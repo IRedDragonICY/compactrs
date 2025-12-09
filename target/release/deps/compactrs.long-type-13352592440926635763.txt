@@ -1,1 +1,0 @@
-Result<HWND, windows_result::error::Error>: Param<HWND, CopyType>

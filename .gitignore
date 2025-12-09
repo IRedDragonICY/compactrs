@@ -1,0 +1,11 @@
+/target
+/debug
+/release
+*.rs.bk
+*.pdb
+*.exe
+*.obj
+*.lib
+.idea/
+.vscode/
+.gemini/
