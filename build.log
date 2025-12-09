@@ -1,0 +1,149 @@
+   Compiling compactrs v0.1.0 (C:\Users\ireddragonicy\RustroverProjects\compactrs)
+warning: unused import: `create_listview`
+  --> src\gui\window.rs:20:43
+   |
+20 | use crate::gui::controls::{create_button, create_listview, create_combobox, create_progress_bar, IDC_LISTVIEW, IDC_BTN_SCAN, IDC_BTN_COMP...
+   |                                           ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `Arc` and `AtomicBool`
+  --> src\gui\window.rs:23:17
+   |
+23 | use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+   |                 ^^^           ^^^^^^^^^^
+
+warning: unused import: `crossbeam_channel::Sender`
+  --> src\gui\window.rs:24:5
+   |
+24 | use crossbeam_channel::Sender;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::Path`
+  --> src\gui\window.rs:30:5
+   |
+30 | use std::path::Path;
+   |     ^^^^^^^^^^^^^^^
+
+warning: unused imports: `PBM_SETPOS` and `PBM_SETRANGE32`
+  --> src\gui\controls.rs:24:48
+   |
+24 | use windows::Win32::UI::Controls::{PBS_SMOOTH, PBM_SETRANGE32, PBM_SETPOS, PROGRESS_CLASSW};
+   |                                                ^^^^^^^^^^^^^^  ^^^^^^^^^^
+
+warning: unused import: `crate::engine::scanner::Message`
+ --> src\gui\state.rs:3:5
+  |
+3 | use crate::engine::scanner::Message;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::path::Path`
+ --> src\engine\wof.rs:6:5
+  |
+6 | use std::path::Path;
+  |     ^^^^^^^^^^^^^^^
+
+warning: unused import: `GENERIC_WRITE`
+ --> src\engine\wof.rs:8:61
+  |
+8 | use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
+  |                                                             ^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+     --> src\gui\window.rs:500:171
+      |
+  500 | ...AN as usize | (0 << 16)) as usize), LPARAM(ctrls.btn_scan.0));
+      |                                        ------ ^^^^^^^^^^^^^^^^ expected `isize`, found `*mut c_void`
+      |                                        |
+      |                                        arguments to this struct are incorrect
+      |
+      = note:     expected type `isize`
+              found raw pointer `*mut c_void`
+note: tuple struct defined here
+     --> C:\Users\ireddragonicy\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\windows-0.58.0\src\Windows\Win32\Foundation\mod.rs:10888:12
+      |
+10888 | pub struct LPARAM(pub isize);
+      |            ^^^^^^
+
+warning[E0133]: call to unsafe function `windows::Win32::System::Com::CoCreateInstance` is unsafe and requires unsafe block
+   --> src\gui\window.rs:519:35
+    |
+519 |     let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+    |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+note: an unsafe function restricts its caller, but its body is safe by default
+   --> src\gui\window.rs:518:1
+    |
+518 | unsafe fn pick_folder() -> Result<String> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(unsafe_op_in_unsafe_fn)]` (part of `#[warn(rust_2024_compatibility)]`) on by default
+
+warning[E0133]: call to unsafe function `windows::Win32::UI::Shell::IFileDialog::GetOptions` is unsafe and requires unsafe block
+   --> src\gui\window.rs:520:19
+    |
+520 |     let options = dialog.GetOptions()?;
+    |                   ^^^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+
+warning[E0133]: call to unsafe function `windows::Win32::UI::Shell::IFileDialog::SetOptions` is unsafe and requires unsafe block
+   --> src\gui\window.rs:521:5
+    |
+521 |     dialog.SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)?;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+
+warning[E0133]: call to unsafe function `windows::Win32::UI::Shell::IModalWindow::Show` is unsafe and requires unsafe block
+   --> src\gui\window.rs:522:5
+    |
+522 |     dialog.Show(None)?;
+    |     ^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+
+warning[E0133]: call to unsafe function `windows::Win32::UI::Shell::IFileDialog::GetResult` is unsafe and requires unsafe block
+   --> src\gui\window.rs:523:16
+    |
+523 |     let item = dialog.GetResult()?;
+    |                ^^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+
+warning[E0133]: call to unsafe function `windows::Win32::UI::Shell::IShellItem::GetDisplayName` is unsafe and requires unsafe block
+   --> src\gui\window.rs:524:20
+    |
+524 |     let path_ptr = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+
+warning[E0133]: call to unsafe function `windows_strings::pwstr::PWSTR::to_string` is unsafe and requires unsafe block
+   --> src\gui\window.rs:525:16
+    |
+525 |     let path = path_ptr.to_string()?;
+    |                ^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+
+warning[E0133]: call to unsafe function `windows::Win32::System::Com::CoTaskMemFree` is unsafe and requires unsafe block
+   --> src\gui\window.rs:526:5
+    |
+526 |     CoTaskMemFree(Some(path_ptr.as_ptr() as *mut _));
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
+    |
+    = note: for more information, see <https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html>
+    = note: consult the function's documentation for information on how to avoid undefined behavior
+
+Some errors have detailed explanations: E0133, E0308.
+For more information about an error, try `rustc --explain E0133`.
+warning: `compactrs` (bin "compactrs") generated 16 warnings
+error: could not compile `compactrs` (bin "compactrs") due to 1 previous error; 16 warnings emitted

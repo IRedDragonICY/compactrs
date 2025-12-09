@@ -1,0 +1,45 @@
+[package]
+name = "compactrs"
+version = "0.1.0"
+edition = "2024"
+authors = ["Antigravity"]
+description = "High-performance native Windows file compressor"
+
+[dependencies]
+crossbeam-channel = "0.5"
+ignore = "0.4"
+humansize = "2.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Controls",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_System_LibraryLoader",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_Foundation",
+    "Win32_System_SystemServices",
+    "Win32_System_Com",
+    "Win32_System_Ioctl",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_IO",
+    "Win32_Security",
+    "Win32_System_Registry",
+]
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link Time Optimization
+codegen-units = 1   # Maximize optimization
+panic = "abort"     # Remove panic unwinding
+strip = true        # Strip symbols

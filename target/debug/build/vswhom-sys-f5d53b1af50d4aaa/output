@@ -1,0 +1,82 @@
+cargo:rerun-if-changed=build.rs
+cargo:rerun-if-changed=ext/vswhom.cpp
+OPT_LEVEL = Some(0)
+OUT_DIR = Some(C:\Users\ireddragonicy\RustroverProjects\compactrs\target\debug\build\vswhom-sys-f5d53b1af50d4aaa\out)
+TARGET = Some(x86_64-pc-windows-msvc)
+CARGO_ENCODED_RUSTFLAGS = Some()
+cargo:rerun-if-env-changed=VCINSTALLDIR
+VCINSTALLDIR = None
+cargo:rerun-if-env-changed=VSTEL_MSBuildProjectFullPath
+VSTEL_MSBuildProjectFullPath = None
+cargo:rerun-if-env-changed=VCToolsVersion
+VCToolsVersion = None
+cargo:rerun-if-env-changed=VSCMD_ARG_VCVARS_SPECTRE
+VSCMD_ARG_VCVARS_SPECTRE = None
+cargo:rerun-if-env-changed=WindowsSdkDir
+WindowsSdkDir = None
+cargo:rerun-if-env-changed=WindowsSDKVersion
+WindowsSDKVersion = None
+cargo:rerun-if-env-changed=LIB
+LIB = None
+PATH = Some(C:\Users\ireddragonicy\RustroverProjects\compactrs\target\debug\deps;C:\Users\ireddragonicy\RustroverProjects\compactrs\target\debug;C:\Users\ireddragonicy\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib\rustlib\x86_64-pc-windows-msvc\lib;C:\Program Files\WindowsApps\Microsoft.PowerShellPreview_7.6.5.0_x64__8wekyb3d8bbwe;C:\Program Files (x86)\Microsoft\Edge\Application;C:\Program Files (x86)\VMware\VMware Workstation\bin\;C:\Program Files\Python\Python311\Scripts\;C:\Program Files\Python\Python311\;C:\Program Files\Python\Python312\Scripts\;C:\Program Files\Python\Python312\;C:\Program Files\Python\Python313\Scripts\;C:\Program Files\Python\Python313\;C:\Program Files\Common Files\Oracle\Java\javapath;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\Microsoft VS Code Insiders\bin;C:\Program Files\CMake\bin;C:\Program Files\Microsoft SQL Server\150\Tools\Binn\;C:\Program Files\dotnet\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\ProgramData\chocolatey\bin;C:\Program Files\NVIDIA Corporation\NVIDIA app\NvDLISR;C:\msys64\mingw64\bin;C:\Program Files\Graphviz\bin;C:\Users\ireddragonicy\AppData\Local\Pub\Cache\bin;C:\laragon\bin\composer;C:\laragon\bin\php\php-8.3.16-Win32-vs16-x64;c:\Users\ireddragonicy\AppData\Local\Programs\cursor\resources\app\bin;C:\Program Files\nodejs\;C:\Program Files\Cloudflare\Cloudflare WARP\;C:\Program Files\Topaz Labs LLC\Topaz Gigapixel AI\bin\;C:\Program Files\Git\cmd;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\Topaz Labs LLC\Topaz Gigapixel\bin\;C:\Program Files\cursor\resources\app\bin;C:\Users\ireddragonicy\AppData\Local\Android\Sdk\platform-tools;C:\Program Files\WindowsApps\Microsoft.PowerShellPreview_7.6.5.0_x64__8wekyb3d8bbwe;c:\Users\ireddragonicy\AppData\Roaming\Code - Insiders\User\globalStorage\github.copilot-chat\debugCommand;c:\Users\ireddragonicy\AppData\Roaming\Code - Insiders\User\globalStorage\github.copilot-chat\copilotCli;C:\Program Files (x86)\VMware\VMware Workstation\bin\;C:\Program Files\Python\Python311\Scripts\;C:\Program Files\Python\Python311\;C:\Program Files\Python\Python312\Scripts\;C:\Program Files\Python\Python312\;C:\Program Files\Python\Python313\Scripts\;C:\Program Files\Python\Python313\;C:\Program Files\Common Files\Oracle\Java\javapath;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\Microsoft VS Code Insiders\bin;C:\Program Files\CMake\bin;C:\Program Files\Microsoft SQL Server\150\Tools\Binn\;C:\Program Files\dotnet\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\ProgramData\chocolatey\bin;C:\Program Files\NVIDIA Corporation\NVIDIA app\NvDLISR;C:\msys64\mingw64\bin;C:\Program Files\Graphviz\bin;C:\Users\ireddragonicy\AppData\Local\Pub\Cache\bin;C:\laragon\bin\composer;C:\laragon\bin\php\php-8.3.16-Win32-vs16-x64;c:\Users\ireddragonicy\AppData\Local\Programs\cursor\resources\app\bin;C:\Program Files\nodejs\;C:\Program Files\Cloudflare\Cloudflare WARP\;C:\Program Files\Topaz Labs LLC\Topaz Gigapixel AI\bin\;C:\Program Files\Git\cmd;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\Topaz Labs LLC\Topaz Gigapixel\bin\;C:\Program Files\cursor\resources\app\bin;C:\laragon\bin\php\php-8.4.6-nts-Win32-vs17-x64;C:\laragon\bin;C:\laragon\bin\apache\httpd-2.4.54-win64-VS16\bin;C:\laragon\bin\composer;C:\laragon\bin\git\bin;C:\laragon\bin\git\cmd;C:\laragon\bin\git\mingw64\bin;C:\laragon\bin\git\usr\bin;C:\laragon\bin\laragon\utils;C:\laragon\bin\mysql\mysql-8.0.30-winx64\bin;C:\laragon\bin\nginx\nginx-1.22.0;C:\laragon\bin\ngrok;C:\laragon\bin\nodejs\node-v18;C:\laragon\bin\notepad++;C:\laragon\bin\python\python-3.10;C:\laragon\bin\python\python-3.10\Scripts;C:\laragon\bin\redis\redis-x64-5.0.14.1;C:\laragon\bin\telnet;C:\laragon\usr\bin;C:\Users\ireddragonicy\AppData\Local\Yarn\config\global\node_modules\.bin;C:\Users\ireddragonicy\AppData\Roaming\Composer\vendor\bin;C:\Users\ireddragonicy\.cargo\bin;C:\Users\ireddragonicy\AppData\Local\pnpm;C:\Users\ireddragonicy\AppData\Local\Microsoft\WindowsApps;C:\Users\ireddragonicy\AppData\Local\JetBrains\Toolbox\scripts;C:\Users\ireddragonicy\AppData\Local\Programs\Ollama;C:\tools\flutter\bin;C:\Program Files\OpenSSL-Win64\bin;C:\Users\ireddragonicy\AppData\Local\GitHubDesktop\bin;C:\Users\ireddragonicy\AppData\Local\Programs\cursor\resources\app\bin;C:\Users\ireddragonicy\AppData\Roaming\npm;%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;c:\Users\ireddragonicy\.vscode-insiders\extensions\vscjava.vscode-java-debug-0.58.3\bundled\scripts\noConfigScripts;C:\Users\ireddragonicy\AppData\Local\Android\Sdk\platform-tools;C:\Users\ireddragonicy\AppData\Local\Android\Sdk\platform-tools;C:\Users\ireddragonicy\AppData\Local\Android\Sdk\platform-tools;C:\Users\ireddragonicy\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin)
+cargo:rerun-if-env-changed=INCLUDE
+INCLUDE = None
+HOST = Some(x86_64-pc-windows-msvc)
+cargo:rerun-if-env-changed=CXX_x86_64-pc-windows-msvc
+CXX_x86_64-pc-windows-msvc = None
+cargo:rerun-if-env-changed=CXX_x86_64_pc_windows_msvc
+CXX_x86_64_pc_windows_msvc = None
+cargo:rerun-if-env-changed=HOST_CXX
+HOST_CXX = None
+cargo:rerun-if-env-changed=CXX
+CXX = None
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+CARGO_CFG_TARGET_FEATURE = Some(cmpxchg16b,fxsr,sse,sse2,sse3)
+DEBUG = Some(false)
+cargo:rerun-if-env-changed=CXXFLAGS
+CXXFLAGS = None
+cargo:rerun-if-env-changed=HOST_CXXFLAGS
+HOST_CXXFLAGS = None
+cargo:rerun-if-env-changed=CXXFLAGS_x86_64_pc_windows_msvc
+CXXFLAGS_x86_64_pc_windows_msvc = None
+cargo:rerun-if-env-changed=CXXFLAGS_x86_64-pc-windows-msvc
+CXXFLAGS_x86_64-pc-windows-msvc = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+vswhom.cpp
+ext/vswhom.cpp(213): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+ext/vswhom.cpp(216): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+ext/vswhom.cpp(431): warning C4456: declaration of 'hr' hides previous local declaration
+ext/vswhom.cpp(418): note: see declaration of 'hr'
+ext/vswhom.cpp(459): warning C4244: 'argument': conversion from 'LONGLONG' to 'int', possible loss of data
+ext/vswhom.cpp(502): warning C4456: declaration of 'rc' hides previous local declaration
+ext/vswhom.cpp(410): note: see declaration of 'rc'
+cargo:rerun-if-env-changed=AR_x86_64-pc-windows-msvc
+AR_x86_64-pc-windows-msvc = None
+cargo:rerun-if-env-changed=AR_x86_64_pc_windows_msvc
+AR_x86_64_pc_windows_msvc = None
+cargo:rerun-if-env-changed=HOST_AR
+HOST_AR = None
+cargo:rerun-if-env-changed=AR
+AR = None
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=HOST_ARFLAGS
+HOST_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64_pc_windows_msvc
+ARFLAGS_x86_64_pc_windows_msvc = None
+cargo:rerun-if-env-changed=ARFLAGS_x86_64-pc-windows-msvc
+ARFLAGS_x86_64-pc-windows-msvc = None
+cargo:rustc-link-search=native=C:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\MSVC\14.42.34430\atlmfc\lib\x64
+cargo:rustc-link-lib=static=vswhom
+cargo:rustc-link-search=native=C:\Users\ireddragonicy\RustroverProjects\compactrs\target\debug\build\vswhom-sys-f5d53b1af50d4aaa\out
+cargo:rerun-if-env-changed=CXXSTDLIB_x86_64-pc-windows-msvc
+CXXSTDLIB_x86_64-pc-windows-msvc = None
+cargo:rerun-if-env-changed=CXXSTDLIB_x86_64_pc_windows_msvc
+CXXSTDLIB_x86_64_pc_windows_msvc = None
+cargo:rerun-if-env-changed=HOST_CXXSTDLIB
+HOST_CXXSTDLIB = None
+cargo:rerun-if-env-changed=CXXSTDLIB
+CXXSTDLIB = None
+cargo:rustc-link-lib=dylib=OleAut32
+cargo:rustc-link-lib=dylib=Ole32
