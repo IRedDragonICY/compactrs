@@ -1,19 +1,25 @@
-use windows::core::{Result, w, PCWSTR, PWSTR};
+#![allow(unsafe_op_in_unsafe_fn)]
+use windows::core::{Result, w, PCWSTR, PWSTR, PCSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, GetStockObject, NULL_BRUSH, SetBkMode, SetTextColor, TRANSPARENT, FillRect, HDC};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE, DWMWINDOWATTRIBUTE};
+use windows::Win32::Graphics::Gdi::{
+    HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, GetStockObject, NULL_BRUSH, 
+    SetBkMode, SetTextColor, TRANSPARENT, FillRect, HDC, CreateFontW, DEFAULT_QUALITY, 
+    DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
+    FW_NORMAL, DEFAULT_CHARSET, FONT_PITCH, DrawTextW, DT_CENTER, DT_VCENTER, DT_SINGLELINE,
+};
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DwmExtendFrameIntoClientArea, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND, SetWindowPos, SWP_NOZORDER,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY, GetClientRect,
+    MB_ICONINFORMATION, WM_NOTIFY, GetClientRect, WM_SETFONT,
 };
-use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles};
+use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc, SUBCLASSPROC};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, HKEY};
 use crate::gui::controls::{
     create_button, create_listview, create_combobox, create_progress_bar, 
@@ -30,7 +36,9 @@ use windows::Win32::UI::Controls::{
     LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_GETSELECTEDCOUNT, LVM_GETNEXTITEM,
     LVM_SETBKCOLOR, LVM_SETTEXTCOLOR, LVM_SETTEXTBKCOLOR, SetWindowTheme,
     LVCOLUMNW, LVITEMW, LVCF_WIDTH, LVCF_TEXT, LVCF_FMT, LVCFMT_LEFT, LVIF_TEXT,
-    LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE,
+    LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE, MARGINS,
+    InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES, LVM_GETHEADER,
+    NM_CUSTOMDRAW, NMCUSTOMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, CDRF_NOTIFYITEMDRAW, CDRF_NEWFONT, NMHDR, CDRF_SKIPDEFAULT,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, is_wof_compressed, get_wof_algorithm};
@@ -168,8 +176,67 @@ fn detect_path_algorithm(path: &str) -> Option<WofAlgorithm> {
     }
 }
 
+#[allow(non_snake_case)]
+unsafe fn allow_dark_mode() {
+    unsafe {
+        if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
+            // Ordinal 135: SetPreferredAppMode
+            if let Some(set_preferred_app_mode) = GetProcAddress(uxtheme, PCSTR(135 as *const u8)) {
+                let set_preferred_app_mode: extern "system" fn(i32) -> i32 = std::mem::transmute(set_preferred_app_mode);
+                set_preferred_app_mode(2); // 2 = AllowDark (or ForceDark)
+            }
+        }
+    }
+}
+
+/// ListView subclass procedure to intercept Header's NM_CUSTOMDRAW notifications
+/// Header sends NM_CUSTOMDRAW to its parent (ListView), not grandparent (main window)
+unsafe extern "system" fn listview_subclass_proc(
+    hwnd: HWND,
+    umsg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _uidsubclass: usize,
+    _dwrefdata: usize,
+) -> LRESULT {
+    unsafe {
+        if umsg == WM_NOTIFY && is_system_dark_mode() {
+            let nmhdr = &*(lparam.0 as *const NMHDR);
+            
+            if nmhdr.code == NM_CUSTOMDRAW {
+                let nmcd = &mut *(lparam.0 as *mut NMCUSTOMDRAW);
+                
+                if nmcd.dwDrawStage == CDDS_PREPAINT {
+                    // Request item-level notifications
+                    return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
+                }
+                
+                if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
+                    // Set text color to white for header items
+                    SetTextColor(nmcd.hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
+                    SetBkMode(nmcd.hdc, TRANSPARENT);
+                    return LRESULT(CDRF_NEWFONT as isize);
+                }
+            }
+        }
+        
+        // Call original window procedure
+        DefSubclassProc(hwnd, umsg, wparam, lparam)
+    }
+}
+
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
     unsafe {
+        allow_dark_mode();
+        
+        // Initialize Common Controls to ensure Visual Styles are applied
+        let iccex = INITCOMMONCONTROLSEX {
+            dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+            dwICC: ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES,
+        };
+        InitCommonControlsEx(&iccex);
+
+
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wnd_proc),
@@ -239,19 +306,22 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 // Create progress bar at y=430
                 let h_progress = create_progress_bar(hwnd, 10, 430, 860, 20, IDC_PROGRESS_BAR);
                 
-                // Create ALL buttons at y=460 - same row, with proper spacing
-                // Files: x=10, width=55
-                // Folder: x=70, width=55  
-                // Remove: x=130, width=60
-                // Combo: x=195, width=110
-                // Process: x=315, width=90
-                // Cancel: x=410, width=70
-                let h_add_files = create_button(hwnd, w!("Files"), 10, 460, 55, 28, IDC_BTN_ADD_FILES);
-                let h_add_folder = create_button(hwnd, w!("Folder"), 70, 460, 55, 28, IDC_BTN_ADD_FOLDER);
-                let h_remove = create_button(hwnd, w!("Remove"), 130, 460, 60, 28, IDC_BTN_REMOVE);
-                let h_combo = create_combobox(hwnd, 195, 460, 110, 200, IDC_COMBO_ALGO);
-                let h_process = create_button(hwnd, w!("Process All"), 315, 460, 90, 28, IDC_BTN_PROCESS_ALL);
-                let h_cancel = create_button(hwnd, w!("Cancel"), 410, 460, 70, 28, IDC_BTN_CANCEL);
+                // Create ALL buttons at y=460 - Taller buttons (32px) for modern look
+                // Files: x=10, width=65
+                // Folder: x=85, width=65
+                // Remove: x=160, width=70
+                // Combo: x=240, width=110
+                // Process: x=360, width=100
+                // Cancel: x=470, width=80
+                let btn_h = 32;
+                let btn_y = 460;
+                
+                let h_add_files = create_button(hwnd, w!("Files"), 10, btn_y, 65, btn_h, IDC_BTN_ADD_FILES);
+                let h_add_folder = create_button(hwnd, w!("Folder"), 85, btn_y, 65, btn_h, IDC_BTN_ADD_FOLDER);
+                let h_remove = create_button(hwnd, w!("Remove"), 160, btn_y, 70, btn_h, IDC_BTN_REMOVE);
+                let h_combo = create_combobox(hwnd, 240, btn_y, 110, 200, IDC_COMBO_ALGO);
+                let h_process = create_button(hwnd, w!("Process All"), 360, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL);
+                let h_cancel = create_button(hwnd, w!("Cancel"), 470, btn_y, 80, btn_h, IDC_BTN_CANCEL);
                 let _ = h_add_files; // Used via IDC_BTN_ADD_FILES
                 EnableWindow(h_cancel, false);
 
@@ -362,6 +432,20 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         3 => WofAlgorithm::Lzx,
                                         _ => WofAlgorithm::Xpress8K,
                                     };
+                                    
+                                    // Get algorithm name for display
+                                    let algo_name = match algo {
+                                        WofAlgorithm::Xpress4K => "XPRESS4K",
+                                        WofAlgorithm::Xpress8K => "XPRESS8K",
+                                        WofAlgorithm::Xpress16K => "XPRESS16K",
+                                        WofAlgorithm::Lzx => "LZX",
+                                    };
+                                    
+                                    // Update Algorithm column for all items in ListView
+                                    let item_count = st.batch_items.len();
+                                    for row in 0..item_count {
+                                        update_listview_item(ctrls.list_view, row as i32, 1, algo_name);
+                                    }
                                     
                                     EnableWindow(ctrls.btn_cancel, true);
                                     SetWindowTextW(ctrls.static_text, w!("Processing batch..."));
@@ -633,8 +717,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 }
                             }
                         }
-                    }
                 }
+                }
+                
+                // Note: Header NM_CUSTOMDRAW is handled by listview_subclass_proc
+                // Header sends NM_CUSTOMDRAW to its parent (ListView), not to main window
+                
                 LRESULT(0)
             }
             
@@ -996,9 +1084,28 @@ unsafe fn pick_folder() -> Result<String> {
 
 fn apply_backdrop(hwnd: HWND) {
     unsafe {
+        // 1. Monitor System Dark Mode
+        let is_dark = is_system_dark_mode();
+        let true_val: i32 = 1;
+        let false_val: i32 = 0;
+        
+        // 2. Force Dark Mode Frame (Titlebar & Borders)
+        // DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        let dwm_dark_mode = DWMWINDOWATTRIBUTE(20); 
+        if is_dark {
+            let _ = DwmSetWindowAttribute(hwnd, dwm_dark_mode, &true_val as *const _ as _, 4);
+        } else {
+             let _ = DwmSetWindowAttribute(hwnd, dwm_dark_mode, &false_val as *const _ as _, 4);
+        }
+
+        // 3. Apply Mica Backdrop (Windows 11 Standard)
+        // This matches Task Manager and Explorer design
         let system_backdrop_type = DWMWA_SYSTEMBACKDROP_TYPE;
-        let mica = DWM_SYSTEMBACKDROP_TYPE(2);
+        let mica = DWM_SYSTEMBACKDROP_TYPE(2); // 2 = Mica
         let _ = DwmSetWindowAttribute(hwnd, system_backdrop_type, &mica as *const _ as _, 4);
+        
+        // Note: We DO NOT call DwmExtendFrameIntoClientArea for Mica. 
+        // We want the system to draw the Mica background, not transparency.
     }
 }
 
@@ -1022,6 +1129,18 @@ unsafe fn is_system_dark_mode() -> bool {
     }
 }
 
+#[allow(non_snake_case)]
+unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {
+    unsafe {
+        if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
+            if let Some(func) = GetProcAddress(uxtheme, PCSTR(133 as *const u8)) {
+                let allow_dark_mode_for_window: extern "system" fn(HWND, bool) -> bool = std::mem::transmute(func);
+                allow_dark_mode_for_window(hwnd, allow);
+            }
+        }
+    }
+}
+
 fn update_theme(hwnd: HWND) {
     unsafe {
         let dark = is_system_dark_mode();
@@ -1032,9 +1151,10 @@ fn update_theme(hwnd: HWND) {
         // Update ListView with dark mode explorer theme and colors
         if let Ok(list_view) = GetDlgItem(Some(hwnd), IDC_BATCH_LIST as i32) {
             if !list_view.is_invalid() {
+                allow_dark_mode_for_window(list_view, dark);
                 // Apply dark mode explorer theme (affects header, scrollbars, etc.)
                 if dark {
-                    let _ = SetWindowTheme(list_view, w!("DarkMode_Explorer"), None);
+                    let _ = SetWindowTheme(list_view, w!("DarkMode_ItemsView"), None);
                 } else {
                     let _ = SetWindowTheme(list_view, w!("Explorer"), None);
                 }
@@ -1062,12 +1182,115 @@ fn update_theme(hwnd: HWND) {
         // Update progress bar with dark theme
         if let Ok(progress) = GetDlgItem(Some(hwnd), IDC_PROGRESS_BAR as i32) {
             if !progress.is_invalid() {
+                allow_dark_mode_for_window(progress, dark);
                 if dark {
                     let _ = SetWindowTheme(progress, w!("DarkMode_Explorer"), None);
                 } else {
                     let _ = SetWindowTheme(progress, w!("Explorer"), None);
                 }
             }
+        }
+        
+        // Create modern font (Segoe UI Variable Display or Segoe UI)
+        let font_height = -12; // ~9pt
+        let hfont = CreateFontW(
+            font_height,
+            0, 0, 0,
+            FW_NORMAL.0 as i32,
+            0, 0, 0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
+            w!("Segoe UI Variable Display"),
+        );
+        
+        // Helper to update button theme, font, and force dark mode
+        let update_btn_theme = |id: u16| {
+            if let Ok(btn) = GetDlgItem(Some(hwnd), id as i32) {
+                if !btn.is_invalid() {
+                    // Force dark mode on control itself (Ordinal 133)
+                    allow_dark_mode_for_window(btn, dark);
+                    
+                    let font_height = -12;
+                    let hfont = CreateFontW(
+                        font_height, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
+                        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
+                        w!("Segoe UI Variable Display"));
+                    
+                    SendMessageW(btn, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
+                    
+                    if dark {
+                         // DarkMode_Explorer gives dark buttons (with border)
+                        let _ = SetWindowTheme(btn, w!("DarkMode_Explorer"), None);
+                    } else {
+                         let _ = SetWindowTheme(btn, w!("Explorer"), None);
+                    }
+                }
+            }
+        };
+        
+        // Update all buttons
+        update_btn_theme(IDC_BTN_ADD_FILES);
+        update_btn_theme(IDC_BTN_ADD_FOLDER);
+        update_btn_theme(IDC_BTN_REMOVE);
+        update_btn_theme(IDC_BTN_PROCESS_ALL);
+        update_btn_theme(IDC_BTN_CANCEL);
+        
+        // Update ComboBox
+        if let Ok(combo) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO as i32) {
+             if !combo.is_invalid() {
+                 SendMessageW(combo, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
+                 allow_dark_mode_for_window(combo, dark);
+                 if dark {
+                     let _ = SetWindowTheme(combo, w!("Explorer"), None); 
+                 } else {
+                     let _ = SetWindowTheme(combo, w!("Explorer"), None);
+                 }
+             }
+        }
+        
+        // Update Static Text Font
+        if let Ok(static_text) = GetDlgItem(Some(hwnd), IDC_STATIC_TEXT as i32) {
+            SendMessageW(static_text, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
+        }
+        
+        // Update ListView Font and Header Theme
+        if let Ok(list_view) = GetDlgItem(Some(hwnd), IDC_BATCH_LIST as i32) {
+             SendMessageW(list_view, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
+             allow_dark_mode_for_window(list_view, dark);
+             
+             // Subclass ListView to intercept Header's NM_CUSTOMDRAW notifications
+             let _ = SetWindowSubclass(
+                 list_view,
+                 Some(listview_subclass_proc),
+                 1, // Subclass ID
+                 0, // Reference data
+             );
+             
+             // Get Header Control and skin it
+             let header_lresult = SendMessageW(list_view, LVM_GETHEADER, None, None);
+             let header = HWND(header_lresult.0 as *mut _);
+             
+             if !header.is_invalid() {
+                 allow_dark_mode_for_window(header, dark);
+                 if dark {
+                     // DarkMode_ItemsView for dark background (subclass handles white text)
+                     let _ = SetWindowTheme(header, w!("DarkMode_ItemsView"), None);
+                 } else {
+                     let _ = SetWindowTheme(header, w!("Explorer"), None);
+                 }
+             }
+             
+             // Re-apply listview colors
+             if dark {
+                let bg_color: u32 = 0x00202020;
+                let text_color: u32 = 0x00FFFFFF;
+                SendMessageW(list_view, LVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
+                SendMessageW(list_view, LVM_SETTEXTBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
+                SendMessageW(list_view, LVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(text_color as isize)));
+             }
         }
         
         // Force main window redraw
