@@ -31,7 +31,7 @@ use crate::gui::about::show_about_modal;
 use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, AppTheme};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use crossbeam_channel::Sender;
+use std::sync::mpsc::Sender;
 use windows::Win32::UI::Controls::{
     PBM_SETRANGE32, PBM_SETPOS, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETITEMW,
     LVM_DELETEITEM, LVM_GETNEXTITEM,

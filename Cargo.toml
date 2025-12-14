@@ -2,20 +2,18 @@
 name = "compactrs"
 version = "0.1.0"
 edition = "2024"
-authors = ["Mohammad Farid Hendianto <ireddragonicy@gmail.com>"]
+authors = ["Mohammad Farid Hendianto (IRedDragonICY)"]
 description = "High-performance native Windows file compressor using WOF (Windows Overlay Filter)"
 license = "MIT"
 repository = "https://github.com/IRedDragonICY/compactrs"
 
 [dependencies]
-crossbeam-channel = "0.5"
+
 ignore = "0.4"
 humansize = "2.1"
 rayon = "1.11.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-window-vibrancy = "0.7.1"
-raw-window-handle = "0.6"
 
 [dependencies.windows]
 version = "0.62"

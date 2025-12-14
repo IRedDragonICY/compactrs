@@ -1,5 +1,5 @@
 use windows::Win32::Foundation::HWND;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicBool};
 use crate::engine::wof::WofAlgorithm;
 
@@ -119,7 +119,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let (tx, rx) = unbounded();
+        let (tx, rx) = channel();
         Self {
             current_folder: None,
             batch_items: Vec::new(),

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use crossbeam_channel::Sender;
+use std::sync::mpsc::Sender;
 
 pub enum Message {
     FileFound(PathBuf, u64), // Path, Size
