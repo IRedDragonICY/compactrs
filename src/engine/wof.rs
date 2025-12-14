@@ -62,6 +62,73 @@ pub fn is_wof_compressed(path: &str) -> bool {
     }
 }
 
+/// Get the WOF compression algorithm used for a file
+/// Returns None if file is not WOF-compressed, Some(algorithm) if it is
+pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
+    unsafe {
+        let wide: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+        let handle = CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            GENERIC_READ.0,
+            FILE_SHARE_READ,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        ).unwrap_or(INVALID_HANDLE_VALUE);
+
+        if handle == INVALID_HANDLE_VALUE {
+            return None;
+        }
+
+        // Buffer for WOF_EXTERNAL_INFO + FILE_PROVIDER_EXTERNAL_INFO_V1
+        let mut out_buffer = [0u8; 1024];
+        let mut bytes_returned = 0u32;
+        
+        let result = DeviceIoControl(
+            handle,
+            FSCTL_GET_EXTERNAL_BACKING,
+            None,
+            0,
+            Some(out_buffer.as_mut_ptr() as *mut _),
+            out_buffer.len() as u32,
+            Some(&mut bytes_returned),
+            None,
+        );
+        
+        let _ = CloseHandle(handle);
+        
+        if result.is_err() {
+            return None;
+        }
+        
+        // Parse the output buffer
+        // First comes WOF_EXTERNAL_INFO (8 bytes), then FILE_PROVIDER_EXTERNAL_INFO_V1 (12 bytes)
+        if bytes_returned < 20 {
+            return None;
+        }
+        
+        let wof_info = &out_buffer[0..8];
+        let provider = u32::from_le_bytes([wof_info[4], wof_info[5], wof_info[6], wof_info[7]]);
+        
+        // Check if it's WOF_PROVIDER_FILE (2)
+        if provider != 2 {
+            return None;
+        }
+        
+        let file_info = &out_buffer[8..20];
+        let algorithm = u32::from_le_bytes([file_info[4], file_info[5], file_info[6], file_info[7]]);
+        
+        match algorithm {
+            0 => Some(WofAlgorithm::Xpress4K),
+            1 => Some(WofAlgorithm::Lzx),
+            2 => Some(WofAlgorithm::Xpress8K),
+            3 => Some(WofAlgorithm::Xpress16K),
+            _ => None,
+        }
+    }
+}
+
 // WOF Definitions not fully exposed in high-level windows crate helpers sometimes, 
 // creating safe wrappers around the raw structs.
 
@@ -106,7 +173,7 @@ impl WofAlgorithm {
 }
 
 pub fn compress_file(path: &str, algo: WofAlgorithm) -> Result<bool> {
-    let file = File::open(path).map_err(|_| windows::core::Error::from_win32())?; // Map io error to windows error? Or just skip?
+    let file = File::open(path).map_err(|_| windows::core::Error::from_thread())?; // Map io error to windows error? Or just skip?
     compress_file_handle(&file, algo)
 }
 
@@ -171,7 +238,7 @@ pub fn compress_file_handle(file: &File, algo: WofAlgorithm) -> Result<bool> {
 
 
 pub fn uncompress_file(path: &str) -> Result<()> {
-    let file = File::open(path).map_err(|_| windows::core::Error::from_win32())?; 
+    let file = File::open(path).map_err(|_| windows::core::Error::from_thread())?; 
     uncompress_file_handle(&file)
 }
 
