@@ -16,6 +16,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
     MB_ICONINFORMATION, WM_NOTIFY, GetClientRect, WM_SETFONT,
+    CreatePopupMenu, TrackPopupMenu, AppendMenuW, DestroyMenu,
+    TPM_LEFTALIGN, TPM_TOPALIGN, TPM_RETURNCMD, TPM_NONOTIFY,
+    MF_STRING, MF_CHECKED, MF_UNCHECKED,
 };
 use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc, SUBCLASSPROC};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
@@ -25,9 +28,10 @@ use crate::gui::controls::{
     create_button, create_listview, create_combobox, create_progress_bar, 
     IDC_LISTVIEW, IDC_BTN_SCAN, IDC_BTN_COMPRESS, IDC_COMBO_ALGO, IDC_BTN_DECOMPRESS, 
     IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
-    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES,
+    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS,
 };
-use crate::gui::state::{AppState, Controls, UiMessage, BatchAction};
+use crate::gui::settings::show_settings_modal;
+use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, AppTheme};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crossbeam_channel::Sender;
@@ -59,7 +63,7 @@ fn hi_word(l: u32) -> u16 {
 }
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("CompactRS_Class");
-const WINDOW_TITLE: PCWSTR = w!("CompactRS - Batch Compressor");
+const WINDOW_TITLE: PCWSTR = w!("CompactRS");
 
 /// Calculate total LOGICAL size of all files in a folder (uncompressed content size)
 /// This counts ALL files including hidden and .gitignored files
@@ -199,10 +203,11 @@ unsafe extern "system" fn listview_subclass_proc(
     wparam: WPARAM,
     lparam: LPARAM,
     _uidsubclass: usize,
-    _dwrefdata: usize,
+    dwrefdata: usize,
 ) -> LRESULT {
     unsafe {
-        if umsg == WM_NOTIFY && is_system_dark_mode() {
+        let main_hwnd = HWND(dwrefdata as *mut _);
+        if umsg == WM_NOTIFY && is_app_dark_mode(main_hwnd) {
             let nmhdr = &*(lparam.0 as *const NMHDR);
             
             if nmhdr.code == NM_CUSTOMDRAW {
@@ -324,6 +329,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let h_combo = create_combobox(hwnd, 240, btn_y, 110, 200, IDC_COMBO_ALGO);
                 let h_process = create_button(hwnd, w!("Process All"), 360, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL);
                 let h_cancel = create_button(hwnd, w!("Cancel"), 470, btn_y, 80, btn_h, IDC_BTN_CANCEL);
+                
+                // Settings button (created but positioned later)
+                let h_settings = create_button(hwnd, w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS); // Gear icon
+                
                 let _ = h_add_files; // Used via IDC_BTN_ADD_FILES
                 EnableWindow(h_cancel, false);
 
@@ -343,6 +352,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     static_text: h_label,
                     progress_bar: h_progress,
                     btn_cancel: h_cancel,
+                    btn_settings: h_settings,
                 });
 
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -352,6 +362,24 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 // Apply theme (dark mode support for ListView)
                 update_theme(hwnd);
 
+                LRESULT(0)
+            }
+            
+
+            
+            // WM_THEME_CHANGED (Custom Message)
+            0x8001 => {
+                if let Some(st) = get_state() {
+                    let theme_val = wparam.0;
+                    let new_theme = match theme_val {
+                        0 => AppTheme::System,
+                        1 => AppTheme::Dark,
+                        2 => AppTheme::Light,
+                        _ => st.theme,
+                    };
+                    st.theme = new_theme;
+                    update_theme(hwnd);
+                }
                 LRESULT(0)
             }
             
@@ -477,6 +505,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         }
                     },
                     
+                    IDC_BTN_SETTINGS => {
+                        unsafe {
+                            if let Some(st) = get_state() {
+                                let theme = st.theme;
+                                show_settings_modal(hwnd, theme);
+                            }
+                        }
+                    },
+                    
                     _ => {}
                 }
                 LRESULT(0)
@@ -543,8 +580,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let list_height = height - header_height - progress_height - btn_height - (padding * 5);
                 
                 // Resize header
+                // Resize header - leave space for settings button (30px)
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_STATIC_TEXT.into()) {
-                    SetWindowPos(h, None, padding, padding, width - padding * 2, header_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding, padding, width - padding * 2 - 40, header_height, SWP_NOZORDER);
+                }
+                
+                // Position Settings button
+                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_SETTINGS.into()) {
+                     SetWindowPos(h, None, width - padding - 30, padding, 30, header_height, SWP_NOZORDER);
                 }
                 
                 // Resize ListView
@@ -730,7 +773,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             
             // WM_CTLCOLORSTATIC - handle static text colors in dark mode
             0x0138 => { // WM_CTLCOLORSTATIC
-                if is_system_dark_mode() {
+                if is_app_dark_mode(hwnd) {
                     let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
                     SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF)); // White text
                     SetBkMode(hdc, TRANSPARENT);
@@ -741,7 +784,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             
             // WM_ERASEBKGND - paint dark background
             0x0014 => { // WM_ERASEBKGND
-                if is_system_dark_mode() {
+                if is_app_dark_mode(hwnd) {
                     let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
                     let mut rect = windows::Win32::Foundation::RECT::default();
                     if windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rect).is_ok() {
@@ -1185,7 +1228,7 @@ unsafe fn pick_folder() -> Result<String> {
 fn apply_backdrop(hwnd: HWND) {
     unsafe {
         // 1. Monitor System Dark Mode
-        let is_dark = is_system_dark_mode();
+        let is_dark = is_app_dark_mode(hwnd);
         let true_val: i32 = 1;
         let false_val: i32 = 0;
         
@@ -1209,7 +1252,7 @@ fn apply_backdrop(hwnd: HWND) {
     }
 }
 
-unsafe fn is_system_dark_mode() -> bool {
+unsafe fn is_system_dark_mode_preference() -> bool {
     unsafe {
         let subkey = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
         let val_name = w!("AppsUseLightTheme");
@@ -1229,6 +1272,22 @@ unsafe fn is_system_dark_mode() -> bool {
     }
 }
 
+// Check effective dark mode state (System or Override)
+unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
+    // Try to get AppState to check override
+    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    if ptr != 0 {
+        let st = &*(ptr as *const AppState);
+        match st.theme {
+            AppTheme::Dark => return true,
+            AppTheme::Light => return false,
+            AppTheme::System => return is_system_dark_mode_preference(),
+        }
+    }
+    // Fallback if no state yet (e.g. during creation)
+    is_system_dark_mode_preference()
+}
+
 #[allow(non_snake_case)]
 unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {
     unsafe {
@@ -1243,7 +1302,7 @@ unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {
 
 fn update_theme(hwnd: HWND) {
     unsafe {
-        let dark = is_system_dark_mode();
+        let dark = is_app_dark_mode(hwnd);
         let attr = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
         let val = if dark { 1 } else { 0 };
         let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(attr), &val as *const _ as _, std::mem::size_of::<i32>() as u32);
@@ -1337,6 +1396,7 @@ fn update_theme(hwnd: HWND) {
         update_btn_theme(IDC_BTN_REMOVE);
         update_btn_theme(IDC_BTN_PROCESS_ALL);
         update_btn_theme(IDC_BTN_CANCEL);
+        update_btn_theme(IDC_BTN_SETTINGS);
         
         // Update ComboBox
         if let Ok(combo) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO as i32) {
@@ -1366,7 +1426,7 @@ fn update_theme(hwnd: HWND) {
                  list_view,
                  Some(listview_subclass_proc),
                  1, // Subclass ID
-                 0, // Reference data
+                 hwnd.0 as usize, // Pass Main Window HWND as RefData
              );
              
              // Get Header Control and skin it

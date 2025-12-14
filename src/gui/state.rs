@@ -3,6 +3,20 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicBool};
 use crate::engine::wof::WofAlgorithm;
 
+/// App Theme Preference
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AppTheme {
+    System,
+    Dark,
+    Light,
+}
+
+impl Default for AppTheme {
+    fn default() -> Self {
+        AppTheme::System
+    }
+}
+
 /// Message types for UI updates
 pub enum UiMessage {
     Progress(u64, u64), // current, total (global progress)
@@ -80,6 +94,7 @@ pub struct Controls {
     pub static_text: HWND,
     pub progress_bar: HWND,
     pub btn_cancel: HWND,
+    pub btn_settings: HWND,
 }
 
 /// Application state
@@ -96,6 +111,9 @@ pub struct AppState {
     pub tx: Sender<UiMessage>,
     pub rx: Receiver<UiMessage>,
     pub cancel_flag: Arc<AtomicBool>,
+    
+    // Settings
+    pub theme: AppTheme,
 }
 
 impl AppState {
@@ -109,6 +127,7 @@ impl AppState {
             tx,
             rx,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            theme: AppTheme::default(),
         }
     }
     
