@@ -29,6 +29,8 @@ pub enum UiMessage {
     Finished,
     /// Single item finished: (row_index, status, size_after)
     ItemFinished(i32, String, String),
+    /// Item analyzed (id, logical_size, disk_size, algorithm)
+    BatchItemAnalyzed(u32, u64, u64, Option<WofAlgorithm>),
     Error(String),
 }
 

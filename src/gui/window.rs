@@ -563,6 +563,38 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             }
                                         }
                                     },
+                                    UiMessage::BatchItemAnalyzed(id, logical_size, disk_size, algo) => {
+                                        let logical_str = format_size(logical_size, BINARY);
+                                        let disk_str = format_size(disk_size, BINARY);
+                                        
+                                        // Find row index by ID
+                                        if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
+                                            if let Some(ctrls) = &st.controls {
+                                                // Update ListView columns:
+                                                // 1: Algorithm (if detected)
+                                                // 3: Size
+                                                // 4: On Disk
+                                                update_listview_item(ctrls.list_view, pos as i32, 3, &logical_str);
+                                                update_listview_item(ctrls.list_view, pos as i32, 4, &disk_str);
+                                                
+                                                if let Some(a) = algo {
+                                                    let algo_str = match a {
+                                                        WofAlgorithm::Xpress4K => "XPRESS4K",
+                                                        WofAlgorithm::Xpress8K => "XPRESS8K",
+                                                        WofAlgorithm::Xpress16K => "XPRESS16K",
+                                                        WofAlgorithm::Lzx => "LZX",
+                                                    };
+                                                    update_listview_item(ctrls.list_view, pos as i32, 1, algo_str);
+                                                }
+                                                // Reset status to Pending (from Calculating...)
+                                                update_listview_item(ctrls.list_view, pos as i32, 6, "Pending");
+
+                                                let msg = format!("{} item(s) analyzed.", st.batch_items.len());
+                                                let wstr = windows::core::HSTRING::from(&msg);
+                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                            }
+                                        }
+                                    },
                                     _ => {}
                                 }
                             },
@@ -656,40 +688,48 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let mut buffer = [0u16; 1024];
                 let count = DragQueryFileW(hdrop, 0xFFFFFFFF, None);
                 
+                let mut paths = Vec::new();
                 for i in 0..count {
                     let len = DragQueryFileW(hdrop, i, Some(&mut buffer));
                     if len > 0 {
                         let path_string = String::from_utf16_lossy(&buffer[..len as usize]);
-                        
-                        // Accept both files and folders directly
-                        if let Some(st) = get_state() {
-                            // Check if already added
-                            let already_exists = st.batch_items.iter().any(|item| item.path == path_string);
-                            if !already_exists {
-                                let item_id = st.add_batch_item(path_string.clone());
-                                let logical_size = calculate_path_logical_size(&path_string);
-                                let disk_size = calculate_path_disk_size(&path_string);
-                                let detected_algo = detect_path_algorithm(&path_string);
-                                let logical_str = format_size(logical_size, BINARY);
-                                let disk_str = format_size(disk_size, BINARY);
-                                if let Some(ctrls) = &st.controls {
-                                    add_listview_item(ctrls.list_view, item_id, &path_string, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
-                                }
-                            }
-                        }
+                        paths.push(path_string);
                     }
                 }
-                
-                if let Some(st) = get_state() {
-                    if let Some(ctrls) = &st.controls {
-                        let count = st.batch_items.len();
-                        let msg = format!("{} item(s) in batch queue. Select algorithm and click 'Process All'.", count);
-                        let wstr = windows::core::HSTRING::from(&msg);
-                        SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
-                    }
-                }
-                
                 DragFinish(hdrop);
+
+                if let Some(st) = get_state() {
+                     if let Some(ctrls) = &st.controls {
+                         SetWindowTextW(ctrls.static_text, w!("Analyzing dropped files..."));
+                     }
+                     
+                     // 1. Add Placeholders immediately to UI
+                     let mut items_to_analyze = Vec::new();
+                     for path in paths {
+                         // Check duplicates (simple O(N) check is fine for drag-drop)
+                         if !st.batch_items.iter().any(|item| item.path == path) {
+                             let id = st.add_batch_item(path.clone());
+                             if let Some(ctrls) = &st.controls {
+                                 add_listview_item(ctrls.list_view, id, &path, "XPRESS8K", "Compress", "Calculating...", "Calculating...", None);
+                             }
+                             items_to_analyze.push((id, path));
+                         }
+                     }
+                     
+                     // 2. Spawn thread to analyze
+                     let tx = st.tx.clone();
+                     thread::spawn(move || {
+                         for (id, path) in items_to_analyze {
+                             let logical_size = calculate_path_logical_size(&path);
+                             let disk_size = calculate_path_disk_size(&path);
+                             let detected_algo = detect_path_algorithm(&path);
+                             let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical_size, disk_size, detected_algo));
+                         }
+                         // Update status when done
+                         let _ = tx.send(UiMessage::Status("Ready.".to_string()));
+                     });
+                }
+                
                 LRESULT(0)
             }
 
