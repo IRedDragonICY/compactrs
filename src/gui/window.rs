@@ -45,6 +45,8 @@ use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_
 use crate::engine::compresstimate::estimate_size;
 use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
+use rayon::prelude::*;
+use std::sync::atomic::{AtomicU64};
 
 #[allow(dead_code)]
 fn lo_word(l: u32) -> u16 {
@@ -454,8 +456,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     let cancel = st.cancel_flag.clone();
                                     cancel.store(false, Ordering::Relaxed);
                                     
-                                    // Clone items for worker thread
-                                    let items: Vec<_> = st.batch_items.iter().map(|i| (i.path.clone(), i.action)).collect();
+                                    // Clone items for worker thread, including their row index
+                                    let items: Vec<_> = st.batch_items.iter().enumerate().map(|(idx, i)| (i.path.clone(), i.action, idx)).collect();
                                     
                                     thread::spawn(move || {
                                         batch_process_worker(items, algo, tx, cancel);
@@ -864,70 +866,150 @@ unsafe fn update_listview_item(hwnd: HWND, row: i32, col: i32, text: &str) {
     SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
 }
 
-fn batch_process_worker(items: Vec<(String, BatchAction)>, algo: WofAlgorithm, tx: Sender<UiMessage>, cancel: Arc<AtomicBool>) {
-    let mut total_files = 0u64;
-    let mut processed = 0u64;
-    let mut success = 0u64;
-    let mut failed = 0u64;
+fn batch_process_worker(items: Vec<(String, BatchAction, usize)>, algo: WofAlgorithm, tx: Sender<UiMessage>, cancel: Arc<AtomicBool>) {
+    // 1. Discovery Phase
+    let _ = tx.send(UiMessage::Status("Discovering files...".to_string()));
     
-    // Count total files first
-    for (path, _) in &items {
-        for result in WalkBuilder::new(path).build() {
-            if let Ok(entry) = result {
-                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                    total_files += 1;
+    // Store tasks as (path, action, row_index)
+    let mut tasks: Vec<(String, BatchAction, usize)> = Vec::new();
+    // Track total files per row (row_index -> count)
+    let mut row_totals: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
+    
+    for (path, action, row_idx) in &items {
+        if cancel.load(Ordering::Relaxed) { break; }
+        
+        let mut row_count = 0;
+        
+        // If it's a file, just add it
+        if std::path::Path::new(path).is_file() {
+            tasks.push((path.clone(), *action, *row_idx));
+            row_count = 1;
+        } else {
+            // If it's a directory, walk it
+            for result in WalkBuilder::new(path).build() {
+                if let Ok(entry) = result {
+                    if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+                        tasks.push((entry.path().to_string_lossy().to_string(), *action, *row_idx));
+                        row_count += 1;
+                    }
                 }
             }
         }
+        
+        row_totals.insert(*row_idx, row_count);
+        // Initialize row progress
+        let _ = tx.send(UiMessage::RowUpdate(*row_idx as i32, format!("0/{}", row_count), "Running".to_string(), "".to_string()));
     }
     
+    let total_files = tasks.len() as u64;
     let _ = tx.send(UiMessage::Progress(0, total_files));
-    let _ = tx.send(UiMessage::Status(format!("Processing {} files across {} folders...", total_files, items.len())));
+    let _ = tx.send(UiMessage::Status(format!("Processing {} files with {} threads...", total_files, rayon::current_num_threads())));
     
-    for (folder_idx, (path, action)) in items.iter().enumerate() {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = tx.send(UiMessage::Status("Batch processing cancelled.".to_string()));
-            let _ = tx.send(UiMessage::Finished);
-            return;
-        }
-        
-        let _ = tx.send(UiMessage::Status(format!("Processing folder {}/{}: {}", folder_idx + 1, items.len(), path)));
-        
-        for result in WalkBuilder::new(path).build() {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            
-            if let Ok(entry) = result {
-                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                    let file_path = entry.path().to_string_lossy().to_string();
-                    
-                    let result = match action {
-                        BatchAction::Compress => compress_file(&file_path, algo).is_ok(),
-                        BatchAction::Decompress => uncompress_file(&file_path).is_ok(),
-                    };
-                    
-                    if result {
-                        success += 1;
-                    } else {
-                        failed += 1;
-                    }
-                    
-                    processed += 1;
-                    
-                    if processed % 20 == 0 {
-                        let _ = tx.send(UiMessage::Progress(processed, total_files));
-                    }
-                }
-            }
-        }
+    if total_files == 0 {
+        let _ = tx.send(UiMessage::Status("No files found to process.".to_string()));
+        let _ = tx.send(UiMessage::Finished);
+        return;
     }
+
+    // 2. Parallel Processing Phase
+    let processed = AtomicU64::new(0);
+    let success = AtomicU64::new(0);
+    let failed = AtomicU64::new(0);
     
-    use humansize::{format_size, BINARY};
-    let report = format!("Batch complete! Processed: {} files | Success: {} | Failed: {}", 
-        processed, success, failed);
+    // Per-row processed counters. We need thread-safe access.
+    // Since row indices are 0..items.len(), we can use a Vec<AtomicU64>.
+    // But items might not be contiguous if we support deletion (Wait, we rewrite the list on every frame? No, index comes from enumerate)
+    // The row index passed in comes from enumerate() on the current state list, so it is 0..N contiguous.
+    let max_row = items.iter().map(|(_, _, r)| *r).max().unwrap_or(0);
+    let row_processed_counts: Vec<AtomicU64> = (0..=max_row).map(|_| AtomicU64::new(0)).collect();
+    // Wrap in Arc implies we need to share it, but pare_iter takes reference. 
+    // Wait, Vec can be shared immutably, and AtomicU64 inside it can be mutated.
+    // We don't need Arc for the Vec itself if we just reference it in the closure scope, 
+    // BUT par_iter requires Send/Sync. Vec<AtomicU64> is Send/Sync.
     
-    let _ = tx.send(UiMessage::Log(report));
+    // Process in parallel
+    tasks.par_iter().for_each(|(file_path, action, row_idx)| {
+        if cancel.load(Ordering::Relaxed) {
+             return; // Stop processing new items
+        }
+        
+        let result = match action {
+            BatchAction::Compress => compress_file(file_path, algo).is_ok(),
+            BatchAction::Decompress => uncompress_file(file_path).is_ok(),
+        };
+        
+        if result {
+            success.fetch_add(1, Ordering::Relaxed);
+        } else {
+            failed.fetch_add(1, Ordering::Relaxed);
+        }
+        
+        // Global progress
+        let current_global = processed.fetch_add(1, Ordering::Relaxed) + 1;
+        
+        // Row progress
+        // Safety: row_idx is bounded by max_row
+        if let Some(counter) = row_processed_counts.get(*row_idx) {
+            let current_row = counter.fetch_add(1, Ordering::Relaxed) + 1;
+            
+            // Update row UI (throttled: every 5 items or when done for that row)
+            let total_row = *row_totals.get(row_idx).unwrap_or(&1); // fallback to 1 to avoid div by zero/logic error
+            
+            if current_row % 5 == 0 || current_row == total_row {
+                 let _ = tx.send(UiMessage::RowUpdate(*row_idx as i32, format!("{}/{}", current_row, total_row), "Running".to_string(), "".to_string()));
+                 
+                 // If row finished, we could calculate size? 
+                 // Doing it here might be expensive if many threads hit this.
+                 // Maybe do it only at the very end of the row?
+                 // But parallel execution means we don't know "who" finishes the row last easily without checking equality
+                 if current_row == total_row {
+                     // Check if it was single file or folder
+                     // We don't have the original path here easily unless we look it up or pass it.
+                     // But we can just leave the final size update for later or skip it for now to avoid complexity in hot loop.
+                     // Re-reading the size happens in ItemFinished mostly.
+                     // Let's just update the status to "Done"
+                     // let _ = tx.send(UiMessage::RowUpdate(*row_idx as i32, format!("{}/{}", current_row, total_row), "Done".to_string(), "".to_string()));
+                 }
+            }
+        }
+        
+        // Throttled Global updates
+        if current_global % 20 == 0 || current_global == total_files {
+             let _ = tx.send(UiMessage::Progress(current_global, total_files));
+             let _ = tx.send(UiMessage::Status(format!("Processed {}/{} files...", current_global, total_files)));
+        }
+    });
+    
+    if cancel.load(Ordering::Relaxed) {
+        let _ = tx.send(UiMessage::Status("Batch processing cancelled.".to_string()));
+         let _ = tx.send(UiMessage::Finished);
+        return;
+    }
+
+    // 3. Final Report & Cleanup
+    // Update all rows to "Done" and calculate sizes
+    for (path, _, row_idx) in items {
+        let size_after = if std::path::Path::new(&path).is_file() {
+            calculate_path_disk_size(&path)
+        } else {
+            calculate_folder_disk_size(&path)
+        };
+        let size_str = format_size(size_after, BINARY);
+        
+        // Check if there were failed items for this row?
+        // We tracked global failures, but not per-row failures. 
+        // For now just mark as Done.
+        let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, "Done".to_string(), size_str));
+    }
+
+    let s = success.load(Ordering::Relaxed);
+    let f = failed.load(Ordering::Relaxed);
+    let p = processed.load(Ordering::Relaxed);
+    
+    let report = format!("Batch complete! Processed: {} files | Success: {} | Failed: {}", p, s, f);
+    
+    let _ = tx.send(UiMessage::Log(report.clone()));
+    let _ = tx.send(UiMessage::Status(report));
     let _ = tx.send(UiMessage::Progress(total_files, total_files));
     let _ = tx.send(UiMessage::Finished);
 }
@@ -987,41 +1069,59 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
         let _ = tx.send(UiMessage::RowUpdate(row, "1/1".to_string(), "Running".to_string(), "".to_string()));
         let _ = tx.send(UiMessage::Progress(1, 1));
     } else {
-        // Process folder with WalkBuilder
+        // Process folder in PARALLEL
+        let mut tasks: Vec<String> = Vec::new();
         for result in WalkBuilder::new(&path).build() {
-            if cancel.load(Ordering::Relaxed) {
-                let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
-                let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
-                let _ = tx.send(UiMessage::Finished);
-                return;
-            }
-            
             if let Ok(entry) = result {
                 if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                    let file_path = entry.path().to_string_lossy().to_string();
-                    
-                    let ok = match action {
-                        BatchAction::Compress => compress_file(&file_path, algo).is_ok(),
-                        BatchAction::Decompress => uncompress_file(&file_path).is_ok(),
-                    };
-                    
-                    if ok {
-                        success += 1;
-                    } else {
-                        failed += 1;
-                    }
-                    
-                    processed += 1;
-                    
-                    // Send per-item progress updates every 5 files or when done
-                    if processed % 5 == 0 || processed == total_files {
-                        let progress_str = format!("{}/{}", processed, total_files);
-                        let _ = tx.send(UiMessage::RowUpdate(row, progress_str, "Running".to_string(), "".to_string()));
-                        let _ = tx.send(UiMessage::Progress(processed, total_files));
-                    }
+                     tasks.push(entry.path().to_string_lossy().to_string());
                 }
             }
         }
+        
+        total_files = tasks.len() as u64;
+        
+        let processed_atomic = AtomicU64::new(0);
+        let success_atomic = AtomicU64::new(0);
+        let failed_atomic = AtomicU64::new(0);
+        
+        tasks.par_iter().for_each(|file_path| {
+            if cancel.load(Ordering::Relaxed) {
+                 return;
+            }
+            
+            let ok = match action {
+                BatchAction::Compress => compress_file(file_path, algo).is_ok(),
+                BatchAction::Decompress => uncompress_file(file_path).is_ok(),
+            };
+            
+            if ok {
+                success_atomic.fetch_add(1, Ordering::Relaxed);
+            } else {
+                failed_atomic.fetch_add(1, Ordering::Relaxed);
+            }
+            
+            let current = processed_atomic.fetch_add(1, Ordering::Relaxed) + 1;
+            
+            // Send per-item progress updates every 5 files or when done
+            if current % 5 == 0 || current == total_files {
+                let progress_str = format!("{}/{}", current, total_files);
+                let _ = tx.send(UiMessage::RowUpdate(row, progress_str, "Running".to_string(), "".to_string()));
+                let _ = tx.send(UiMessage::Progress(current, total_files));
+            }
+        });
+        
+        if cancel.load(Ordering::Relaxed) {
+            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
+            let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
+            let _ = tx.send(UiMessage::Finished);
+            return;
+        }
+        
+        // Sync back to local variables for the final report
+        processed = processed_atomic.load(Ordering::Relaxed);
+        success = success_atomic.load(Ordering::Relaxed);
+        failed = failed_atomic.load(Ordering::Relaxed);
     }
     
     // Calculate size after
