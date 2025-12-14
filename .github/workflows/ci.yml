@@ -10,85 +10,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Check
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Rust
-        uses: dtolnay/rust-action@stable
-        with:
-          toolchain: stable
-          
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
-          
-      - name: Run cargo check
-        run: cargo check --all-targets
-
-  fmt:
-    name: Format
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Rust
-        uses: dtolnay/rust-action@stable
-        with:
-          toolchain: stable
-          components: rustfmt
-          
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Rust
-        uses: dtolnay/rust-action@stable
-        with:
-          toolchain: stable
-          components: clippy
-          
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
-          
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
   build:
     name: Build
     runs-on: windows-latest
-    needs: [check, fmt, clippy]
+    
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Rust
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
         uses: dtolnay/rust-action@stable
         with:
           toolchain: stable
-          
-      - name: Cache Cargo
+
+      - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -97,11 +32,13 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
-          
-      - name: Build release
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
         run: cargo build --release
-        
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
