@@ -40,6 +40,7 @@ use windows::Win32::UI::Controls::{
     LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES, LVM_GETHEADER,
     NM_CUSTOMDRAW, NMCUSTOMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, CDRF_NOTIFYITEMDRAW, CDRF_NEWFONT, NMHDR,
+    LVN_ITEMCHANGED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
@@ -429,17 +430,32 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     
                     IDC_BTN_REMOVE => {
                         if let Some(st) = get_state() {
-                            // First get the list_view handle and selected index
+                            // First get the list_view handle
                             let list_view = st.controls.as_ref().map(|c| c.list_view);
                             if let Some(lv) = list_view {
-                                let sel_idx = SendMessageW(lv, LVM_GETNEXTITEM, Some(WPARAM(usize::MAX)), Some(LPARAM(LVNI_SELECTED as isize)));
-                                if sel_idx.0 >= 0 {
-                                    let idx = sel_idx.0 as usize;
-                                    // Get item ID before removing
-                                    let item_id = st.batch_items.get(idx).map(|i| i.id);
-                                    if let Some(id) = item_id {
+                                // Collect all selected indices first
+                                let mut selected_indices = Vec::new();
+                                let mut item_idx = -1;
+                                loop {
+                                    let start_param = if item_idx < 0 { usize::MAX } else { item_idx as usize };
+                                    let next = SendMessageW(lv, LVM_GETNEXTITEM, Some(WPARAM(start_param)), Some(LPARAM(LVNI_SELECTED as isize)));
+                                    if next.0 < 0 { break; }
+                                    item_idx = next.0 as i32;
+                                    selected_indices.push(item_idx as usize);
+                                }
+                                
+                                // Sort descending to remove from end first (preserves indices)
+                                selected_indices.sort_by(|a, b| b.cmp(a));
+                                
+                                for idx in selected_indices {
+                                    // Remove from State (by ID)
+                                    // Use the index directly since batch_items maps 1:1 to ListView rows
+                                    if let Some(item) = st.batch_items.get(idx) {
+                                        let id = item.id;
                                         st.remove_batch_item(id);
                                     }
+                                    
+                                    // Remove from ListView
                                     SendMessageW(lv, LVM_DELETEITEM, Some(WPARAM(idx)), None);
                                 }
                             }
@@ -452,6 +468,24 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 MessageBoxW(Some(hwnd), w!("Add folders first!"), w!("Info"), MB_OK | MB_ICONINFORMATION);
                             } else {
                                 if let Some(ctrls) = &st.controls {
+                                    // Collect indices to process
+                                    let mut indices_to_process = Vec::new();
+                                    
+                                    // Check for selection
+                                    let mut item_idx = -1;
+                                    loop {
+                                        let start_param = if item_idx < 0 { usize::MAX } else { item_idx as usize };
+                                        let next = SendMessageW(ctrls.list_view, LVM_GETNEXTITEM, Some(WPARAM(start_param)), Some(LPARAM(LVNI_SELECTED as isize)));
+                                        if next.0 < 0 { break; }
+                                        item_idx = next.0 as i32;
+                                        indices_to_process.push(item_idx as usize);
+                                    }
+                                    
+                                    // If no selection, process all
+                                    if indices_to_process.is_empty() {
+                                        indices_to_process = (0..st.batch_items.len()).collect();
+                                    }
+                                    
                                     // Get selected algorithm
                                     let idx = SendMessageW(ctrls.combo_algo, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
                                     let algo = match idx.0 {
@@ -469,21 +503,28 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         WofAlgorithm::Lzx => "LZX",
                                     };
                                     
-                                    // Update Algorithm column for all items in ListView
-                                    let item_count = st.batch_items.len();
-                                    for row in 0..item_count {
+                                    // Update Algorithm column for processed items
+                                    for &row in &indices_to_process {
                                         update_listview_item(ctrls.list_view, row as i32, 1, algo_name);
                                     }
                                     
                                     EnableWindow(ctrls.btn_cancel, true);
-                                    SetWindowTextW(ctrls.static_text, w!("Processing batch..."));
+                                    let status_msg = if indices_to_process.len() == st.batch_items.len() {
+                                        "Processing all items...".to_string()
+                                    } else {
+                                        format!("Processing {} selected items...", indices_to_process.len())
+                                    };
+                                    let wstr = windows::core::HSTRING::from(&status_msg);
+                                    SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
                                     
                                     let tx = st.tx.clone();
                                     let cancel = st.cancel_flag.clone();
                                     cancel.store(false, Ordering::Relaxed);
                                     
-                                    // Clone items for worker thread, including their row index
-                                    let items: Vec<_> = st.batch_items.iter().enumerate().map(|(idx, i)| (i.path.clone(), i.action, idx)).collect();
+                                    // Clone items for worker thread
+                                    let items: Vec<_> = indices_to_process.into_iter().filter_map(|idx| {
+                                        st.batch_items.get(idx).map(|item| (item.path.clone(), item.action, idx))
+                                    }).collect();
                                     
                                     thread::spawn(move || {
                                         batch_process_worker(items, algo, tx, cancel);
@@ -497,8 +538,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         if let Some(st) = get_state() {
                             st.cancel_flag.store(true, Ordering::Relaxed);
                             if let Some(ctrls) = &st.controls {
-                                EnableWindow(ctrls.btn_cancel, false);
-                                SetWindowTextW(ctrls.static_text, w!("Cancelling..."));
+                                let _ = EnableWindow(ctrls.btn_cancel, false);
+                                let _ = SetWindowTextW(ctrls.static_text, w!("Cancelling..."));
                             }
                         }
                     },
@@ -742,12 +783,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let nmhdr = &*(lparam.0 as *const windows::Win32::UI::Controls::NMHDR);
                 
                 // Check if it's from our ListView and is a double-click
-                if nmhdr.idFrom == IDC_BATCH_LIST as usize && nmhdr.code == NM_DBLCLK {
-                    let nmia = &*(lparam.0 as *const NMITEMACTIVATE);
-                    let row = nmia.iItem;
-                    let col = nmia.iSubItem;
-                    
-                    if row >= 0 {
+                if nmhdr.idFrom == IDC_BATCH_LIST as usize {
+                    if nmhdr.code == NM_DBLCLK {
+                        let nmia = &*(lparam.0 as *const NMITEMACTIVATE);
+                        let row = nmia.iItem;
+                        let col = nmia.iSubItem;
+                        
+                        if row >= 0 {
                         if let Some(st) = get_state() {
                             let row_idx = row as usize;
                             
@@ -811,7 +853,106 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 }
                             }
                         }
+                        }
+                    }
                 }
+                
+                if nmhdr.idFrom == IDC_BATCH_LIST as usize {
+                    if nmhdr.code == NM_DBLCLK {
+                        let nmia = &*(lparam.0 as *const NMITEMACTIVATE);
+                        let row = nmia.iItem;
+                        let col = nmia.iSubItem;
+                        
+                        if row >= 0 {
+                            if let Some(st) = get_state() {
+                                let row_idx = row as usize;
+                                
+                                // Column 1 = Algorithm, Column 2 = Action
+                                if col == 1 {
+                                    // Cycle Algorithm: XPRESS4K -> XPRESS8K -> XPRESS16K -> LZX -> XPRESS4K
+                                    if let Some(item) = st.batch_items.get_mut(row_idx) {
+                                        item.algorithm = match item.algorithm {
+                                            WofAlgorithm::Xpress4K => WofAlgorithm::Xpress8K,
+                                            WofAlgorithm::Xpress8K => WofAlgorithm::Xpress16K,
+                                            WofAlgorithm::Xpress16K => WofAlgorithm::Lzx,
+                                            WofAlgorithm::Lzx => WofAlgorithm::Xpress4K,
+                                        };
+                                        let algo_str = match item.algorithm {
+                                            WofAlgorithm::Xpress4K => "XPRESS4K",
+                                            WofAlgorithm::Xpress8K => "XPRESS8K",
+                                            WofAlgorithm::Xpress16K => "XPRESS16K",
+                                            WofAlgorithm::Lzx => "LZX",
+                                        };
+                                        // Update ListView
+                                        if let Some(ctrls) = &st.controls {
+                                            update_listview_item(ctrls.list_view, row, 1, algo_str);
+                                        }
+                                    }
+                                } else if col == 2 {
+                                    // Toggle Action: Compress <-> Decompress
+                                    if let Some(item) = st.batch_items.get_mut(row_idx) {
+                                        item.action = match item.action {
+                                            BatchAction::Compress => BatchAction::Decompress,
+                                            BatchAction::Decompress => BatchAction::Compress,
+                                        };
+                                        let action_str = match item.action {
+                                            BatchAction::Compress => "Compress",
+                                            BatchAction::Decompress => "Decompress",
+                                        };
+                                        // Update ListView
+                                        if let Some(ctrls) = &st.controls {
+                                            update_listview_item(ctrls.list_view, row, 2, action_str);
+                                        }
+                                    }
+                                } else if col == 7 {
+                                    // Start button clicked - process this single item
+                                    if let Some(item) = st.batch_items.get(row_idx) {
+                                        let path = item.path.clone();
+                                        let algo = item.algorithm;
+                                        let action = item.action;
+                                        let tx = st.tx.clone();
+                                        let cancel = st.cancel_flag.clone();
+                                        cancel.store(false, Ordering::Relaxed);
+                                        
+                                        // Update status to Processing (col 6)
+                                        if let Some(ctrls) = &st.controls {
+                                            update_listview_item(ctrls.list_view, row, 6, "Running");
+                                            let _ = EnableWindow(ctrls.btn_cancel, true);
+                                        }
+                                        
+                                        let row_for_thread = row;
+                                        thread::spawn(move || {
+                                            single_item_worker(path, algo, action, row_for_thread, tx, cancel);
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if nmhdr.code == LVN_ITEMCHANGED {
+                         // Check selection count
+                         if let Some(st) = get_state() {
+                              if let Some(ctrls) = &st.controls {
+                                  // Count selected items
+                                  let mut count = 0;
+                                  let mut item_idx = -1;
+                                  loop {
+                                      let start_param = if item_idx < 0 { usize::MAX } else { item_idx as usize };
+                                      let next = SendMessageW(ctrls.list_view, LVM_GETNEXTITEM, Some(WPARAM(start_param)), Some(LPARAM(LVNI_SELECTED as isize)));
+                                      if next.0 < 0 { break; }
+                                      item_idx = next.0 as i32;
+                                      count += 1;
+                                  }
+                                  
+                                  if count > 0 {
+                                      SetWindowTextW(ctrls.btn_compress, w!("Process Selected"));
+                                  } else {
+                                      SetWindowTextW(ctrls.btn_compress, w!("Process All"));
+                                  }
+                              }
+                         }
+                    }
                 }
                 
                 // Note: Header NM_CUSTOMDRAW is handled by listview_subclass_proc
@@ -1157,7 +1298,8 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
         } else {
             failed += 1;
         }
-        processed = 1;
+
+        processed += 1;
         let _ = tx.send(UiMessage::RowUpdate(row, "1/1".to_string(), "Running".to_string(), "".to_string()));
         let _ = tx.send(UiMessage::Progress(1, 1));
     } else {
@@ -1211,7 +1353,7 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
         }
         
         // Sync back to local variables for the final report
-        processed = processed_atomic.load(Ordering::Relaxed);
+        processed += processed_atomic.load(Ordering::Relaxed);
         success = success_atomic.load(Ordering::Relaxed);
         failed = failed_atomic.load(Ordering::Relaxed);
     }
