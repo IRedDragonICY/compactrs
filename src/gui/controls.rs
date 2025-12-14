@@ -26,6 +26,7 @@ pub const IDC_BATCH_LIST: u16 = 110;
 pub const IDC_BTN_ADD_FOLDER: u16 = 111;
 pub const IDC_BTN_REMOVE: u16 = 112;
 pub const IDC_BTN_PROCESS_ALL: u16 = 113;
+pub const IDC_BTN_ADD_FILES: u16 = 114;
 
 #[allow(unused_imports)]
 use windows::Win32::UI::Controls::{PBS_SMOOTH, PBM_SETRANGE32, PBM_SETPOS, PROGRESS_CLASSW};

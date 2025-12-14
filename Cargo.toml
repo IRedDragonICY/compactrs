@@ -2,8 +2,10 @@
 name = "compactrs"
 version = "0.1.0"
 edition = "2024"
-authors = ["Antigravity"]
-description = "High-performance native Windows file compressor"
+authors = ["Mohammad Farid Hendianto <ireddragonicy@gmail.com>"]
+description = "High-performance native Windows file compressor using WOF (Windows Overlay Filter)"
+license = "MIT"
+repository = "https://github.com/IRedDragonICY/compactrs"
 
 [dependencies]
 crossbeam-channel = "0.5"
@@ -38,8 +40,16 @@ features = [
 winres = "0.1"
 
 [profile.release]
-opt-level = "z"     # Optimize for size
-lto = true          # Link Time Optimization
-codegen-units = 1   # Maximize optimization
-panic = "abort"     # Remove panic unwinding
-strip = true        # Strip symbols
+opt-level = "z"          # Optimize for smallest size (disables loop vectorization)
+lto = true               # Full Link-Time Optimization across all crates
+codegen-units = 1        # Single codegen unit = maximum optimization (slower compile)
+panic = "abort"          # Remove panic unwinding code (smaller binary)
+strip = "symbols"        # Strip all symbols from binary
+debug = false            # No debug info
+overflow-checks = false  # Disable overflow checks for speed/size
+incremental = false      # Disable incremental for better optimization
+
+# Optional: Even more aggressive - uncomment if you want
+# [profile.release.build-override]
+# opt-level = "z"
+# codegen-units = 1

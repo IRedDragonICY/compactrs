@@ -1,0 +1,138 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: compactrs
+
+jobs:
+  build:
+    name: Build Release Binary
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Install UPX
+        run: |
+          $upxVersion = "4.2.4"
+          $upxUrl = "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip"
+          Invoke-WebRequest -Uri $upxUrl -OutFile upx.zip
+          Expand-Archive -Path upx.zip -DestinationPath .
+          Move-Item "upx-$upxVersion-win64/upx.exe" .
+        shell: pwsh
+
+      - name: Compress binary with UPX
+        run: |
+          $originalSize = (Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length
+          ./upx.exe --best --lzma "target/release/${{ env.BINARY_NAME }}.exe"
+          $compressedSize = (Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length
+          $ratio = [math]::Round(($compressedSize / $originalSize) * 100, 2)
+          Write-Host "Original: $([math]::Round($originalSize / 1KB, 2)) KB"
+          Write-Host "Compressed: $([math]::Round($compressedSize / 1KB, 2)) KB"
+          Write-Host "Compression ratio: $ratio%"
+        shell: pwsh
+
+      - name: Get version
+        id: version
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ github.event.inputs.version }}"
+          } else {
+            $version = "${{ github.ref_name }}"
+          }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          $previousTag = git describe --tags --abbrev=0 HEAD^ 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            $commits = git log --pretty=format:"- %s (%h)" -20
+          } else {
+            $commits = git log --pretty=format:"- %s (%h)" "$previousTag..HEAD"
+          }
+          
+          $changelog = @"
+          ## What's Changed
+          
+          $($commits -join "`n")
+          
+          ## Build Information
+          
+          - **Platform**: Windows x64
+          - **Rust Version**: stable
+          - **Optimization**: Size optimized (opt-level=z, LTO, UPX compressed)
+          - **Binary Size**: Compressed with UPX LZMA
+          
+          ## Installation
+          
+          1. Download ``compactrs.exe`` from the assets below
+          2. Run as Administrator (required for WOF compression)
+          3. Drag and drop files or folders to compress
+          
+          ## Checksums
+          
+          ``````
+          SHA256: $(Get-FileHash "target/release/${{ env.BINARY_NAME }}.exe" -Algorithm SHA256 | Select-Object -ExpandProperty Hash)
+          ``````
+          "@
+          
+          $changelog | Out-File -FilePath changelog.md -Encoding utf8
+          echo "CHANGELOG_FILE=changelog.md" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: CompactRS ${{ steps.version.outputs.VERSION }}
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          body_path: changelog.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, 'alpha') || contains(steps.version.outputs.VERSION, 'beta') || contains(steps.version.outputs.VERSION, 'rc') }}
+          files: |
+            target/release/${{ env.BINARY_NAME }}.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-windows-x64
+          path: target/release/${{ env.BINARY_NAME }}.exe
+          retention-days: 30

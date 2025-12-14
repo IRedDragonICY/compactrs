@@ -1,7 +1,7 @@
 use windows::core::{Result, w, PCWSTR, PWSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, GetStockObject, NULL_BRUSH, SetBkMode, SetTextColor, TRANSPARENT, FillRect, HDC};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
@@ -9,7 +9,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND, SetWindowPos, SWP_NOZORDER,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY,
+    MB_ICONINFORMATION, WM_NOTIFY, GetClientRect,
 };
 use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
@@ -19,7 +19,7 @@ use crate::gui::controls::{
     create_button, create_listview, create_combobox, create_progress_bar, 
     IDC_LISTVIEW, IDC_BTN_SCAN, IDC_BTN_COMPRESS, IDC_COMBO_ALGO, IDC_BTN_DECOMPRESS, 
     IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
-    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL,
+    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES,
 };
 use crate::gui::state::{AppState, Controls, UiMessage, BatchAction};
 use std::thread;
@@ -28,6 +28,7 @@ use crossbeam_channel::Sender;
 use windows::Win32::UI::Controls::{
     PBM_SETRANGE32, PBM_SETPOS, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETITEMW,
     LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_GETSELECTEDCOUNT, LVM_GETNEXTITEM,
+    LVM_SETBKCOLOR, LVM_SETTEXTCOLOR, LVM_SETTEXTBKCOLOR, SetWindowTheme,
     LVCOLUMNW, LVITEMW, LVCF_WIDTH, LVCF_TEXT, LVCF_FMT, LVCFMT_LEFT, LVIF_TEXT,
     LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE,
 };
@@ -135,6 +136,38 @@ fn detect_folder_algorithm(path: &str) -> Option<WofAlgorithm> {
     None
 }
 
+// ===== PATH-AWARE FUNCTIONS (work for both files and folders) =====
+
+/// Calculate logical size for a path (file or folder)
+fn calculate_path_logical_size(path: &str) -> u64 {
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+        std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        calculate_folder_logical_size(path)
+    }
+}
+
+/// Calculate disk size for a path (file or folder)
+fn calculate_path_disk_size(path: &str) -> u64 {
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+        get_real_file_size(path)
+    } else {
+        calculate_folder_disk_size(path)
+    }
+}
+
+/// Detect WOF algorithm for a path (file or folder)  
+fn detect_path_algorithm(path: &str) -> Option<WofAlgorithm> {
+    let p = std::path::Path::new(path);
+    if p.is_file() {
+        get_wof_algorithm(path)
+    } else {
+        detect_folder_algorithm(path)
+    }
+}
+
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
     unsafe {
         let wc = WNDCLASSW {
@@ -190,7 +223,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let h_label = CreateWindowExW(
                     Default::default(),
                     w!("STATIC"),
-                    w!("Drag and drop folders here, or use 'Add Folder' button. Then click 'Process All' to start."),
+                    w!("Drag and drop files or folders, or use 'Files'/'Folder' buttons. Then click 'Process All'."),
                     WS_CHILD | WS_VISIBLE,
                     10, 10, 860, 25,
                     Some(hwnd),
@@ -199,20 +232,27 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     None,
                 ).unwrap_or_default();
                 
-                // Create batch ListView
-                let h_listview = create_listview(hwnd, 10, 40, 860, 420, IDC_BATCH_LIST);
+                // Create batch ListView - height 380, ends at y=420
+                let h_listview = create_listview(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
                 setup_batch_listview_columns(h_listview);
                 
-                // Create progress bar
-                let h_progress = create_progress_bar(hwnd, 10, 470, 860, 25, IDC_PROGRESS_BAR);
+                // Create progress bar at y=430
+                let h_progress = create_progress_bar(hwnd, 10, 430, 860, 20, IDC_PROGRESS_BAR);
                 
-                // Create buttons at bottom
-                let btn_y = 505;
-                let h_add = create_button(hwnd, w!("Add Folder"), 10, btn_y, 100, 30, IDC_BTN_ADD_FOLDER);
-                let h_remove = create_button(hwnd, w!("Remove"), 120, btn_y, 80, 30, IDC_BTN_REMOVE);
-                let h_combo = create_combobox(hwnd, 210, btn_y, 120, 200, IDC_COMBO_ALGO);
-                let h_process = create_button(hwnd, w!("Process All"), 340, btn_y, 100, 30, IDC_BTN_PROCESS_ALL);
-                let h_cancel = create_button(hwnd, w!("Cancel"), 450, btn_y, 80, 30, IDC_BTN_CANCEL);
+                // Create ALL buttons at y=460 - same row, with proper spacing
+                // Files: x=10, width=55
+                // Folder: x=70, width=55  
+                // Remove: x=130, width=60
+                // Combo: x=195, width=110
+                // Process: x=315, width=90
+                // Cancel: x=410, width=70
+                let h_add_files = create_button(hwnd, w!("Files"), 10, 460, 55, 28, IDC_BTN_ADD_FILES);
+                let h_add_folder = create_button(hwnd, w!("Folder"), 70, 460, 55, 28, IDC_BTN_ADD_FOLDER);
+                let h_remove = create_button(hwnd, w!("Remove"), 130, 460, 60, 28, IDC_BTN_REMOVE);
+                let h_combo = create_combobox(hwnd, 195, 460, 110, 200, IDC_COMBO_ALGO);
+                let h_process = create_button(hwnd, w!("Process All"), 315, 460, 90, 28, IDC_BTN_PROCESS_ALL);
+                let h_cancel = create_button(hwnd, w!("Cancel"), 410, 460, 70, 28, IDC_BTN_CANCEL);
+                let _ = h_add_files; // Used via IDC_BTN_ADD_FILES
                 EnableWindow(h_cancel, false);
 
                 // Populate algorithm combo
@@ -224,7 +264,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 
                 state.controls = Some(Controls {
                     list_view: h_listview,
-                    btn_scan: h_add,  // Reusing for Add Folder
+                    btn_scan: h_add_folder,  // Reusing for Add Folder
                     btn_compress: h_process,  // Reusing for Process All
                     btn_decompress: h_remove,  // Reusing for Remove
                     combo_algo: h_combo,
@@ -236,6 +276,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
                 SetTimer(Some(hwnd), 1, 100, None);
                 DragAcceptFiles(hwnd, true);
+                
+                // Apply theme (dark mode support for ListView)
+                update_theme(hwnd);
 
                 LRESULT(0)
             }
@@ -244,17 +287,43 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let id = (wparam.0 & 0xFFFF) as u16;
 
                 match id {
+                    IDC_BTN_ADD_FILES => {
+                        if let Ok(files) = pick_files() {
+                            if let Some(st) = get_state() {
+                                for file_path in files {
+                                    // Check if already added
+                                    let already_exists = st.batch_items.iter().any(|item| item.path == file_path);
+                                    if !already_exists {
+                                        let item_id = st.add_batch_item(file_path.clone());
+                                        let logical_size = calculate_path_logical_size(&file_path);
+                                        let disk_size = calculate_path_disk_size(&file_path);
+                                        let detected_algo = detect_path_algorithm(&file_path);
+                                        let logical_str = format_size(logical_size, BINARY);
+                                        let disk_str = format_size(disk_size, BINARY);
+                                        if let Some(ctrls) = &st.controls {
+                                            add_listview_item(ctrls.list_view, item_id, &file_path, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    
                     IDC_BTN_ADD_FOLDER => {
                         if let Ok(folder) = pick_folder() {
                             if let Some(st) = get_state() {
-                                let item_id = st.add_batch_item(folder.clone());
-                                let logical_size = calculate_folder_logical_size(&folder);
-                                let disk_size = calculate_folder_disk_size(&folder);
-                                let detected_algo = detect_folder_algorithm(&folder);
-                                let logical_str = format_size(logical_size, BINARY);
-                                let disk_str = format_size(disk_size, BINARY);
-                                if let Some(ctrls) = &st.controls {
-                                    add_listview_item(ctrls.list_view, item_id, &folder, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
+                                // Check if already added
+                                let already_exists = st.batch_items.iter().any(|item| item.path == folder);
+                                if !already_exists {
+                                    let item_id = st.add_batch_item(folder.clone());
+                                    let logical_size = calculate_path_logical_size(&folder);
+                                    let disk_size = calculate_path_disk_size(&folder);
+                                    let detected_algo = detect_path_algorithm(&folder);
+                                    let logical_str = format_size(logical_size, BINARY);
+                                    let disk_str = format_size(disk_size, BINARY);
+                                    if let Some(ctrls) = &st.controls {
+                                        add_listview_item(ctrls.list_view, item_id, &folder, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
+                                    }
                                 }
                             }
                         }
@@ -403,22 +472,32 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     SetWindowPos(h, None, padding, y, width - padding * 2, progress_height, SWP_NOZORDER);
                 }
                 
-                // Position buttons at bottom
+                // Position buttons at bottom - all on same row
                 let btn_y = height - btn_height - padding;
+                
+                // Files button
+                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_ADD_FILES.into()) {
+                    SetWindowPos(h, None, padding, btn_y, 55, btn_height, SWP_NOZORDER);
+                }
+                // Folder button
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_ADD_FOLDER.into()) {
-                    SetWindowPos(h, None, padding, btn_y, 100, btn_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding + 60, btn_y, 55, btn_height, SWP_NOZORDER);
                 }
+                // Remove button
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_REMOVE.into()) {
-                    SetWindowPos(h, None, padding + 110, btn_y, 80, btn_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding + 120, btn_y, 65, btn_height, SWP_NOZORDER);
                 }
+                // Algorithm combo
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO.into()) {
-                    SetWindowPos(h, None, padding + 200, btn_y, 120, btn_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding + 190, btn_y, 110, btn_height, SWP_NOZORDER);
                 }
+                // Process All button
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_PROCESS_ALL.into()) {
-                    SetWindowPos(h, None, padding + 330, btn_y, 100, btn_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding + 310, btn_y, 90, btn_height, SWP_NOZORDER);
                 }
+                // Cancel button
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_CANCEL.into()) {
-                    SetWindowPos(h, None, padding + 440, btn_y, 80, btn_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding + 410, btn_y, 70, btn_height, SWP_NOZORDER);
                 }
                 
                 LRESULT(0)
@@ -443,28 +522,20 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     let len = DragQueryFileW(hdrop, i, Some(&mut buffer));
                     if len > 0 {
                         let path_string = String::from_utf16_lossy(&buffer[..len as usize]);
-                        let path = std::path::Path::new(&path_string);
                         
-                        let target_folder = if path.is_dir() {
-                            Some(path_string.clone())
-                        } else {
-                            path.parent().map(|p| p.to_string_lossy().to_string())
-                        };
-
-                        if let Some(folder) = target_folder {
-                            if let Some(st) = get_state() {
-                                // Check if already added
-                                let already_exists = st.batch_items.iter().any(|item| item.path == folder);
-                                if !already_exists {
-                                    let item_id = st.add_batch_item(folder.clone());
-                                    let logical_size = calculate_folder_logical_size(&folder);
-                                    let disk_size = calculate_folder_disk_size(&folder);
-                                    let detected_algo = detect_folder_algorithm(&folder);
-                                    let logical_str = format_size(logical_size, BINARY);
-                                    let disk_str = format_size(disk_size, BINARY);
-                                    if let Some(ctrls) = &st.controls {
-                                        add_listview_item(ctrls.list_view, item_id, &folder, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
-                                    }
+                        // Accept both files and folders directly
+                        if let Some(st) = get_state() {
+                            // Check if already added
+                            let already_exists = st.batch_items.iter().any(|item| item.path == path_string);
+                            if !already_exists {
+                                let item_id = st.add_batch_item(path_string.clone());
+                                let logical_size = calculate_path_logical_size(&path_string);
+                                let disk_size = calculate_path_disk_size(&path_string);
+                                let detected_algo = detect_path_algorithm(&path_string);
+                                let logical_str = format_size(logical_size, BINARY);
+                                let disk_str = format_size(disk_size, BINARY);
+                                if let Some(ctrls) = &st.controls {
+                                    add_listview_item(ctrls.list_view, item_id, &path_string, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
                                 }
                             }
                         }
@@ -474,7 +545,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 if let Some(st) = get_state() {
                     if let Some(ctrls) = &st.controls {
                         let count = st.batch_items.len();
-                        let msg = format!("{} folder(s) in batch queue. Select algorithm and click 'Process All'.", count);
+                        let msg = format!("{} item(s) in batch queue. Select algorithm and click 'Process All'.", count);
                         let wstr = windows::core::HSTRING::from(&msg);
                         SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
                     }
@@ -565,6 +636,31 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     }
                 }
                 LRESULT(0)
+            }
+            
+            // WM_CTLCOLORSTATIC - handle static text colors in dark mode
+            0x0138 => { // WM_CTLCOLORSTATIC
+                if is_system_dark_mode() {
+                    let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
+                    SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF)); // White text
+                    SetBkMode(hdc, TRANSPARENT);
+                    return LRESULT(get_dark_brush().0 as isize);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            
+            // WM_ERASEBKGND - paint dark background
+            0x0014 => { // WM_ERASEBKGND
+                if is_system_dark_mode() {
+                    let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
+                    let mut rect = windows::Win32::Foundation::RECT::default();
+                    if windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rect).is_ok() {
+                        let brush = get_dark_brush();
+                        windows::Win32::Graphics::Gdi::FillRect(hdc, &rect, brush);
+                        return LRESULT(1);
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
@@ -748,18 +844,24 @@ fn batch_process_worker(items: Vec<(String, BatchAction)>, algo: WofAlgorithm, t
     let _ = tx.send(UiMessage::Finished);
 }
 
-/// Worker to process a single folder with its own algorithm setting
+/// Worker to process a single file or folder with its own algorithm setting
 fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row: i32, tx: Sender<UiMessage>, cancel: Arc<AtomicBool>) {
     let mut total_files = 0u64;
     let mut processed = 0u64;
     let mut success = 0u64;
     let mut failed = 0u64;
     
+    let is_single_file = std::path::Path::new(&path).is_file();
+    
     // Count files first
-    for result in WalkBuilder::new(&path).build() {
-        if let Ok(entry) = result {
-            if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                total_files += 1;
+    if is_single_file {
+        total_files = 1;
+    } else {
+        for result in WalkBuilder::new(&path).build() {
+            if let Ok(entry) = result {
+                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+                    total_files += 1;
+                }
             }
         }
     }
@@ -774,7 +876,8 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
     // Send initial row update
     let _ = tx.send(UiMessage::RowUpdate(row, format!("0/{}", total_files), "Running".to_string(), "".to_string()));
     
-    for result in WalkBuilder::new(&path).build() {
+    if is_single_file {
+        // Process single file directly
         if cancel.load(Ordering::Relaxed) {
             let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
             let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
@@ -782,28 +885,52 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
             return;
         }
         
-        if let Ok(entry) = result {
-            if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                let file_path = entry.path().to_string_lossy().to_string();
-                
-                let ok = match action {
-                    BatchAction::Compress => compress_file(&file_path, algo).is_ok(),
-                    BatchAction::Decompress => uncompress_file(&file_path).is_ok(),
-                };
-                
-                if ok {
-                    success += 1;
-                } else {
-                    failed += 1;
-                }
-                
-                processed += 1;
-                
-                // Send per-item progress updates every 5 files or when done
-                if processed % 5 == 0 || processed == total_files {
-                    let progress_str = format!("{}/{}", processed, total_files);
-                    let _ = tx.send(UiMessage::RowUpdate(row, progress_str, "Running".to_string(), "".to_string()));
-                    let _ = tx.send(UiMessage::Progress(processed, total_files));
+        let ok = match action {
+            BatchAction::Compress => compress_file(&path, algo).is_ok(),
+            BatchAction::Decompress => uncompress_file(&path).is_ok(),
+        };
+        
+        if ok {
+            success += 1;
+        } else {
+            failed += 1;
+        }
+        processed = 1;
+        let _ = tx.send(UiMessage::RowUpdate(row, "1/1".to_string(), "Running".to_string(), "".to_string()));
+        let _ = tx.send(UiMessage::Progress(1, 1));
+    } else {
+        // Process folder with WalkBuilder
+        for result in WalkBuilder::new(&path).build() {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
+                let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
+                let _ = tx.send(UiMessage::Finished);
+                return;
+            }
+            
+            if let Ok(entry) = result {
+                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+                    let file_path = entry.path().to_string_lossy().to_string();
+                    
+                    let ok = match action {
+                        BatchAction::Compress => compress_file(&file_path, algo).is_ok(),
+                        BatchAction::Decompress => uncompress_file(&file_path).is_ok(),
+                    };
+                    
+                    if ok {
+                        success += 1;
+                    } else {
+                        failed += 1;
+                    }
+                    
+                    processed += 1;
+                    
+                    // Send per-item progress updates every 5 files or when done
+                    if processed % 5 == 0 || processed == total_files {
+                        let progress_str = format!("{}/{}", processed, total_files);
+                        let _ = tx.send(UiMessage::RowUpdate(row, progress_str, "Running".to_string(), "".to_string()));
+                        let _ = tx.send(UiMessage::Progress(processed, total_files));
+                    }
                 }
             }
         }
@@ -825,6 +952,34 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
     let _ = tx.send(UiMessage::Finished);
 }
 
+/// Pick files (multi-select)
+unsafe fn pick_files() -> Result<Vec<String>> {
+    unsafe {
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+        let options = dialog.GetOptions()?;
+        dialog.SetOptions(options | FOS_FORCEFILESYSTEM | windows::Win32::UI::Shell::FOS_ALLOWMULTISELECT)?;
+        dialog.Show(None)?;
+        
+        let results = dialog.GetResults()?;
+        let count = results.GetCount()?;
+        let mut paths = Vec::new();
+        
+        for i in 0..count {
+            if let Ok(item) = results.GetItemAt(i) {
+                if let Ok(path_ptr) = item.GetDisplayName(SIGDN_FILESYSPATH) {
+                    if let Ok(path) = path_ptr.to_string() {
+                        paths.push(path);
+                    }
+                    CoTaskMemFree(Some(path_ptr.as_ptr() as *mut _));
+                }
+            }
+        }
+        
+        Ok(paths)
+    }
+}
+
+/// Pick folder (single folder selection)
 unsafe fn pick_folder() -> Result<String> {
     unsafe {
         let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
@@ -873,5 +1028,65 @@ fn update_theme(hwnd: HWND) {
         let attr = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
         let val = if dark { 1 } else { 0 };
         let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(attr), &val as *const _ as _, std::mem::size_of::<i32>() as u32);
+        
+        // Update ListView with dark mode explorer theme and colors
+        if let Ok(list_view) = GetDlgItem(Some(hwnd), IDC_BATCH_LIST as i32) {
+            if !list_view.is_invalid() {
+                // Apply dark mode explorer theme (affects header, scrollbars, etc.)
+                if dark {
+                    let _ = SetWindowTheme(list_view, w!("DarkMode_Explorer"), None);
+                } else {
+                    let _ = SetWindowTheme(list_view, w!("Explorer"), None);
+                }
+                
+                if dark {
+                    // Dark mode colors: dark background, light text
+                    let bg_color: u32 = 0x00202020;   // Dark gray background (BGR format)
+                    let text_color: u32 = 0x00FFFFFF; // White text
+                    SendMessageW(list_view, LVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
+                    SendMessageW(list_view, LVM_SETTEXTBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
+                    SendMessageW(list_view, LVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(text_color as isize)));
+                } else {
+                    // Light mode colors: white background, black text
+                    let bg_color: u32 = 0x00FFFFFF;   // White background
+                    let text_color: u32 = 0x00000000; // Black text
+                    SendMessageW(list_view, LVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
+                    SendMessageW(list_view, LVM_SETTEXTBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
+                    SendMessageW(list_view, LVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(text_color as isize)));
+                }
+                // Force redraw
+                let _ = InvalidateRect(Some(list_view), None, true);
+            }
+        }
+        
+        // Update progress bar with dark theme
+        if let Ok(progress) = GetDlgItem(Some(hwnd), IDC_PROGRESS_BAR as i32) {
+            if !progress.is_invalid() {
+                if dark {
+                    let _ = SetWindowTheme(progress, w!("DarkMode_Explorer"), None);
+                } else {
+                    let _ = SetWindowTheme(progress, w!("Explorer"), None);
+                }
+            }
+        }
+        
+        // Force main window redraw
+        let _ = InvalidateRect(Some(hwnd), None, true);
     }
 }
+
+// Store dark brush handle as isize for thread safety (HBRUSH is not Sync)
+use std::sync::OnceLock;
+
+static DARK_BRUSH_HANDLE: OnceLock<isize> = OnceLock::new();
+
+fn get_dark_brush() -> HBRUSH {
+    let handle = *DARK_BRUSH_HANDLE.get_or_init(|| {
+        unsafe { 
+            let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
+            brush.0 as isize
+        }
+    });
+    HBRUSH(handle as *mut _)
+}
+
