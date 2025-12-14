@@ -24,9 +24,10 @@ use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CUR
 use crate::gui::controls::{
     create_button, create_listview, create_combobox, create_progress_bar, IDC_COMBO_ALGO, 
     IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
-    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS,
+    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
 };
 use crate::gui::settings::show_settings_modal;
+use crate::gui::about::show_about_modal;
 use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, AppTheme};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -327,7 +328,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 
                 // Settings button (created but positioned later)
                 let h_settings = create_button(hwnd, w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS); // Gear icon
-                
+                let h_about = create_button(hwnd, w!("?"), 0, 0, 30, 25, IDC_BTN_ABOUT); // About icon
+
                 let _ = h_add_files; // Used via IDC_BTN_ADD_FILES
                 EnableWindow(h_cancel, false);
 
@@ -348,6 +350,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     progress_bar: h_progress,
                     btn_cancel: h_cancel,
                     btn_settings: h_settings,
+                    btn_about: h_about,
                 });
 
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -509,6 +512,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         }
                     },
                     
+                    IDC_BTN_ABOUT => {
+                        unsafe {
+                            show_about_modal(hwnd);
+                        }
+                    },
+                    
                     _ => {}
                 }
                 LRESULT(0)
@@ -575,14 +584,19 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let list_height = height - header_height - progress_height - btn_height - (padding * 5);
                 
                 // Resize header
-                // Resize header - leave space for settings button (30px)
+                // Resize header - leave space for settings (30px) and about (30px) buttons
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_STATIC_TEXT.into()) {
-                    SetWindowPos(h, None, padding, padding, width - padding * 2 - 40, header_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding, padding, width - padding - 80, header_height, SWP_NOZORDER);
                 }
                 
-                // Position Settings button
+                // Position Settings button (Rightmost)
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_SETTINGS.into()) {
                      SetWindowPos(h, None, width - padding - 30, padding, 30, header_height, SWP_NOZORDER);
+                }
+
+                // Position About button (Left of Settings)
+                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_ABOUT.into()) {
+                     SetWindowPos(h, None, width - padding - 65, padding, 30, header_height, SWP_NOZORDER);
                 }
                 
                 // Resize ListView
@@ -1392,6 +1406,7 @@ fn update_theme(hwnd: HWND) {
         update_btn_theme(IDC_BTN_PROCESS_ALL);
         update_btn_theme(IDC_BTN_CANCEL);
         update_btn_theme(IDC_BTN_SETTINGS);
+        update_btn_theme(IDC_BTN_ABOUT);
         
         // Update ComboBox
         if let Ok(combo) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO as i32) {

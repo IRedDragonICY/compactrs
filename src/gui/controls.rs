@@ -28,6 +28,8 @@ pub const IDC_BTN_REMOVE: u16 = 112;
 pub const IDC_BTN_PROCESS_ALL: u16 = 113;
 pub const IDC_BTN_ADD_FILES: u16 = 114;
 pub const IDC_BTN_SETTINGS: u16 = 115;
+pub const IDC_BTN_ABOUT: u16 = 116;
+pub const IDC_BTN_OK: u16 = 117;
 
 #[allow(unused_imports)]
 use windows::Win32::UI::Controls::{PBS_SMOOTH, PBM_SETRANGE32, PBM_SETPOS, PROGRESS_CLASSW};

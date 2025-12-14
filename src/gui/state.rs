@@ -95,6 +95,7 @@ pub struct Controls {
     pub progress_bar: HWND,
     pub btn_cancel: HWND,
     pub btn_settings: HWND,
+    pub btn_about: HWND,
 }
 
 /// Application state
