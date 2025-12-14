@@ -1,12 +1,12 @@
-use windows::core::{Result, w, PCWSTR};
-use windows::Win32::Foundation::{HWND, HINSTANCE, LPARAM, LRESULT, WPARAM};
+use windows::core::{w, PCWSTR};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, ShowWindow,
-    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
+    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
     WS_VISIBLE, WM_CREATE, WM_COMMAND,
-    GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem,
+    GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    BS_AUTORADIOBUTTON, BM_SETCHECK, BM_GETCHECK,
+    BS_AUTORADIOBUTTON, BM_SETCHECK,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
 };
@@ -64,7 +64,7 @@ pub unsafe fn show_settings(parent: HWND, current_theme: AppTheme) -> Option<App
             result: None,
         });
 
-        let hwnd = CreateWindowExW(
+        let _hwnd = CreateWindowExW(
             Default::default(),
             SETTINGS_CLASS_NAME,
             SETTINGS_TITLE,
@@ -149,7 +149,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Opti
             result: None,
         };
 
-        let hwnd = CreateWindowExW(
+        let _hwnd = CreateWindowExW(
             Default::default(),
             SETTINGS_CLASS_NAME,
             SETTINGS_TITLE,
@@ -176,7 +176,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Opti
 }
 
 
-unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
     let get_state = || {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
         if ptr == 0 { None } else { Some(&mut *(ptr as *mut SettingsState)) }
@@ -294,4 +294,4 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
         
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
-}
+}}

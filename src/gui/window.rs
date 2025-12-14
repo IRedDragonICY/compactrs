@@ -3,30 +3,26 @@ use windows::core::{Result, w, PCWSTR, PWSTR, PCSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, GetStockObject, NULL_BRUSH, 
-    SetBkMode, SetTextColor, TRANSPARENT, FillRect, HDC, CreateFontW, DEFAULT_QUALITY, 
+    HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, 
+    SetBkMode, SetTextColor, TRANSPARENT, CreateFontW, 
     DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
-    FW_NORMAL, DEFAULT_CHARSET, FONT_PITCH, DrawTextW, DT_CENTER, DT_VCENTER, DT_SINGLELINE,
+    FW_NORMAL, DEFAULT_CHARSET,
 };
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DwmExtendFrameIntoClientArea, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE, DWMWINDOWATTRIBUTE};
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND, SetWindowPos, SWP_NOZORDER,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY, GetClientRect, WM_SETFONT,
-    CreatePopupMenu, TrackPopupMenu, AppendMenuW, DestroyMenu,
-    TPM_LEFTALIGN, TPM_TOPALIGN, TPM_RETURNCMD, TPM_NONOTIFY,
-    MF_STRING, MF_CHECKED, MF_UNCHECKED,
+    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT,
 };
-use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc, SUBCLASSPROC};
+use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, HKEY};
 use crate::gui::controls::{
-    create_button, create_listview, create_combobox, create_progress_bar, 
-    IDC_LISTVIEW, IDC_BTN_SCAN, IDC_BTN_COMPRESS, IDC_COMBO_ALGO, IDC_BTN_DECOMPRESS, 
+    create_button, create_listview, create_combobox, create_progress_bar, IDC_COMBO_ALGO, 
     IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS,
 };
@@ -37,16 +33,15 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crossbeam_channel::Sender;
 use windows::Win32::UI::Controls::{
     PBM_SETRANGE32, PBM_SETPOS, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETITEMW,
-    LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_GETSELECTEDCOUNT, LVM_GETNEXTITEM,
+    LVM_DELETEITEM, LVM_GETNEXTITEM,
     LVM_SETBKCOLOR, LVM_SETTEXTCOLOR, LVM_SETTEXTBKCOLOR, SetWindowTheme,
     LVCOLUMNW, LVITEMW, LVCF_WIDTH, LVCF_TEXT, LVCF_FMT, LVCFMT_LEFT, LVIF_TEXT,
-    LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE, MARGINS,
+    LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES, LVM_GETHEADER,
-    NM_CUSTOMDRAW, NMCUSTOMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, CDRF_NOTIFYITEMDRAW, CDRF_NEWFONT, NMHDR, CDRF_SKIPDEFAULT,
+    NM_CUSTOMDRAW, NMCUSTOMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, CDRF_NOTIFYITEMDRAW, CDRF_NEWFONT, NMHDR,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, is_wof_compressed, get_wof_algorithm};
-use crate::engine::compresstimate::estimate_size;
+use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
 use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
 use rayon::prelude::*;
