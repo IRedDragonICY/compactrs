@@ -24,13 +24,13 @@ use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CUR
 use crate::gui::controls::{
     create_button, create_listview, create_combobox, create_progress_bar, IDC_COMBO_ALGO, 
     IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
-    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS,
+    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
 };
 use crate::gui::settings::show_settings_modal;
 use crate::gui::about::show_about_modal;
 use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
 use std::thread;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}};
 use std::sync::mpsc::Sender;
 use windows::Win32::UI::Controls::{
     PBM_SETRANGE32, PBM_SETPOS, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETITEMW,
@@ -46,8 +46,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
 use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
-use rayon::prelude::*;
-use std::sync::atomic::{AtomicU64};
+
+
 
 #[allow(dead_code)]
 fn lo_word(l: u32) -> u16 {
@@ -545,18 +545,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     },
                     
                     IDC_BTN_SETTINGS => {
-                        unsafe {
-                            if let Some(st) = get_state() {
-                                let theme = st.theme;
-                                show_settings_modal(hwnd, theme);
-                            }
+                        if let Some(st) = get_state() {
+                            let theme = st.theme;
+                            show_settings_modal(hwnd, theme);
                         }
                     },
                     
                     IDC_BTN_ABOUT => {
-                        unsafe {
-                            show_about_modal(hwnd);
-                        }
+                        show_about_modal(hwnd);
                     },
                     
                     _ => {}
@@ -1082,7 +1078,8 @@ fn batch_process_worker(items: Vec<(String, BatchAction, usize)>, algo: WofAlgor
     
     let total_files = tasks.len() as u64;
     let _ = tx.send(UiMessage::Progress(0, total_files));
-    let _ = tx.send(UiMessage::Status(format!("Processing {} files with {} threads...", total_files, rayon::current_num_threads())));
+    let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let _ = tx.send(UiMessage::Status(format!("Processing {} files with {} threads...", total_files, num_threads)));
     
     if total_files == 0 {
         let _ = tx.send(UiMessage::Status("No files found to process.".to_string()));
@@ -1095,67 +1092,73 @@ fn batch_process_worker(items: Vec<(String, BatchAction, usize)>, algo: WofAlgor
     let success = AtomicU64::new(0);
     let failed = AtomicU64::new(0);
     
-    // Per-row processed counters. We need thread-safe access.
-    // Since row indices are 0..items.len(), we can use a Vec<AtomicU64>.
-    // But items might not be contiguous if we support deletion (Wait, we rewrite the list on every frame? No, index comes from enumerate)
-    // The row index passed in comes from enumerate() on the current state list, so it is 0..N contiguous.
+    // Per-row processed counters.
     let max_row = items.iter().map(|(_, _, r)| *r).max().unwrap_or(0);
     let row_processed_counts: Vec<AtomicU64> = (0..=max_row).map(|_| AtomicU64::new(0)).collect();
-    // Wrap in Arc implies we need to share it, but pare_iter takes reference. 
-    // Wait, Vec can be shared immutably, and AtomicU64 inside it can be mutated.
-    // We don't need Arc for the Vec itself if we just reference it in the closure scope, 
-    // BUT par_iter requires Send/Sync. Vec<AtomicU64> is Send/Sync.
     
-    // Process in parallel
-    tasks.par_iter().for_each(|(file_path, action, row_idx)| {
-        if cancel.load(Ordering::Relaxed) {
-             return; // Stop processing new items
-        }
-        
-        let result = match action {
-            BatchAction::Compress => compress_file(file_path, algo).is_ok(),
-            BatchAction::Decompress => uncompress_file(file_path).is_ok(),
-        };
-        
-        if result {
-            success.fetch_add(1, Ordering::Relaxed);
-        } else {
-            failed.fetch_add(1, Ordering::Relaxed);
-        }
-        
-        // Global progress
-        let current_global = processed.fetch_add(1, Ordering::Relaxed) + 1;
-        
-        // Row progress
-        // Safety: row_idx is bounded by max_row
-        if let Some(counter) = row_processed_counts.get(*row_idx) {
-            let current_row = counter.fetch_add(1, Ordering::Relaxed) + 1;
-            
-            // Update row UI (throttled: every 5 items or when done for that row)
-            let total_row = *row_totals.get(row_idx).unwrap_or(&1); // fallback to 1 to avoid div by zero/logic error
-            
-            if current_row % 5 == 0 || current_row == total_row {
-                 let _ = tx.send(UiMessage::RowUpdate(*row_idx as i32, format!("{}/{}", current_row, total_row), "Running".to_string(), "".to_string()));
-                 
-                 // If row finished, we could calculate size? 
-                 // Doing it here might be expensive if many threads hit this.
-                 // Maybe do it only at the very end of the row?
-                 // But parallel execution means we don't know "who" finishes the row last easily without checking equality
-                 if current_row == total_row {
-                     // Check if it was single file or folder
-                     // We don't have the original path here easily unless we look it up or pass it.
-                     // But we can just leave the final size update for later or skip it for now to avoid complexity in hot loop.
-                     // Re-reading the size happens in ItemFinished mostly.
-                     // Let's just update the status to "Done"
-                     // let _ = tx.send(UiMessage::RowUpdate(*row_idx as i32, format!("{}/{}", current_row, total_row), "Done".to_string(), "".to_string()));
-                 }
-            }
-        }
-        
-        // Throttled Global updates
-        if current_global % 20 == 0 || current_global == total_files {
-             let _ = tx.send(UiMessage::Progress(current_global, total_files));
-             let _ = tx.send(UiMessage::Status(format!("Processed {}/{} files...", current_global, total_files)));
+    // Process in parallel using std::thread::scope with Dynamic Load Balancing (Atomic Cursor)
+    let next_idx = AtomicUsize::new(0);
+    let tasks_len = tasks.len();
+
+    std::thread::scope(|s| {
+        for _ in 0..num_threads {
+            let processed_ref = &processed;
+            let success_ref = &success;
+            let failed_ref = &failed;
+            let row_counts_ref = &row_processed_counts;
+            let row_totals_ref = &row_totals;
+            let tx_clone = tx.clone();
+            let cancel_ref = &cancel;
+            let algo_copy = algo;
+            let next_idx_ref = &next_idx;
+            let tasks_ref = &tasks; // Reference to the full vector
+
+            s.spawn(move || {
+                loop {
+                    // Claim the next task index
+                    let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
+                    if i >= tasks_len {
+                        break; // No more tasks
+                    }
+                    
+                    if cancel_ref.load(Ordering::Relaxed) {
+                         break; 
+                    }
+
+                    let (file_path, action, row_idx) = &tasks_ref[i];
+                    
+                    let result = match action {
+                        BatchAction::Compress => compress_file(file_path, algo_copy).is_ok(),
+                        BatchAction::Decompress => uncompress_file(file_path).is_ok(),
+                    };
+                    
+                    if result {
+                        success_ref.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        failed_ref.fetch_add(1, Ordering::Relaxed);
+                    }
+                    
+                    // Global progress
+                    let current_global = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
+                    
+                    // Row progress
+                    if let Some(counter) = row_counts_ref.get(*row_idx) {
+                        let current_row = counter.fetch_add(1, Ordering::Relaxed) + 1;
+                        let total_row = *row_totals_ref.get(row_idx).unwrap_or(&1);
+                        
+                        // Update row UI (throttled)
+                        if current_row % 5 == 0 || current_row == total_row {
+                             let _ = tx_clone.send(UiMessage::RowUpdate(*row_idx as i32, format!("{}/{}", current_row, total_row), "Running".to_string(), "".to_string()));
+                        }
+                    }
+                    
+                    // Throttled Global updates
+                    if current_global % 20 == 0 || current_global == tasks_len as u64 {
+                         let _ = tx_clone.send(UiMessage::Progress(current_global, tasks_len as u64));
+                         let _ = tx_clone.send(UiMessage::Status(format!("Processed {}/{} files...", current_global, tasks_len)));
+                    }
+                }
+            });
         }
     });
     
@@ -1265,29 +1268,57 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
         let success_atomic = AtomicU64::new(0);
         let failed_atomic = AtomicU64::new(0);
         
-        tasks.par_iter().for_each(|file_path| {
-            if cancel.load(Ordering::Relaxed) {
-                 return;
-            }
-            
-            let ok = match action {
-                BatchAction::Compress => compress_file(file_path, algo).is_ok(),
-                BatchAction::Decompress => uncompress_file(file_path).is_ok(),
-            };
-            
-            if ok {
-                success_atomic.fetch_add(1, Ordering::Relaxed);
-            } else {
-                failed_atomic.fetch_add(1, Ordering::Relaxed);
-            }
-            
-            let current = processed_atomic.fetch_add(1, Ordering::Relaxed) + 1;
-            
-            // Send per-item progress updates every 5 files or when done
-            if current % 5 == 0 || current == total_files {
-                let progress_str = format!("{}/{}", current, total_files);
-                let _ = tx.send(UiMessage::RowUpdate(row, progress_str, "Running".to_string(), "".to_string()));
-                let _ = tx.send(UiMessage::Progress(current, total_files));
+        // Process folder in PARALLEL with Dynamic Load Balancing
+        let next_idx = AtomicUsize::new(0);
+        let tasks_len = tasks.len();
+        let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+
+        std::thread::scope(|s| {
+            for _ in 0..num_threads {
+                 let processed_ref = &processed_atomic;
+                 let success_ref = &success_atomic;
+                 let failed_ref = &failed_atomic;
+                 let cancel_ref = &cancel;
+                 let algo_copy = algo;
+                 let action_copy = action;
+                 let tx_clone = tx.clone();
+                 let next_idx_ref = &next_idx;
+                 let tasks_ref = &tasks;
+
+                 s.spawn(move || {
+                     loop {
+                        let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
+                        if i >= tasks_len {
+                            break;
+                        }
+                        
+                        if cancel_ref.load(Ordering::Relaxed) {
+                             break;
+                        }
+                        
+                        let file_path = &tasks_ref[i];
+                        
+                        let ok = match action_copy {
+                            BatchAction::Compress => compress_file(file_path, algo_copy).is_ok(),
+                            BatchAction::Decompress => uncompress_file(file_path).is_ok(),
+                        };
+                        
+                        if ok {
+                            success_ref.fetch_add(1, Ordering::Relaxed);
+                        } else {
+                            failed_ref.fetch_add(1, Ordering::Relaxed);
+                        }
+                         
+                        let current = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
+                        
+                        // Send per-item progress updates
+                        if current % 5 == 0 || current == tasks_len as u64 {
+                            let progress_str = format!("{}/{}", current, tasks_len);
+                            let _ = tx_clone.send(UiMessage::RowUpdate(row, progress_str, "Running".to_string(), "".to_string()));
+                            let _ = tx_clone.send(UiMessage::Progress(current, tasks_len as u64));
+                        }
+                     }
+                 });
             }
         });
         
