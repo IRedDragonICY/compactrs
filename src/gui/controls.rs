@@ -3,7 +3,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     HMENU,
     CreateWindowExW, SendMessageW, 
     WS_CHILD, WS_VISIBLE, WS_BORDER, WS_TABSTOP, WS_VSCROLL,
-    BS_PUSHBUTTON, CBS_DROPDOWNLIST, CBS_HASSTRINGS,
+    BS_PUSHBUTTON, BS_AUTOCHECKBOX, CBS_DROPDOWNLIST, CBS_HASSTRINGS,
 };
 use windows::Win32::UI::Controls::{
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_FULLROWSELECT, LVS_EX_DOUBLEBUFFER, LVS_REPORT, LVS_SHOWSELALWAYS,
@@ -30,6 +30,8 @@ pub const IDC_BTN_ADD_FILES: u16 = 114;
 pub const IDC_BTN_SETTINGS: u16 = 115;
 pub const IDC_BTN_ABOUT: u16 = 116;
 pub const IDC_BTN_OK: u16 = 117;
+pub const IDC_BTN_CONSOLE: u16 = 118;
+pub const IDC_CHK_FORCE: u16 = 119;
 
 #[allow(unused_imports)]
 use windows::Win32::UI::Controls::{PBS_SMOOTH, PBM_SETRANGE32, PBM_SETPOS, PROGRESS_CLASSW};
@@ -108,6 +110,25 @@ pub unsafe fn create_combobox(parent: HWND, x: i32, y: i32, w: i32, h: i32, id: 
             w!("COMBOBOX"),
             None,
             windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | WS_TABSTOP.0 | WS_VSCROLL.0 | CBS_DROPDOWNLIST as u32 | CBS_HASSTRINGS as u32),
+            x, y, w, h,
+            Some(parent),
+            Some(HMENU(id as isize as *mut _)),
+            Some(instance),
+            None
+        ).unwrap_or_default();
+        hwnd
+    }
+}
+
+pub unsafe fn create_checkbox(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND {
+    unsafe {
+        let module = GetModuleHandleW(None).unwrap();
+        let instance = HINSTANCE(module.0);
+        let hwnd = CreateWindowExW(
+            Default::default(),
+            w!("BUTTON"),
+            text,
+            windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | WS_TABSTOP.0 | BS_AUTOCHECKBOX as u32),
             x, y, w, h,
             Some(parent),
             Some(HMENU(id as isize as *mut _)),

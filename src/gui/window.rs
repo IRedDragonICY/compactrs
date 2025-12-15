@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND, SetWindowPos, SWP_NOZORDER,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT,
+    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK,
 };
 use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
@@ -25,9 +25,11 @@ use crate::gui::controls::{
     create_button, create_listview, create_combobox, create_progress_bar, IDC_COMBO_ALGO, 
     IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
+    IDC_BTN_CONSOLE, IDC_CHK_FORCE, create_checkbox,
 };
 use crate::gui::settings::show_settings_modal;
 use crate::gui::about::show_about_modal;
+use crate::gui::console::{show_console_window, append_log_msg};
 use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}};
@@ -40,10 +42,14 @@ use windows::Win32::UI::Controls::{
     LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES, LVM_GETHEADER,
     NM_CUSTOMDRAW, NMCUSTOMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, CDRF_NOTIFYITEMDRAW, CDRF_NEWFONT, NMHDR,
-    LVN_ITEMCHANGED,
+    LVN_ITEMCHANGED, BST_CHECKED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
+use crate::engine::wof::{WofAlgorithm, get_real_file_size, get_wof_algorithm};
+use crate::engine::worker::{
+    batch_process_worker, single_item_worker, 
+    calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm
+};
 use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
 
@@ -62,122 +68,7 @@ fn hi_word(l: u32) -> u16 {
 const WINDOW_CLASS_NAME: PCWSTR = w!("CompactRS_Class");
 const WINDOW_TITLE: PCWSTR = w!("CompactRS");
 
-/// Calculate total LOGICAL size of all files in a folder (uncompressed content size)
-/// This counts ALL files including hidden and .gitignored files
-fn calculate_folder_logical_size(path: &str) -> u64 {
-    WalkBuilder::new(path)
-        .hidden(false)          // Include hidden files
-        .git_ignore(false)      // Don't respect .gitignore
-        .git_global(false)      // Don't respect global gitignore
-        .git_exclude(false)     // Don't respect .git/info/exclude
-        .ignore(false)          // Don't respect .ignore files
-        .build()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-        .filter_map(|e| std::fs::metadata(e.path()).ok())
-        .map(|m| m.len())
-        .sum()
-}
-
-/// Calculate total DISK size of all files in a folder (actual space used, respects compression)
-/// Uses GetCompressedFileSizeW to get real disk usage for WOF-compressed files
-fn calculate_folder_disk_size(path: &str) -> u64 {
-    WalkBuilder::new(path)
-        .hidden(false)          // Include hidden files
-        .git_ignore(false)      // Don't respect .gitignore
-        .git_global(false)      // Don't respect global gitignore
-        .git_exclude(false)     // Don't respect .git/info/exclude
-        .ignore(false)          // Don't respect .ignore files
-        .build()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-        .map(|e| get_real_file_size(&e.path().to_string_lossy()))
-        .sum()
-}
-
-/// Check if a folder has any WOF-compressed files
-/// Returns true if disk size < logical size (meaning compression is active)
-fn is_folder_compressed(logical_size: u64, disk_size: u64) -> bool {
-    // If disk size is noticeably smaller, folder has compressed files
-    // Use a small threshold to account for rounding
-    disk_size < logical_size && (logical_size - disk_size) > 1024
-}
-
-/// Detect the predominant WOF algorithm used in a folder
-/// Samples up to 10 files to determine the algorithm
-fn detect_folder_algorithm(path: &str) -> Option<WofAlgorithm> {
-    let mut algo_counts = [0u32; 4]; // Xpress4K, Lzx, Xpress8K, Xpress16K
-    let mut sampled = 0;
-    
-    for result in WalkBuilder::new(path)
-        .hidden(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .ignore(false)
-        .build()
-    {
-        if sampled >= 20 { break; } // Sample enough files
-        
-        if let Ok(entry) = result {
-            if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                let file_path = entry.path().to_string_lossy().to_string();
-                if let Some(algo) = get_wof_algorithm(&file_path) {
-                    algo_counts[algo as usize] += 1;
-                    sampled += 1;
-                }
-            }
-        }
-    }
-    
-    // Find the most common algorithm
-    let max_idx = algo_counts.iter().enumerate().max_by_key(|(_, v)| *v).map(|(i, _)| i);
-    
-    if let Some(idx) = max_idx {
-        if algo_counts[idx] > 0 {
-            return match idx {
-                0 => Some(WofAlgorithm::Xpress4K),
-                1 => Some(WofAlgorithm::Lzx),
-                2 => Some(WofAlgorithm::Xpress8K),
-                3 => Some(WofAlgorithm::Xpress16K),
-                _ => None,
-            };
-        }
-    }
-    None
-}
-
-// ===== PATH-AWARE FUNCTIONS (work for both files and folders) =====
-
-/// Calculate logical size for a path (file or folder)
-fn calculate_path_logical_size(path: &str) -> u64 {
-    let p = std::path::Path::new(path);
-    if p.is_file() {
-        std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-    } else {
-        calculate_folder_logical_size(path)
-    }
-}
-
-/// Calculate disk size for a path (file or folder)
-fn calculate_path_disk_size(path: &str) -> u64 {
-    let p = std::path::Path::new(path);
-    if p.is_file() {
-        get_real_file_size(path)
-    } else {
-        calculate_folder_disk_size(path)
-    }
-}
-
-/// Detect WOF algorithm for a path (file or folder)  
-fn detect_path_algorithm(path: &str) -> Option<WofAlgorithm> {
-    let p = std::path::Path::new(path);
-    if p.is_file() {
-        get_wof_algorithm(path)
-    } else {
-        detect_folder_algorithm(path)
-    }
-}
+// ===== PATH-AWARE FUNCTIONS moved to engine::worker =====
 
 #[allow(non_snake_case)]
 unsafe fn allow_dark_mode() {
@@ -324,12 +215,17 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let h_add_folder = create_button(hwnd, w!("Folder"), 85, btn_y, 65, btn_h, IDC_BTN_ADD_FOLDER);
                 let h_remove = create_button(hwnd, w!("Remove"), 160, btn_y, 70, btn_h, IDC_BTN_REMOVE);
                 let h_combo = create_combobox(hwnd, 240, btn_y, 110, 200, IDC_COMBO_ALGO);
-                let h_process = create_button(hwnd, w!("Process All"), 360, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL);
-                let h_cancel = create_button(hwnd, w!("Cancel"), 470, btn_y, 80, btn_h, IDC_BTN_CANCEL);
+                // Force Checkbox
+                let h_force = create_checkbox(hwnd, w!("Force"), 360, btn_y, 60, btn_h, IDC_CHK_FORCE);
+                let h_process = create_button(hwnd, w!("Process All"), 430, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL);
+                let h_cancel = create_button(hwnd, w!("Cancel"), 540, btn_y, 80, btn_h, IDC_BTN_CANCEL);
                 
-                // Settings button (created but positioned later)
+                
+                // Settings/About items
                 let h_settings = create_button(hwnd, w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS); // Gear icon
                 let h_about = create_button(hwnd, w!("?"), 0, 0, 30, 25, IDC_BTN_ABOUT); // About icon
+                // Console button (using a simple ">_" or similar text)
+                let h_console = create_button(hwnd, w!(">_"), 0, 0, 30, 25, IDC_BTN_CONSOLE);
 
                 let _ = h_add_files; // Used via IDC_BTN_ADD_FILES
                 EnableWindow(h_cancel, false);
@@ -352,6 +248,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     btn_cancel: h_cancel,
                     btn_settings: h_settings,
                     btn_about: h_about,
+                    btn_console: h_console,
+                    btn_force: h_force,
                 });
 
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -526,8 +424,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         st.batch_items.get(idx).map(|item| (item.path.clone(), item.action, idx))
                                     }).collect();
                                     
+                                    let force = st.force_compress; // Capture force flag
+
                                     thread::spawn(move || {
-                                        batch_process_worker(items, algo, tx, cancel);
+                                        batch_process_worker(items, algo, tx, cancel, force);
                                     });
                                 }
                             }
@@ -547,13 +447,37 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     IDC_BTN_SETTINGS => {
                         if let Some(st) = get_state() {
                             let theme = st.theme;
-                            show_settings_modal(hwnd, theme);
+                            let is_dark = is_app_dark_mode(hwnd);
+                            // Modal will block until closed
+                            if let Some(new_theme) = show_settings_modal(hwnd, theme, is_dark) {
+                                st.theme = new_theme;
+                                // Apply immediately
+                                apply_theme(hwnd, new_theme);
+                            }
                         }
                     },
                     
                     IDC_BTN_ABOUT => {
-                        show_about_modal(hwnd);
+                        let is_dark = is_app_dark_mode(hwnd);
+                        show_about_modal(hwnd, is_dark);
                     },
+
+                    IDC_BTN_CONSOLE => {
+                        if let Some(app_state) = (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState).as_mut() {
+                             let is_dark = is_app_dark_mode(hwnd);
+                             show_console_window(hwnd, &app_state.logs, is_dark);
+                        }
+                    },
+
+                    IDC_CHK_FORCE => {
+                         if let Some(st) = get_state() {
+                             // LPARAM is the HWND of the control in WM_COMMAND
+                             let hwnd_ctl = HWND(lparam.0 as *mut _);
+                             let state = SendMessageW(hwnd_ctl, BM_GETCHECK, None, None);
+                             st.force_compress = state == LRESULT(BST_CHECKED.0 as isize);
+                         }
+                    },
+                    
                     
                     _ => {}
                 }
@@ -572,11 +496,38 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             SendMessageW(ctrls.progress_bar, PBM_SETPOS, Some(WPARAM(cur as usize)), Some(LPARAM(0)));
                                         }
                                     },
-                                    UiMessage::Status(text) | UiMessage::Log(text) | UiMessage::Error(text) => {
-                                        if let Some(ctrls) = &st.controls {
-                                            let wstr = windows::core::HSTRING::from(&text);
-                                            SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                    UiMessage::Status(text) => {
+                                        if let Some(st) = get_state() {
+                                            if let Some(ctrls) = &st.controls {
+                                                let wstr = windows::core::HSTRING::from(&text);
+                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                            }
                                         }
+                                    },
+                                    UiMessage::Log(text) => {
+                                        if let Some(st) = get_state() {
+                                            st.logs.push(text.clone());
+                                            append_log_msg(&text);
+                                            
+                                            // Also update status text? Optional.
+                                            if let Some(ctrls) = &st.controls {
+                                                let wstr = windows::core::HSTRING::from(&text);
+                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                            }
+                                        }
+                                    },
+                                    UiMessage::Error(text) => {
+                                         if let Some(st) = get_state() {
+                                             let full_msg = format!("ERROR: {}", text);
+                                             st.logs.push(full_msg.clone());
+                                             append_log_msg(&full_msg);
+                                             
+                                             // Update status text
+                                             if let Some(ctrls) = &st.controls {
+                                                let wstr = windows::core::HSTRING::from(&text);
+                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                             }
+                                         }
                                     },
                                     UiMessage::Finished => {
                                         if let Some(ctrls) = &st.controls {
@@ -660,9 +611,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let list_height = height - header_height - progress_height - btn_height - (padding * 5);
                 
                 // Resize header
-                // Resize header - leave space for settings (30px) and about (30px) buttons
+                // Resize header - leave space for settings (30), about (30), console (30) + spacing
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_STATIC_TEXT.into()) {
-                    SetWindowPos(h, None, padding, padding, width - padding - 80, header_height, SWP_NOZORDER);
+                    // Previous width: width - padding - 80 (was overlapping console)
+                    // New width: width - padding - 120 (leaves space for 3 buttons + gaps)
+                    SetWindowPos(h, None, padding, padding, width - padding - 120, header_height, SWP_NOZORDER);
                 }
                 
                 // Position Settings button (Rightmost)
@@ -673,6 +626,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 // Position About button (Left of Settings)
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_ABOUT.into()) {
                      SetWindowPos(h, None, width - padding - 65, padding, 30, header_height, SWP_NOZORDER);
+                }
+
+                // Position Console button (Left of About)
+                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_CONSOLE.into()) {
+                     SetWindowPos(h, None, width - padding - 100, padding, 30, header_height, SWP_NOZORDER);
                 }
                 
                 // Resize ListView
@@ -705,13 +663,17 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO.into()) {
                     SetWindowPos(h, None, padding + 190, btn_y, 110, btn_height, SWP_NOZORDER);
                 }
+                // Force Checkbox
+                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_CHK_FORCE.into()) {
+                    SetWindowPos(h, None, padding + 310, btn_y, 60, btn_height, SWP_NOZORDER);
+                }
                 // Process All button
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_PROCESS_ALL.into()) {
-                    SetWindowPos(h, None, padding + 310, btn_y, 90, btn_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding + 380, btn_y, 90, btn_height, SWP_NOZORDER);
                 }
                 // Cancel button
                 if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_CANCEL.into()) {
-                    SetWindowPos(h, None, padding + 410, btn_y, 70, btn_height, SWP_NOZORDER);
+                    SetWindowPos(h, None, padding + 480, btn_y, 70, btn_height, SWP_NOZORDER);
                 }
                 
                 LRESULT(0)
@@ -861,9 +823,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                                 update_listview_item(ctrls.list_view, row, 7, "■ Stop");
                                             }
                                             
+                                            let force = st.force_compress; // Capture force flag
+                                            
                                             let row_for_thread = row;
                                             thread::spawn(move || {
-                                                single_item_worker(path, algo, action, row_for_thread, tx, token);
+                                                single_item_worker(path, algo, action, row_for_thread, tx, token, force);
                                             });
                                         }
                                     }
@@ -1039,337 +1003,6 @@ unsafe fn update_listview_item(hwnd: HWND, row: i32, col: i32, text: &str) {
         ..Default::default()
     };
     SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-}
-
-fn batch_process_worker(items: Vec<(String, BatchAction, usize)>, algo: WofAlgorithm, tx: Sender<UiMessage>, cancel: Arc<AtomicBool>) {
-    // 1. Discovery Phase
-    let _ = tx.send(UiMessage::Status("Discovering files...".to_string()));
-    
-    // Store tasks as (path, action, row_index)
-    let mut tasks: Vec<(String, BatchAction, usize)> = Vec::new();
-    // Track total files per row (row_index -> count)
-    let mut row_totals: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
-    
-    for (path, action, row_idx) in &items {
-        if cancel.load(Ordering::Relaxed) { break; }
-        
-        let mut row_count = 0;
-        
-        // If it's a file, just add it
-        if std::path::Path::new(path).is_file() {
-            tasks.push((path.clone(), *action, *row_idx));
-            row_count = 1;
-        } else {
-            // If it's a directory, walk it
-            for result in WalkBuilder::new(path)
-                .hidden(false)
-                .git_ignore(false)
-                .git_global(false)
-                .git_exclude(false)
-                .ignore(false)
-                .build() 
-            {
-                if let Ok(entry) = result {
-                    if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                        tasks.push((entry.path().to_string_lossy().to_string(), *action, *row_idx));
-                        row_count += 1;
-                    }
-                }
-            }
-        }
-        
-        row_totals.insert(*row_idx, row_count);
-        // Initialize row progress
-        let _ = tx.send(UiMessage::RowUpdate(*row_idx as i32, format!("0/{}", row_count), "Running".to_string(), "".to_string()));
-    }
-    
-    let total_files = tasks.len() as u64;
-    let _ = tx.send(UiMessage::Progress(0, total_files));
-    let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let _ = tx.send(UiMessage::Status(format!("Processing {} files with {} threads...", total_files, num_threads)));
-    
-    if total_files == 0 {
-        let _ = tx.send(UiMessage::Status("No files found to process.".to_string()));
-        let _ = tx.send(UiMessage::Finished);
-        return;
-    }
-
-    // 2. Parallel Processing Phase
-    let processed = AtomicU64::new(0);
-    let success = AtomicU64::new(0);
-    let failed = AtomicU64::new(0);
-    
-    // Per-row processed counters.
-    let max_row = items.iter().map(|(_, _, r)| *r).max().unwrap_or(0);
-    let row_processed_counts: Vec<AtomicU64> = (0..=max_row).map(|_| AtomicU64::new(0)).collect();
-    
-    // Process in parallel using std::thread::scope with Dynamic Load Balancing (Atomic Cursor)
-    let next_idx = AtomicUsize::new(0);
-    let tasks_len = tasks.len();
-
-    std::thread::scope(|s| {
-        for _ in 0..num_threads {
-            let processed_ref = &processed;
-            let success_ref = &success;
-            let failed_ref = &failed;
-            let row_counts_ref = &row_processed_counts;
-            let row_totals_ref = &row_totals;
-            let tx_clone = tx.clone();
-            let cancel_ref = &cancel;
-            let algo_copy = algo;
-            let next_idx_ref = &next_idx;
-            let tasks_ref = &tasks; // Reference to the full vector
-
-            s.spawn(move || {
-                loop {
-                    // Claim the next task index
-                    let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
-                    if i >= tasks_len {
-                        break; // No more tasks
-                    }
-                    
-                    if cancel_ref.load(Ordering::Relaxed) {
-                         break; 
-                    }
-
-                    let (file_path, action, row_idx) = &tasks_ref[i];
-                    
-                    let result = match action {
-                        BatchAction::Compress => compress_file(file_path, algo_copy).is_ok(),
-                        BatchAction::Decompress => uncompress_file(file_path).is_ok(),
-                    };
-                    
-                    if result {
-                        success_ref.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        failed_ref.fetch_add(1, Ordering::Relaxed);
-                    }
-                    
-                    // Global progress
-                    let current_global = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
-                    
-                    // Row progress
-                    if let Some(counter) = row_counts_ref.get(*row_idx) {
-                        let current_row = counter.fetch_add(1, Ordering::Relaxed) + 1;
-                        let total_row = *row_totals_ref.get(row_idx).unwrap_or(&1);
-                        
-                        // Update row UI (throttled)
-                        if current_row % 5 == 0 || current_row == total_row {
-                             let _ = tx_clone.send(UiMessage::RowUpdate(*row_idx as i32, format!("{}/{}", current_row, total_row), "Running".to_string(), "".to_string()));
-                        }
-                    }
-                    
-                    // Throttled Global updates
-                    if current_global % 20 == 0 || current_global == tasks_len as u64 {
-                         let _ = tx_clone.send(UiMessage::Progress(current_global, tasks_len as u64));
-                         let _ = tx_clone.send(UiMessage::Status(format!("Processed {}/{} files...", current_global, tasks_len)));
-                    }
-                }
-            });
-        }
-    });
-    
-    if cancel.load(Ordering::Relaxed) {
-        let _ = tx.send(UiMessage::Status("Batch processing cancelled.".to_string()));
-         let _ = tx.send(UiMessage::Finished);
-        return;
-    }
-
-    // 3. Final Report & Cleanup
-    // Update all rows to "Done" and calculate sizes
-    for (path, _, row_idx) in items {
-        let size_after = if std::path::Path::new(&path).is_file() {
-            calculate_path_disk_size(&path)
-        } else {
-            calculate_folder_disk_size(&path)
-        };
-        let size_str = format_size(size_after, BINARY);
-        
-        // Check if there were failed items for this row?
-        // We tracked global failures, but not per-row failures. 
-        // For now just mark as Done.
-        let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, "Done".to_string(), size_str));
-    }
-
-    let s = success.load(Ordering::Relaxed);
-    let f = failed.load(Ordering::Relaxed);
-    let p = processed.load(Ordering::Relaxed);
-    
-    let report = format!("Batch complete! Processed: {} files | Success: {} | Failed: {}", p, s, f);
-    
-    let _ = tx.send(UiMessage::Log(report.clone()));
-    let _ = tx.send(UiMessage::Status(report));
-    let _ = tx.send(UiMessage::Progress(total_files, total_files));
-    let _ = tx.send(UiMessage::Finished);
-}
-
-/// Worker to process a single file or folder with its own algorithm setting
-fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row: i32, tx: Sender<UiMessage>, cancel: Arc<AtomicBool>) {
-    let mut total_files = 0u64;
-    let mut processed = 0u64;
-    let mut success = 0u64;
-    let mut failed = 0u64;
-    
-    let is_single_file = std::path::Path::new(&path).is_file();
-    
-    // Count files first
-    if is_single_file {
-        total_files = 1;
-    } else {
-        for result in WalkBuilder::new(&path)
-            .hidden(false)
-            .git_ignore(false)
-            .git_global(false)
-            .git_exclude(false)
-            .ignore(false)
-            .build() 
-        {
-            if let Ok(entry) = result {
-                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                    total_files += 1;
-                }
-            }
-        }
-    }
-    
-    let _ = tx.send(UiMessage::Progress(0, total_files));
-    let action_str = match action {
-        BatchAction::Compress => "Compressing",
-        BatchAction::Decompress => "Decompressing",
-    };
-    let _ = tx.send(UiMessage::Status(format!("{} {} ({} files)...", action_str, path, total_files)));
-    
-    // Send initial row update
-    let _ = tx.send(UiMessage::RowUpdate(row, format!("0/{}", total_files), "Running".to_string(), "".to_string()));
-    
-    if is_single_file {
-        // Process single file directly
-        if cancel.load(Ordering::Relaxed) {
-            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
-            let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
-            let _ = tx.send(UiMessage::Finished);
-            return;
-        }
-        
-        let ok = match action {
-            BatchAction::Compress => compress_file(&path, algo).is_ok(),
-            BatchAction::Decompress => uncompress_file(&path).is_ok(),
-        };
-        
-        if ok {
-            success += 1;
-        } else {
-            failed += 1;
-        }
-
-        processed += 1;
-        let _ = tx.send(UiMessage::RowUpdate(row, "1/1".to_string(), "Running".to_string(), "".to_string()));
-        let _ = tx.send(UiMessage::Progress(1, 1));
-    } else {
-        // Process folder in PARALLEL
-        let mut tasks: Vec<String> = Vec::new();
-        for result in WalkBuilder::new(&path)
-            .hidden(false)
-            .git_ignore(false)
-            .git_global(false)
-            .git_exclude(false)
-            .ignore(false)
-            .build() 
-        {
-            if let Ok(entry) = result {
-                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                     tasks.push(entry.path().to_string_lossy().to_string());
-                }
-            }
-        }
-        
-        total_files = tasks.len() as u64;
-        
-        let processed_atomic = AtomicU64::new(0);
-        let success_atomic = AtomicU64::new(0);
-        let failed_atomic = AtomicU64::new(0);
-        
-        // Process folder in PARALLEL with Dynamic Load Balancing
-        let next_idx = AtomicUsize::new(0);
-        let tasks_len = tasks.len();
-        let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-
-        std::thread::scope(|s| {
-            for _ in 0..num_threads {
-                 let processed_ref = &processed_atomic;
-                 let success_ref = &success_atomic;
-                 let failed_ref = &failed_atomic;
-                 let cancel_ref = &cancel;
-                 let algo_copy = algo;
-                 let action_copy = action;
-                 let tx_clone = tx.clone();
-                 let next_idx_ref = &next_idx;
-                 let tasks_ref = &tasks;
-
-                 s.spawn(move || {
-                     loop {
-                        let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
-                        if i >= tasks_len {
-                            break;
-                        }
-                        
-                        if cancel_ref.load(Ordering::Relaxed) {
-                             break;
-                        }
-                        
-                        let file_path = &tasks_ref[i];
-                        
-                        let ok = match action_copy {
-                            BatchAction::Compress => compress_file(file_path, algo_copy).is_ok(),
-                            BatchAction::Decompress => uncompress_file(file_path).is_ok(),
-                        };
-                        
-                        if ok {
-                            success_ref.fetch_add(1, Ordering::Relaxed);
-                        } else {
-                            failed_ref.fetch_add(1, Ordering::Relaxed);
-                        }
-                         
-                        let current = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
-                        
-                        // Send per-item progress updates
-                        if current % 5 == 0 || current == tasks_len as u64 {
-                            let progress_str = format!("{}/{}", current, tasks_len);
-                            let _ = tx_clone.send(UiMessage::RowUpdate(row, progress_str, "Running".to_string(), "".to_string()));
-                            let _ = tx_clone.send(UiMessage::Progress(current, tasks_len as u64));
-                        }
-                     }
-                 });
-            }
-        });
-        
-        if cancel.load(Ordering::Relaxed) {
-            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
-            let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
-            let _ = tx.send(UiMessage::Finished);
-            return;
-        }
-        
-        // Sync back to local variables for the final report
-        processed += processed_atomic.load(Ordering::Relaxed);
-        success = success_atomic.load(Ordering::Relaxed);
-        failed = failed_atomic.load(Ordering::Relaxed);
-    }
-    
-    // Calculate size after
-    let size_after = calculate_folder_disk_size(&path);
-    let size_after_str = format_size(size_after, BINARY);
-    
-    // Send final status with disk size for On Disk column
-    let status = if failed > 0 { format!("Done+{} err", failed) } else { "Done".to_string() };
-    let _ = tx.send(UiMessage::ItemFinished(row, status, size_after_str));
-    
-    let report = format!("Done! {} files | Success: {} | Failed: {}", 
-        processed, success, failed);
-    
-    let _ = tx.send(UiMessage::Status(report));
-    let _ = tx.send(UiMessage::Progress(total_files, total_files));
-    let _ = tx.send(UiMessage::Finished);
 }
 
 /// Pick files (multi-select)
@@ -1663,3 +1296,21 @@ fn get_dark_brush() -> HBRUSH {
     HBRUSH(handle as *mut _)
 }
 
+unsafe fn apply_theme(hwnd: HWND, theme: AppTheme) {
+    let is_dark = match theme {
+        AppTheme::System => is_system_dark_mode_preference(),
+        AppTheme::Dark => true,
+        AppTheme::Light => false,
+    };
+    
+    let dark_mode: u32 = if is_dark { 1 } else { 0 };
+    let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+        hwnd,
+        windows::Win32::Graphics::Dwm::DWMWA_USE_IMMERSIVE_DARK_MODE,
+        &dark_mode as *const u32 as *const _,
+        4
+    );
+    
+    // Force redraw
+    windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, true);
+}

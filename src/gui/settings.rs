@@ -9,9 +9,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BS_AUTORADIOBUTTON, BM_SETCHECK,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
+    FindWindowW,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetActiveWindow};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Controls::SetWindowTheme;
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkColor, CreateSolidBrush, HDC, DeleteObject, HGDIOBJ, InvalidateRect, FillRect, SetBkMode, TRANSPARENT};
+use windows::Win32::Foundation::COLORREF;
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
 use crate::gui::state::AppTheme;
 use crate::gui::controls::create_button;
 
@@ -29,6 +35,18 @@ const IDC_BTN_CANCEL: u16 = 2006;
 struct SettingsState {
     theme: AppTheme,
     result: Option<AppTheme>,
+    is_dark: bool,
+    dark_brush: Option<HBRUSH>,
+}
+
+impl Drop for SettingsState {
+    fn drop(&mut self) {
+        if let Some(brush) = self.dark_brush {
+            unsafe {
+                DeleteObject(HGDIOBJ(brush.0));
+            }
+        }
+    }
 }
 
 pub unsafe fn show_settings(parent: HWND, current_theme: AppTheme) -> Option<AppTheme> {
@@ -62,6 +80,8 @@ pub unsafe fn show_settings(parent: HWND, current_theme: AppTheme) -> Option<App
         let state = Box::new(SettingsState {
             theme: current_theme,
             result: None,
+            is_dark: false, // Default for this unused path
+            dark_brush: None,
         });
 
         let _hwnd = CreateWindowExW(
@@ -120,7 +140,7 @@ pub unsafe fn show_settings(parent: HWND, current_theme: AppTheme) -> Option<App
 }
 
 // Redefining proper function with data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Option<AppTheme> {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool) -> Option<AppTheme> {
     unsafe {
         let instance = GetModuleHandleW(None).unwrap_or_default();
         
@@ -130,7 +150,19 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Opti
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             lpszClassName: SETTINGS_CLASS_NAME,
-            hbrBackground: windows::Win32::Graphics::Gdi::HBRUSH(windows::Win32::Graphics::Gdi::COLOR_WINDOW.0 as isize as *mut _),
+            hbrBackground: HBRUSH(if is_dark {
+                // Use a dark brush initially if possible, but standard is COLOR_WINDOW
+                // We'll rely on WM_CTLCOLORSTATIC to paint background
+                // But for the main window background (if any exposed), we want dark.
+                // 0x1E1E1E is 30,30,30. 
+                // Creating a global brush just for class registration is tricky without leaks.
+                // Let's stick to COLOR_WINDOW and rely on DWM/Painting.
+                // Actually, for pure dark mode, we often want a dark background class brush.
+                // But standard practice is handle WM_ERASEBKGND or WM_CTLCOLOR.
+                COLOR_WINDOW.0 + 1
+            } else {
+                 COLOR_WINDOW.0 + 1
+            } as isize as *mut _),
             ..Default::default()
         };
         RegisterClassW(&wc);
@@ -147,6 +179,8 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Opti
         let mut state = SettingsState {
             theme: current_theme,
             result: None,
+            is_dark,
+            dark_brush: None,
         };
 
         let _hwnd = CreateWindowExW(
@@ -161,7 +195,8 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Opti
             Some(&mut state as *mut _ as *mut _),
         ).unwrap_or_default();
 
-        EnableWindow(parent, false);
+        // Non-modal: DON'T disable parent window
+        // EnableWindow(parent, false);
         
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -169,7 +204,8 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Opti
             DispatchMessageW(&msg);
         }
         
-        EnableWindow(parent, true);
+        // Non-modal: DON'T re-enable parent window
+        // EnableWindow(parent, true);
         
         state.result
     }
@@ -177,21 +213,69 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme) -> Opti
 
 
 unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
-    let get_state = || {
+    let mut get_state = || {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
         if ptr == 0 { None } else { Some(&mut *(ptr as *mut SettingsState)) }
     };
 
     match msg {
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+            if let Some(st) = get_state() {
+                if st.is_dark {
+                    let hdc = HDC(wparam.0 as *mut _);
+                    SetTextColor(hdc, COLORREF(0x00FFFFFF)); // White text
+                    SetBkMode(hdc, TRANSPARENT);   // Transparent background for text
+                    
+                    let brush = if let Some(b) = st.dark_brush {
+                        b
+                    } else {
+                        let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
+                        st.dark_brush = Some(new_brush);
+                        new_brush
+                    };
+                    return LRESULT(brush.0 as isize);
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+        WM_ERASEBKGND => {
+            if let Some(st) = get_state() {
+                if st.is_dark {
+                    let hdc = HDC(wparam.0 as *mut _);
+                    let mut rc = windows::Win32::Foundation::RECT::default();
+                    GetClientRect(hwnd, &mut rc);
+                    
+                    let brush = if let Some(b) = st.dark_brush {
+                        b
+                    } else {
+                        let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
+                        st.dark_brush = Some(new_brush);
+                        new_brush
+                    };
+                    FillRect(hdc, &rc, brush);
+                    return LRESULT(1); // We handled it
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
         WM_CREATE => {
             let createstruct = &*(lparam.0 as *const windows::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
             let state_ptr = createstruct.lpCreateParams as *mut SettingsState;
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
             
+            // Apply DWM title bar color (must always set, not just for dark)
+            let dark_mode: u32 = if let Some(st) = state_ptr.as_ref() { if st.is_dark { 1 } else { 0 } } else { 0 };
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                &dark_mode as *const u32 as *const _,
+                4
+            );
+            
             let instance = GetModuleHandleW(None).unwrap_or_default();
             
             // Group Box
-            CreateWindowExW(
+            let grp = CreateWindowExW(
                 Default::default(),
                 w!("BUTTON"),
                 w!("App Theme"),
@@ -201,10 +285,19 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 Some(windows::Win32::UI::WindowsAndMessaging::HMENU(IDC_GRP_THEME as isize as *mut _)),
                 Some(instance.into()),
                 None
-            );
+            ).unwrap_or_default();
+            
+            // Apply dark theme to group box - disable visual styles to allow WM_CTLCOLORSTATIC
+            if let Some(st) = state_ptr.as_ref() {
+                if st.is_dark {
+                    let _ = SetWindowTheme(grp, w!(""), w!(""));
+                }
+            }
 
             // Radio Buttons
+            let is_dark_mode = if let Some(st) = state_ptr.as_ref() { st.is_dark } else { false };
             let create_radio = |text: PCWSTR, id: u16, y: i32, checked: bool| {
+                let instance = GetModuleHandleW(None).unwrap_or_default();
                  let h = CreateWindowExW(
                     Default::default(),
                     w!("BUTTON"),
@@ -219,6 +312,10 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 if checked {
                     SendMessageW(h, BM_SETCHECK, Some(WPARAM(1)), None);
                 }
+                // Apply dark theme to radio button - disable visual styles for WM_CTLCOLORSTATIC
+                if is_dark_mode {
+                    let _ = SetWindowTheme(h, w!(""), w!(""));
+                }
             };
             
             // Determine initial check
@@ -229,7 +326,10 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             create_radio(w!("Light Mode"), IDC_RADIO_LIGHT, 100, theme == AppTheme::Light);
             
             // Buttons
-            create_button(hwnd, w!("Close"), 110, 170, 80, 25, IDC_BTN_CANCEL); // Centered Close button
+            let close_btn = create_button(hwnd, w!("Close"), 110, 170, 80, 25, IDC_BTN_CANCEL);
+            if is_dark_mode {
+                let _ = SetWindowTheme(close_btn, w!(""), w!(""));
+            }
 
             LRESULT(0)
         },
@@ -248,11 +348,63 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              _ => AppTheme::System,
                          };
                          
-                         // Update local state
+                         // Determine if new theme is dark
+                         let new_is_dark = match theme {
+                             AppTheme::Dark => true,
+                             AppTheme::Light => false,
+                             AppTheme::System => {
+                                 // Check system preference
+                                 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegOpenKeyExW, RegQueryValueExW, KEY_READ, HKEY};
+                                 let mut h_key = HKEY::default();
+                                 let mut is_dark = false;
+                                 if RegOpenKeyExW(
+                                     HKEY_CURRENT_USER,
+                                     w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+                                     Some(0),
+                                     KEY_READ,
+                                     &mut h_key
+                                 ).is_ok() {
+                                     let mut buffer = [0u8; 4];
+                                     let mut size = 4u32;
+                                     if RegQueryValueExW(
+                                         h_key, 
+                                         w!("AppsUseLightTheme"), 
+                                         None, 
+                                         None, 
+                                         Some(buffer.as_mut_ptr()), 
+                                         Some(&mut size)
+                                     ).is_ok() {
+                                         let val = u32::from_le_bytes(buffer);
+                                         is_dark = val == 0;
+                                     }
+                                 }
+                                 is_dark
+                             }
+                         };
+                         
+                         // Update local state including is_dark
                          if let Some(st) = get_state() {
                              st.theme = theme;
                              st.result = Some(theme);
+                             st.is_dark = new_is_dark;
+                             
+                             // Delete old brush if theme changed
+                             if let Some(brush) = st.dark_brush.take() {
+                                 DeleteObject(HGDIOBJ(brush.0));
+                             }
                          }
+                         
+                         // Update Settings window title bar
+                         let dark_mode: u32 = if new_is_dark { 1 } else { 0 };
+                         let _ = DwmSetWindowAttribute(
+                             hwnd,
+                             DWMWA_USE_IMMERSIVE_DARK_MODE,
+                             &dark_mode as *const u32 as *const _,
+                             4
+                         );
+                         
+                         // Repaint entire window
+                         InvalidateRect(Some(hwnd), None, true);
                          
                          // Notify Parent Immediately (WM_APP + 1)
                          if let Ok(parent) = GetParent(hwnd) {
@@ -263,13 +415,30 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              };
                              SendMessageW(parent, 0x8000 + 1, Some(WPARAM(theme_val)), None);
                          }
+                         
+                         // Broadcast to About window if open (WM_APP + 2)
+                         if let Ok(about_hwnd) = FindWindowW(w!("CompactRS_About"), None) {
+                             if !about_hwnd.is_invalid() {
+                                 let is_dark_val = if new_is_dark { 1 } else { 0 };
+                                 SendMessageW(about_hwnd, 0x8000 + 2, Some(WPARAM(is_dark_val)), None);
+                             }
+                         }
+                         
+                         // Broadcast to Console window if open (WM_APP + 2)
+                         if let Ok(console_hwnd) = FindWindowW(w!("CompactRS_Console"), None) {
+                             if !console_hwnd.is_invalid() {
+                                 let is_dark_val = if new_is_dark { 1 } else { 0 };
+                                 SendMessageW(console_hwnd, 0x8000 + 2, Some(WPARAM(is_dark_val)), None);
+                             }
+                         }
                      }
                  },
                  IDC_BTN_CANCEL => {
-                     if let Ok(parent) = GetParent(hwnd) {
-                         let _ = EnableWindow(parent, true);
-                         SetActiveWindow(parent);
-                     }
+                     // Non-modal: No need to re-enable parent
+                     // if let Ok(parent) = GetParent(hwnd) {
+                     //     let _ = EnableWindow(parent, true);
+                     //     SetActiveWindow(parent);
+                     // }
                      DestroyWindow(hwnd);
                  },
                  _ => {}
@@ -278,10 +447,11 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
         },
         
         WM_CLOSE => {
-            if let Ok(parent) = GetParent(hwnd) {
-                let _ = EnableWindow(parent, true);
-                SetActiveWindow(parent);
-            }
+            // Non-modal: No need to re-enable parent
+            // if let Ok(parent) = GetParent(hwnd) {
+            //     let _ = EnableWindow(parent, true);
+            //     SetActiveWindow(parent);
+            // }
             DestroyWindow(hwnd);
             LRESULT(0)
         },

@@ -100,6 +100,8 @@ pub struct Controls {
     pub btn_cancel: HWND,
     pub btn_settings: HWND,
     pub btn_about: HWND,
+    pub btn_console: HWND,
+    pub btn_force: HWND,
 }
 
 /// Application state
@@ -118,7 +120,13 @@ pub struct AppState {
     pub cancel_flag: Arc<AtomicBool>,
     
     // Settings
+    // Settings
     pub theme: AppTheme,
+    
+    // Console
+    pub logs: Vec<String>,
+    pub console_hwnd: Option<HWND>,
+    pub force_compress: bool,
 }
 
 impl AppState {
@@ -133,6 +141,9 @@ impl AppState {
             rx,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             theme: AppTheme::default(),
+            logs: Vec::new(),
+            console_hwnd: None,
+            force_compress: false,
         }
     }
     
