@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
-use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, HKEY};
+
 use crate::gui::controls::{
     create_button_themed, create_listview, create_combobox, create_progress_bar, 
     apply_button_theme, apply_combobox_theme,
@@ -227,7 +227,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let btn_y = 460;
                 
                 // Check if dark mode for initial theme application
-                let is_dark_init = is_system_dark_mode_preference();
+                let is_dark_init = crate::gui::theme::ThemeManager::is_system_dark_mode();
                 
                 // Use shared create_button_themed function (same as Console)
                 let h_add_files = create_button_themed(hwnd, w!("Files"), 10, btn_y, 65, btn_h, IDC_BTN_ADD_FILES, is_dark_init);
@@ -1128,25 +1128,7 @@ fn apply_backdrop(hwnd: HWND) {
     }
 }
 
-unsafe fn is_system_dark_mode_preference() -> bool {
-    unsafe {
-        let subkey = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
-        let val_name = w!("AppsUseLightTheme");
-        let mut hkey: HKEY = Default::default();
-        
-        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey, Some(0), KEY_READ, &mut hkey).is_ok() {
-            let mut data: u32 = 0;
-            let mut cb_data = std::mem::size_of::<u32>() as u32;
-            let result = RegQueryValueExW(hkey, val_name, None, None, Some(&mut data as *mut _ as _), Some(&mut cb_data));
-            let _ = windows::Win32::System::Registry::RegCloseKey(hkey);
-            
-            if result.is_ok() {
-                return data == 0;
-            }
-        }
-        false
-    }
-}
+
 
 // Check effective dark mode state (System or Override)
 unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
@@ -1157,11 +1139,11 @@ unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
         match st.theme {
             AppTheme::Dark => return true,
             AppTheme::Light => return false,
-            AppTheme::System => return is_system_dark_mode_preference(),
+            AppTheme::System => return crate::gui::theme::ThemeManager::is_system_dark_mode(),
         }
     }
     // Fallback if no state yet (e.g. during creation)
-    is_system_dark_mode_preference()
+    crate::gui::theme::ThemeManager::is_system_dark_mode()
 }
 
 #[allow(non_snake_case)]
@@ -1341,7 +1323,7 @@ fn get_dark_brush() -> HBRUSH {
 
 unsafe fn apply_theme(hwnd: HWND, theme: AppTheme) {
     let is_dark = match theme {
-        AppTheme::System => is_system_dark_mode_preference(),
+        AppTheme::System => crate::gui::theme::ThemeManager::is_system_dark_mode(),
         AppTheme::Dark => true,
         AppTheme::Light => false,
     };

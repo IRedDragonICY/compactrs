@@ -358,32 +358,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              AppTheme::Dark => true,
                              AppTheme::Light => false,
                              AppTheme::System => {
-                                 // Check system preference
-                                 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegOpenKeyExW, RegQueryValueExW, KEY_READ, HKEY};
-                                 let mut h_key = HKEY::default();
-                                 let mut is_dark = false;
-                                 if RegOpenKeyExW(
-                                     HKEY_CURRENT_USER,
-                                     w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
-                                     Some(0),
-                                     KEY_READ,
-                                     &mut h_key
-                                 ).is_ok() {
-                                     let mut buffer = [0u8; 4];
-                                     let mut size = 4u32;
-                                     if RegQueryValueExW(
-                                         h_key, 
-                                         w!("AppsUseLightTheme"), 
-                                         None, 
-                                         None, 
-                                         Some(buffer.as_mut_ptr()), 
-                                         Some(&mut size)
-                                     ).is_ok() {
-                                         let val = u32::from_le_bytes(buffer);
-                                         is_dark = val == 0;
-                                     }
-                                 }
-                                 is_dark
+                                 crate::gui::theme::ThemeManager::is_system_dark_mode()
                              }
                          };
                          
