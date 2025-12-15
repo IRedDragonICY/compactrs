@@ -9,15 +9,21 @@ use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
 
 // ===== HELPER FUNCTIONS (Moved from window.rs) =====
 
+fn create_walk_builder(path: &str) -> WalkBuilder {
+    let mut builder = WalkBuilder::new(path);
+    builder
+        .hidden(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .ignore(false);
+    builder
+}
+
 /// Calculate total LOGICAL size of all files in a folder (uncompressed content size)
 /// This counts ALL files including hidden and .gitignored files
 pub fn calculate_folder_logical_size(path: &str) -> u64 {
-    WalkBuilder::new(path)
-        .hidden(false)          // Include hidden files
-        .git_ignore(false)      // Don't respect .gitignore
-        .git_global(false)      // Don't respect global gitignore
-        .git_exclude(false)     // Don't respect .git/info/exclude
-        .ignore(false)          // Don't respect .ignore files
+    create_walk_builder(path)
         .build()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
@@ -29,12 +35,7 @@ pub fn calculate_folder_logical_size(path: &str) -> u64 {
 /// Calculate total DISK size of all files in a folder (actual space used, respects compression)
 /// Uses GetCompressedFileSizeW to get real disk usage for WOF-compressed files
 pub fn calculate_folder_disk_size(path: &str) -> u64 {
-    WalkBuilder::new(path)
-        .hidden(false)          // Include hidden files
-        .git_ignore(false)      // Don't respect .gitignore
-        .git_global(false)      // Don't respect global gitignore
-        .git_exclude(false)     // Don't respect .git/info/exclude
-        .ignore(false)          // Don't respect .ignore files
+    create_walk_builder(path)
         .build()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
@@ -56,12 +57,7 @@ pub fn detect_folder_algorithm(path: &str) -> Option<WofAlgorithm> {
     let mut algo_counts = [0u32; 4]; // Xpress4K, Lzx, Xpress8K, Xpress16K
     let mut sampled = 0;
     
-    for result in WalkBuilder::new(path)
-        .hidden(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .ignore(false)
+    for result in create_walk_builder(path)
         .build()
     {
         if sampled >= 20 { break; } // Sample enough files
@@ -156,12 +152,7 @@ pub fn batch_process_worker(
         } else {
             // If it's a directory, walk it
             // FIX: Ensure we do NOT ignore any files (hidden, gitignore, etc.)
-            for result in WalkBuilder::new(path)
-                .hidden(false)
-                .git_ignore(false)
-                .git_global(false)
-                .git_exclude(false)
-                .ignore(false)
+            for result in create_walk_builder(path)
                 .build() 
             {
                 if let Ok(entry) = result {
@@ -403,12 +394,7 @@ pub fn single_item_worker(
         total_files = 1;
     } else {
         // FIX: Ensure we do NOT ignore any files (hidden, gitignore, etc.)
-        for result in WalkBuilder::new(&path)
-            .hidden(false)
-            .git_ignore(false)
-            .git_global(false)
-            .git_exclude(false)
-            .ignore(false)
+        for result in create_walk_builder(&path)
             .build()
         {
             if let Ok(entry) = result {
@@ -533,12 +519,7 @@ pub fn single_item_worker(
         // Process folder in PARALLEL
         let mut tasks: Vec<String> = Vec::new();
         // FIX: Ensure we do NOT ignore any files (hidden, gitignore, etc.)
-        for result in WalkBuilder::new(&path)
-            .hidden(false)
-            .git_ignore(false)
-            .git_global(false)
-            .git_exclude(false)
-            .ignore(false)
+        for result in create_walk_builder(&path)
             .build() 
         {
             if let Ok(entry) = result {
