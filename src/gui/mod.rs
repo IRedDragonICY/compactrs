@@ -4,3 +4,5 @@ pub mod state;
 pub mod settings;
 pub mod about;
 pub mod console;
+
+pub mod taskbar;

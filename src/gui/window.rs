@@ -32,6 +32,7 @@ use crate::gui::settings::show_settings_modal;
 use crate::gui::about::show_about_modal;
 use crate::gui::console::{show_console_window, append_log_msg};
 use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
+use crate::gui::taskbar::{TaskbarProgress, TaskbarState};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use windows::Win32::UI::Controls::{
@@ -198,6 +199,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         match msg {
             WM_CREATE => {
                 let mut state = Box::new(AppState::new());
+                state.taskbar = Some(TaskbarProgress::new(hwnd));
                 
                 // Create header label
                 let h_label = CreateWindowExW(
@@ -446,6 +448,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         update_listview_item(ctrls.list_view, row as i32, 1, algo_name);
                                     }
                                     
+                                    if let Some(tb) = &st.taskbar {
+                                        tb.set_state(TaskbarState::Normal);
+                                    }
+                                    
                                     EnableWindow(ctrls.btn_cancel, true);
                                     let status_msg = if indices_to_process.len() == st.batch_items.len() {
                                         "Processing all items...".to_string()
@@ -477,6 +483,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     IDC_BTN_CANCEL => {
                         if let Some(st) = get_state() {
                             st.cancel_flag.store(true, Ordering::Relaxed);
+                            if let Some(tb) = &st.taskbar {
+                                tb.set_state(TaskbarState::Paused);
+                            }
                             if let Some(ctrls) = &st.controls {
                                 let _ = EnableWindow(ctrls.btn_cancel, false);
                                 let _ = SetWindowTextW(ctrls.static_text, w!("Cancelling..."));
@@ -535,6 +544,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             SendMessageW(ctrls.progress_bar, PBM_SETRANGE32, Some(WPARAM(0)), Some(LPARAM(total as isize)));
                                             SendMessageW(ctrls.progress_bar, PBM_SETPOS, Some(WPARAM(cur as usize)), Some(LPARAM(0)));
                                         }
+                                        if let Some(tb) = &st.taskbar {
+                                            tb.set_value(cur, total);
+                                        }
                                     },
                                     UiMessage::Status(text) => {
                                         if let Some(st) = get_state() {
@@ -558,6 +570,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     },
                                     UiMessage::Error(text) => {
                                          if let Some(st) = get_state() {
+                                             if let Some(tb) = &st.taskbar {
+                                                 tb.set_state(TaskbarState::Error);
+                                             }
                                              let full_msg = format!("ERROR: {}", text);
                                              st.logs.push(full_msg.clone());
                                              append_log_msg(&full_msg);
@@ -570,8 +585,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                          }
                                     },
                                     UiMessage::Finished => {
-                                        if let Some(ctrls) = &st.controls {
-                                            EnableWindow(ctrls.btn_cancel, false);
+                                        if let Some(st) = get_state() {
+                                            if let Some(tb) = &st.taskbar {
+                                                tb.set_state(TaskbarState::NoProgress);
+                                            }
+                                            if let Some(ctrls) = &st.controls {
+                                                EnableWindow(ctrls.btn_cancel, false);
+                                            }
                                         }
                                     },
                                     UiMessage::RowUpdate(row, progress, status, _size_after) => {
