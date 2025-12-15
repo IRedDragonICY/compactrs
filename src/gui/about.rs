@@ -25,7 +25,7 @@ use windows::Win32::Graphics::Gdi::{
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT,
 };
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
-use crate::gui::controls::{create_button, IDC_BTN_OK};
+// Removed: create_button, ButtonOpts, IDC_BTN_OK - OK button removed from About dialog
 
 const ABOUT_CLASS_NAME: PCWSTR = w!("CompactRS_About");
 const ABOUT_TITLE: PCWSTR = w!("About CompactRS");
@@ -81,7 +81,7 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
         let p_width = rect.right - rect.left;
         let p_height = rect.bottom - rect.top;
         let width = 450;  // Wider for better text display
-        let height = 560; // Taller for better spacing and large icon
+        let height = 500; // Reduced height (no OK button)
         let x = rect.left + (p_width - width) / 2;
         let y = rect.top + (p_height - height) / 2;
 
@@ -126,14 +126,9 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
         match msg {
             WM_CTLCOLORSTATIC => {
                 if let Some(st) = get_state() {
-                    let is_dark = st.is_dark;
-                    let (brush, text_col, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
-                    
-                    let hdc = HDC(wparam.0 as *mut _);
-                    SetTextColor(hdc, text_col);
-                    SetBkMode(hdc, TRANSPARENT);
-                    
-                    return LRESULT(brush.0 as isize);
+                    if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                        return result;
+                    }
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             },
@@ -346,30 +341,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                     let _ = SetWindowTheme(link, w!(""), w!(""));
                 }
 
-                // OK Button - Centered
-                let ok_btn = create_button(hwnd, w!("OK"), 185, 490, 80, 30, IDC_BTN_OK);
-                SendMessageW(ok_btn, WM_SETFONT, Some(WPARAM(body_font.0 as usize)), Some(LPARAM(1)));
-                if is_dark_mode {
-                    let _ = SetWindowTheme(ok_btn, w!(""), w!(""));
-                }
-
                 LRESULT(0)
-            },
-            
-            WM_COMMAND => {
-                 let id = (wparam.0 & 0xFFFF) as u16;
-                 match id {
-                     IDC_BTN_OK => {
-                         // Non-modal: No need to re-enable parent
-                         // if let Ok(parent) = GetParent(hwnd) {
-                         //     let _ = EnableWindow(parent, true);
-                         //     SetActiveWindow(parent);
-                         // }
-                         DestroyWindow(hwnd);
-                     },
-                     _ => {}
-                 }
-                 LRESULT(0)
             },
 
             WM_NOTIFY => {

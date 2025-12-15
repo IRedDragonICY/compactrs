@@ -19,7 +19,7 @@ use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
 use crate::gui::state::AppTheme;
-use crate::gui::controls::create_button;
+use crate::gui::controls::{create_button, ButtonOpts};
 
 const SETTINGS_CLASS_NAME: PCWSTR = w!("CompactRS_Settings");
 const SETTINGS_TITLE: PCWSTR = w!("Settings");
@@ -237,14 +237,9 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
     match msg {
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
             if let Some(st) = get_state() {
-                let is_dark = st.is_dark;
-                let (brush, text_col, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
-                
-                let hdc = HDC(wparam.0 as *mut _);
-                SetTextColor(hdc, text_col);
-                SetBkMode(hdc, TRANSPARENT);
-                
-                return LRESULT(brush.0 as isize);
+                if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                    return result;
+                }
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
@@ -341,10 +336,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             }
 
             // Buttons
-            let close_btn = create_button(hwnd, w!("Close"), 110, 200, 80, 25, IDC_BTN_CANCEL);
-            if is_dark_mode {
-                let _ = SetWindowTheme(close_btn, w!(""), w!(""));
-            }
+            let close_btn = create_button(hwnd, ButtonOpts::new(w!("Close"), 110, 200, 80, 25, IDC_BTN_CANCEL, is_dark_mode));
 
             LRESULT(0)
         },

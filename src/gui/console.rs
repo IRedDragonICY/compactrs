@@ -17,7 +17,7 @@ use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData};
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-use crate::gui::controls::{create_button_themed, apply_button_theme};
+use crate::gui::controls::{create_button, ButtonOpts, apply_button_theme};
 
 const CONSOLE_CLASS_NAME: PCWSTR = w!("CompactRS_Console");
 const CONSOLE_TITLE: PCWSTR = w!("Debug Console");
@@ -148,11 +148,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
              
              EDIT_HWND = Some(edit);
              
-             // Create Copy and Clear buttons using shared function
-             let btn_copy = create_button_themed(hwnd, w!("Copy"), 0, 0, 80, BUTTON_HEIGHT, IDC_BTN_COPY as u16, IS_DARK_MODE);
+             // Create Copy and Clear buttons using factory
+             let btn_copy = create_button(hwnd, ButtonOpts::new(w!("Copy"), 0, 0, 80, BUTTON_HEIGHT, IDC_BTN_COPY as u16, IS_DARK_MODE));
              BTN_COPY_HWND = Some(btn_copy);
              
-             let btn_clear = create_button_themed(hwnd, w!("Clear"), 90, 0, 80, BUTTON_HEIGHT, IDC_BTN_CLEAR as u16, IS_DARK_MODE);
+             let btn_clear = create_button(hwnd, ButtonOpts::new(w!("Clear"), 90, 0, 80, BUTTON_HEIGHT, IDC_BTN_CLEAR as u16, IS_DARK_MODE));
              BTN_CLEAR_HWND = Some(btn_clear);
              
              // Apply dark theme to edit control if needed
@@ -240,19 +240,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         },
         WM_CTLCOLORBTN => {
-            if IS_DARK_MODE {
-                let hdc = HDC(wparam.0 as *mut _);
-                SetTextColor(hdc, COLORREF(0x00FFFFFF));
-                SetBkColor(hdc, COLORREF(0x001E1E1E));
-                
-                let brush = if let Some(b) = DARK_BRUSH {
-                    b
-                } else {
-                    let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
-                    DARK_BRUSH = Some(new_brush);
-                    new_brush
-                };
-                return LRESULT(brush.0 as isize);
+            if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
+                return result;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
@@ -268,19 +257,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         },
         WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => {
-            if IS_DARK_MODE {
-                let hdc = HDC(wparam.0 as *mut _);
-                SetTextColor(hdc, COLORREF(0x00FFFFFF)); // White text
-                SetBkColor(hdc, COLORREF(0x001E1E1E));   // Dark background
-                
-                let brush = if let Some(b) = DARK_BRUSH {
-                    b
-                } else {
-                    let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
-                    DARK_BRUSH = Some(new_brush);
-                    new_brush
-                };
-                return LRESULT(brush.0 as isize);
+            if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
+                return result;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },

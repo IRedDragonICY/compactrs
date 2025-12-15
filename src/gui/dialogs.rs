@@ -16,7 +16,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkMode, TRANSPARENT, FillRect, HDC};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 
-use crate::gui::controls::create_button_themed;
+use crate::gui::controls::{create_button, ButtonOpts};
 use crate::gui::theme::ThemeManager;
 
 const DIALOG_CLASS_NAME: PCWSTR = w!("CompactRS_ForceStopDialog");
@@ -135,12 +135,12 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 ).unwrap_or_default();
                 
                 // Yes Button
-                create_button_themed(hwnd, w!("Force Stop (Yes)"), 40, 90, 130, 32, IDC_BTN_YES, is_dark);
+                create_button(hwnd, ButtonOpts::new(w!("Force Stop (Yes)"), 40, 90, 130, 32, IDC_BTN_YES, is_dark));
                 
                 // No Button with Timer
                 let no_text = format!("Cancel ({})", st.seconds_left);
                 let no_wide: Vec<u16> = no_text.encode_utf16().chain(std::iter::once(0)).collect();
-                create_button_themed(hwnd, PCWSTR(no_wide.as_ptr()), 190, 90, 130, 32, IDC_BTN_NO, is_dark);
+                create_button(hwnd, ButtonOpts::new(PCWSTR(no_wide.as_ptr()), 190, 90, 130, 32, IDC_BTN_NO, is_dark));
                 
                 // Start Timer
                 SetTimer(Some(hwnd), TIMER_ID, 1000, None);
@@ -150,14 +150,9 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
         
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
             if let Some(st) = get_state() {
-                let is_dark = st.is_dark;
-                let (brush, text_col, _) = ThemeManager::get_theme_colors(is_dark);
-                
-                let hdc = HDC(wparam.0 as *mut _);
-                SetTextColor(hdc, text_col);
-                SetBkMode(hdc, TRANSPARENT);
-                
-                return LRESULT(brush.0 as isize);
+                if let Some(result) = ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                    return result;
+                }
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },

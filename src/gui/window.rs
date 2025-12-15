@@ -23,7 +23,7 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 
 use crate::gui::controls::{
-    create_button_themed, create_listview, create_combobox, create_progress_bar, 
+    create_button, ButtonOpts, create_listview, create_combobox, create_progress_bar, 
     apply_button_theme, apply_combobox_theme,
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
@@ -241,22 +241,22 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 // Check if dark mode for initial theme application
                 let is_dark_init = crate::gui::theme::ThemeManager::is_system_dark_mode();
                 
-                // Use shared create_button_themed function (same as Console)
-                let h_add_files = create_button_themed(hwnd, w!("Files"), 10, btn_y, 65, btn_h, IDC_BTN_ADD_FILES, is_dark_init);
-                let h_add_folder = create_button_themed(hwnd, w!("Folder"), 85, btn_y, 65, btn_h, IDC_BTN_ADD_FOLDER, is_dark_init);
-                let h_remove = create_button_themed(hwnd, w!("Remove"), 160, btn_y, 70, btn_h, IDC_BTN_REMOVE, is_dark_init);
+                // Use ButtonOpts factory pattern (DRY - theme applied inside)
+                let h_add_files = create_button(hwnd, ButtonOpts::new(w!("Files"), 10, btn_y, 65, btn_h, IDC_BTN_ADD_FILES, is_dark_init));
+                let h_add_folder = create_button(hwnd, ButtonOpts::new(w!("Folder"), 85, btn_y, 65, btn_h, IDC_BTN_ADD_FOLDER, is_dark_init));
+                let h_remove = create_button(hwnd, ButtonOpts::new(w!("Remove"), 160, btn_y, 70, btn_h, IDC_BTN_REMOVE, is_dark_init));
                 let h_combo = create_combobox(hwnd, 240, btn_y, 110, 200, IDC_COMBO_ALGO);
                 // Force Checkbox
                 let h_force = create_checkbox(hwnd, w!("Force"), 360, btn_y, 60, btn_h, IDC_CHK_FORCE);
-                let h_process = create_button_themed(hwnd, w!("Process All"), 430, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL, is_dark_init);
-                let h_cancel = create_button_themed(hwnd, w!("Cancel"), 540, btn_y, 80, btn_h, IDC_BTN_CANCEL, is_dark_init);
+                let h_process = create_button(hwnd, ButtonOpts::new(w!("Process All"), 430, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL, is_dark_init));
+                let h_cancel = create_button(hwnd, ButtonOpts::new(w!("Cancel"), 540, btn_y, 80, btn_h, IDC_BTN_CANCEL, is_dark_init));
                 
                 
                 // Settings/About items
-                let h_settings = create_button_themed(hwnd, w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS, is_dark_init); // Gear icon
-                let h_about = create_button_themed(hwnd, w!("?"), 0, 0, 30, 25, IDC_BTN_ABOUT, is_dark_init); // About icon
+                let h_settings = create_button(hwnd, ButtonOpts::new(w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS, is_dark_init)); // Gear icon
+                let h_about = create_button(hwnd, ButtonOpts::new(w!("?"), 0, 0, 30, 25, IDC_BTN_ABOUT, is_dark_init)); // About icon
                 // Console button (using a simple ">_" or similar text)
-                let h_console = create_button_themed(hwnd, w!(">_"), 0, 0, 30, 25, IDC_BTN_CONSOLE, is_dark_init);
+                let h_console = create_button(hwnd, ButtonOpts::new(w!(">_"), 0, 0, 30, 25, IDC_BTN_CONSOLE, is_dark_init));
 
                 // Apply dark theme to ComboBox and Checkbox
                 if is_dark_init {
@@ -1022,12 +1022,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             // WM_CTLCOLORSTATIC - handle static text colors
             0x0138 => { // WM_CTLCOLORSTATIC
                 let is_dark = is_app_dark_mode(hwnd);
-                let (brush, text_col, bg_col) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
-                
-                let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
-                SetTextColor(hdc, text_col);
-                SetBkMode(hdc, TRANSPARENT);
-                return LRESULT(brush.0 as isize);
+                if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, is_dark) {
+                    return result;
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             },
 
 

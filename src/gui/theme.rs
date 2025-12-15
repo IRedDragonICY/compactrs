@@ -89,6 +89,20 @@ impl ThemeManager {
         }
     }
 
+    /// Handle WM_CTLCOLORSTATIC and WM_CTLCOLORBTN messages centrally.
+    /// Returns Some(LRESULT) with brush if is_dark, None otherwise (caller should use DefWindowProcW).
+    pub unsafe fn handle_ctl_color(_hwnd: HWND, hdc_raw: WPARAM, is_dark: bool) -> Option<windows::Win32::Foundation::LRESULT> {
+        if is_dark {
+            let (brush, text_col, _) = Self::get_theme_colors(true);
+            let hdc = HDC(hdc_raw.0 as *mut _);
+            SetTextColor(hdc, text_col);
+            SetBkMode(hdc, TRANSPARENT);
+            Some(windows::Win32::Foundation::LRESULT(brush.0 as isize))
+        } else {
+            None
+        }
+    }
+
     /// Returns the Background Brush and Text Color for the given mode
     /// (Brush, TextColor, BackgroundColor)
     pub unsafe fn get_theme_colors(is_dark: bool) -> (HBRUSH, COLORREF, COLORREF) {
