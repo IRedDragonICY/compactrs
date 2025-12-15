@@ -24,11 +24,11 @@ use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CUR
 use crate::gui::controls::{
     create_button, create_listview, create_combobox, create_progress_bar, IDC_COMBO_ALGO, 
     IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
-    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
+    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS,
 };
 use crate::gui::settings::show_settings_modal;
 use crate::gui::about::show_about_modal;
-use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, AppTheme};
+use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::sync::mpsc::Sender;
@@ -602,6 +602,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             if !disk_size_str.is_empty() {
                                                 update_listview_item(ctrls.list_view, row, 4, &disk_size_str);
                                             }
+                                            // Reset button to "Start"
+                                            update_listview_item(ctrls.list_view, row, 7, "▶ Start");
+                                            // Update item status in AppState
+                                            if let Some(item) = st.batch_items.get_mut(row as usize) {
+                                                item.status = BatchStatus::Pending;
+                                                item.cancel_token = None; // Clear the token
+                                            }
                                         }
                                     },
                                     UiMessage::BatchItemAnalyzed(id, logical_size, disk_size, algo) => {
@@ -782,81 +789,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             WM_NOTIFY => {
                 let nmhdr = &*(lparam.0 as *const windows::Win32::UI::Controls::NMHDR);
                 
-                // Check if it's from our ListView and is a double-click
-                if nmhdr.idFrom == IDC_BATCH_LIST as usize {
-                    if nmhdr.code == NM_DBLCLK {
-                        let nmia = &*(lparam.0 as *const NMITEMACTIVATE);
-                        let row = nmia.iItem;
-                        let col = nmia.iSubItem;
-                        
-                        if row >= 0 {
-                        if let Some(st) = get_state() {
-                            let row_idx = row as usize;
-                            
-                            // Column 1 = Algorithm, Column 2 = Action
-                            if col == 1 {
-                                // Cycle Algorithm: XPRESS4K -> XPRESS8K -> XPRESS16K -> LZX -> XPRESS4K
-                                if let Some(item) = st.batch_items.get_mut(row_idx) {
-                                    item.algorithm = match item.algorithm {
-                                        WofAlgorithm::Xpress4K => WofAlgorithm::Xpress8K,
-                                        WofAlgorithm::Xpress8K => WofAlgorithm::Xpress16K,
-                                        WofAlgorithm::Xpress16K => WofAlgorithm::Lzx,
-                                        WofAlgorithm::Lzx => WofAlgorithm::Xpress4K,
-                                    };
-                                    let algo_str = match item.algorithm {
-                                        WofAlgorithm::Xpress4K => "XPRESS4K",
-                                        WofAlgorithm::Xpress8K => "XPRESS8K",
-                                        WofAlgorithm::Xpress16K => "XPRESS16K",
-                                        WofAlgorithm::Lzx => "LZX",
-                                    };
-                                    // Update ListView
-                                    if let Some(ctrls) = &st.controls {
-                                        update_listview_item(ctrls.list_view, row, 1, algo_str);
-                                    }
-                                }
-                            } else if col == 2 {
-                                // Toggle Action: Compress <-> Decompress
-                                if let Some(item) = st.batch_items.get_mut(row_idx) {
-                                    item.action = match item.action {
-                                        BatchAction::Compress => BatchAction::Decompress,
-                                        BatchAction::Decompress => BatchAction::Compress,
-                                    };
-                                    let action_str = match item.action {
-                                        BatchAction::Compress => "Compress",
-                                        BatchAction::Decompress => "Decompress",
-                                    };
-                                    // Update ListView
-                                    if let Some(ctrls) = &st.controls {
-                                        update_listview_item(ctrls.list_view, row, 2, action_str);
-                                    }
-                                }
-                            } else if col == 7 {
-                                // Start button clicked - process this single item
-                                if let Some(item) = st.batch_items.get(row_idx) {
-                                    let path = item.path.clone();
-                                    let algo = item.algorithm;
-                                    let action = item.action;
-                                    let tx = st.tx.clone();
-                                    let cancel = st.cancel_flag.clone();
-                                    cancel.store(false, Ordering::Relaxed);
-                                    
-                                    // Update status to Processing (col 6)
-                                    if let Some(ctrls) = &st.controls {
-                                        update_listview_item(ctrls.list_view, row, 6, "Running");
-                                        EnableWindow(ctrls.btn_cancel, true);
-                                    }
-                                    
-                                    let row_for_thread = row;
-                                    thread::spawn(move || {
-                                        single_item_worker(path, algo, action, row_for_thread, tx, cancel);
-                                    });
-                                }
-                            }
-                        }
-                        }
-                    }
-                }
-                
+                // Check if it's from our ListView
                 if nmhdr.idFrom == IDC_BATCH_LIST as usize {
                     if nmhdr.code == NM_DBLCLK {
                         let nmia = &*(lparam.0 as *const NMITEMACTIVATE);
@@ -869,7 +802,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 
                                 // Column 1 = Algorithm, Column 2 = Action
                                 if col == 1 {
-                                    // Cycle Algorithm: XPRESS4K -> XPRESS8K -> XPRESS16K -> LZX -> XPRESS4K
+                                    // Cycle Algorithm
                                     if let Some(item) = st.batch_items.get_mut(row_idx) {
                                         item.algorithm = match item.algorithm {
                                             WofAlgorithm::Xpress4K => WofAlgorithm::Xpress8K,
@@ -883,13 +816,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             WofAlgorithm::Xpress16K => "XPRESS16K",
                                             WofAlgorithm::Lzx => "LZX",
                                         };
-                                        // Update ListView
                                         if let Some(ctrls) = &st.controls {
                                             update_listview_item(ctrls.list_view, row, 1, algo_str);
                                         }
                                     }
                                 } else if col == 2 {
-                                    // Toggle Action: Compress <-> Decompress
+                                    // Toggle Action
                                     if let Some(item) = st.batch_items.get_mut(row_idx) {
                                         item.action = match item.action {
                                             BatchAction::Compress => BatchAction::Decompress,
@@ -899,31 +831,45 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             BatchAction::Compress => "Compress",
                                             BatchAction::Decompress => "Decompress",
                                         };
-                                        // Update ListView
                                         if let Some(ctrls) = &st.controls {
                                             update_listview_item(ctrls.list_view, row, 2, action_str);
                                         }
                                     }
                                 } else if col == 7 {
-                                    // Start button clicked - process this single item
-                                    if let Some(item) = st.batch_items.get(row_idx) {
-                                        let path = item.path.clone();
-                                        let algo = item.algorithm;
-                                        let action = item.action;
-                                        let tx = st.tx.clone();
-                                        let cancel = st.cancel_flag.clone();
-                                        cancel.store(false, Ordering::Relaxed);
-                                        
-                                        // Update status to Processing (col 6)
-                                        if let Some(ctrls) = &st.controls {
-                                            update_listview_item(ctrls.list_view, row, 6, "Running");
-                                            let _ = EnableWindow(ctrls.btn_cancel, true);
+                                    // Start/Stop button clicked
+                                    if let Some(item) = st.batch_items.get_mut(row_idx) {
+                                        // Check if running
+                                        if let BatchStatus::Processing = item.status {
+                                            // Stop
+                                            if let Some(token) = &item.cancel_token {
+                                                token.store(true, Ordering::Relaxed);
+                                            }
+                                            if let Some(ctrls) = &st.controls {
+                                                update_listview_item(ctrls.list_view, row, 7, "Stopping...");
+                                            }
+                                        } else {
+                                            // Start
+                                            let path = item.path.clone();
+                                            let algo = item.algorithm;
+                                            let action = item.action;
+                                            let tx = st.tx.clone();
+                                            
+                                            // Create per-item cancellation token
+                                            let token = Arc::new(AtomicBool::new(false));
+                                            item.cancel_token = Some(token.clone());
+                                            item.status = BatchStatus::Processing;
+                                            
+                                            // Update status and Button
+                                            if let Some(ctrls) = &st.controls {
+                                                update_listview_item(ctrls.list_view, row, 6, "Running");
+                                                update_listview_item(ctrls.list_view, row, 7, "■ Stop");
+                                            }
+                                            
+                                            let row_for_thread = row;
+                                            thread::spawn(move || {
+                                                single_item_worker(path, algo, action, row_for_thread, tx, token);
+                                            });
                                         }
-                                        
-                                        let row_for_thread = row;
-                                        thread::spawn(move || {
-                                            single_item_worker(path, algo, action, row_for_thread, tx, cancel);
-                                        });
                                     }
                                 }
                             }

@@ -71,6 +71,7 @@ pub struct BatchItem {
     pub action: BatchAction,        // Compress or Decompress
     pub status: BatchStatus,        // Pending, Processing, Complete, Error
     pub progress: (u64, u64),       // (current, total) files
+    pub cancel_token: Option<Arc<AtomicBool>>, // Cancellation token for this item
 }
 
 impl BatchItem {
@@ -82,6 +83,7 @@ impl BatchItem {
             action: BatchAction::Compress,
             status: BatchStatus::Pending,
             progress: (0, 0),
+            cancel_token: None,
         }
     }
 }
