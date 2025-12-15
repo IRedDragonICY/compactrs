@@ -51,11 +51,11 @@ impl ToWide for String {
 /// }
 /// ```
 #[inline]
-pub unsafe fn get_window_state<'a, T>(hwnd: HWND) -> Option<&'a mut T> {
+pub unsafe fn get_window_state<'a, T>(hwnd: HWND) -> Option<&'a mut T> { unsafe {
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
     if ptr == 0 {
         None
     } else {
         Some(&mut *(ptr as *mut T))
     }
-}
+}}

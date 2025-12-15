@@ -1,10 +1,9 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use windows::core::{Result, w, PCWSTR, PWSTR, PCSTR};
+use windows::core::{Result, w, PCWSTR, PCSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    HBRUSH, InvalidateRect, CreateSolidBrush, FillRect, HDC,
-    SetBkMode, SetTextColor, TRANSPARENT, CreateFontW, 
+    HBRUSH, InvalidateRect, CreateSolidBrush, FillRect, HDC, CreateFontW, 
     DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     FW_NORMAL, DEFAULT_CHARSET,
 };
@@ -18,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK, WM_ERASEBKGND, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
 };
-use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc};
+use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 
@@ -51,7 +50,7 @@ use crate::engine::worker::{
 };
 use humansize::{format_size, BINARY};
 use crate::config::AppConfig;
-use crate::gui::utils::{ToWide, get_window_state};
+use crate::gui::utils::get_window_state;
 
 
 

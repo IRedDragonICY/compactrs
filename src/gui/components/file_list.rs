@@ -56,7 +56,7 @@ impl FileListView {
     ///
     /// # Safety
     /// This function is unsafe because it calls Win32 APIs that require valid window handles.
-    pub unsafe fn new(parent: HWND, x: i32, y: i32, w: i32, h: i32, id: u16) -> Self {
+    pub unsafe fn new(parent: HWND, x: i32, y: i32, w: i32, h: i32, id: u16) -> Self { unsafe {
         // SAFETY: GetModuleHandleW with None returns the current module handle, which is always valid.
         let module = GetModuleHandleW(None).unwrap();
         let instance = HINSTANCE(module.0);
@@ -95,7 +95,7 @@ impl FileListView {
         file_list.setup_columns();
 
         file_list
-    }
+    }}
 
     /// Returns the underlying HWND.
     #[inline]
@@ -435,7 +435,7 @@ impl FileListView {
 
     /// Enables/disables dark mode for a window using undocumented uxtheme API.
     #[allow(non_snake_case)]
-    unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {
+    unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) { unsafe {
         // SAFETY: LoadLibraryW and GetProcAddress are standard Win32 APIs.
         // Ordinal 133 is the undocumented AllowDarkModeForWindow function.
         if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
@@ -444,7 +444,7 @@ impl FileListView {
                 allow_dark(hwnd, allow);
             }
         }
-    }
+    }}
 }
 
 /// ListView subclass procedure to intercept Header's NM_CUSTOMDRAW notifications.
@@ -461,7 +461,7 @@ unsafe extern "system" fn listview_subclass_proc(
     lparam: LPARAM,
     _uidsubclass: usize,
     dwrefdata: usize,
-) -> LRESULT {
+) -> LRESULT { unsafe {
     // SAFETY: dwrefdata contains the main window HWND passed during subclass setup.
     let main_hwnd = HWND(dwrefdata as *mut _);
 
@@ -489,7 +489,7 @@ unsafe extern "system" fn listview_subclass_proc(
 
     // SAFETY: DefSubclassProc is called with valid parameters.
     DefSubclassProc(hwnd, umsg, wparam, lparam)
-}
+}}
 
 /// Checks if the app is in dark mode.
 ///

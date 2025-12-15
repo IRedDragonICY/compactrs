@@ -4,7 +4,6 @@ use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::prelude::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::process::CommandExt;
 use windows::core::{PCWSTR, Result};
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, OPEN_EXISTING, GetCompressedFileSizeW};
@@ -269,7 +268,7 @@ fn enable_backup_privileges() {
         for priv_name in privileges {
             let mut luid = LUID::default();
             if LookupPrivilegeValueW(None, priv_name, &mut luid).is_ok() {
-                let mut tp = TOKEN_PRIVILEGES {
+                let tp = TOKEN_PRIVILEGES {
                     PrivilegeCount: 1,
                     Privileges: [LUID_AND_ATTRIBUTES {
                         Luid: luid,
@@ -297,7 +296,7 @@ fn compress_file_with_backup_semantics(path: &str, algo: WofAlgorithm, force: bo
         FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE, 
         FILE_SHARE_DELETE, OPEN_EXISTING,
     };
-    use windows::Win32::Foundation::GENERIC_READ;
+    
     use std::fs::File;
     use std::os::windows::io::FromRawHandle;
     
@@ -368,7 +367,7 @@ fn try_force_access(path: &str) -> bool {
         for priv_name in privileges {
             let mut luid = LUID::default();
             if LookupPrivilegeValueW(None, priv_name, &mut luid).is_ok() {
-                let mut tp = TOKEN_PRIVILEGES {
+                let tp = TOKEN_PRIVILEGES {
                     PrivilegeCount: 1,
                     Privileges: [LUID_AND_ATTRIBUTES {
                         Luid: luid,

@@ -3,8 +3,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
-    WS_VISIBLE, WM_CREATE, WM_COMMAND,
-    GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA,
+    WS_VISIBLE, WM_CREATE, WM_COMMAND, SetWindowLongPtrW, GWLP_USERDATA,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, WM_TIMER, SetTimer, KillTimer,

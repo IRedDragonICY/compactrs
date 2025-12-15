@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, DestroyWindow, 
-    WM_NOTIFY, GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA,
+    WM_NOTIFY, SetWindowLongPtrW, GWLP_USERDATA,
     WM_CTLCOLORSTATIC, WM_ERASEBKGND, GetClientRect,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
 };
