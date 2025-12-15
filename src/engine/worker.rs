@@ -7,6 +7,41 @@ use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_
 use windows::Win32::Foundation::{HWND, WPARAM, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
 
+// ===== RESULT TYPE FOR CORE PROCESSING =====
+
+/// Result of processing a single file
+#[derive(Debug, Clone)]
+pub enum ProcessResult {
+    /// File was successfully processed (compressed/decompressed)
+    Success,
+    /// File was skipped (with reason)
+    Skipped(String),
+    /// Processing failed (with error message)
+    Failed(String),
+}
+
+// ===== SKIP HEURISTICS =====
+
+/// Extensions that should be skipped during compression (already compressed or incompressible)
+const SKIP_EXTENSIONS: &[&str] = &[
+    "zip", "7z", "rar", "gz", "bz2", "xz", "zst", "lz4",  // Archives
+    "jpg", "jpeg", "png", "gif", "webp", "avif", "heic",  // Images
+    "mp4", "mkv", "avi", "webm", "mov", "wmv",            // Video
+    "mp3", "flac", "aac", "ogg", "opus", "wma",           // Audio
+    "pdf",                                                 // Documents
+];
+
+/// Check if a file should be skipped based on extension heuristics
+fn should_skip_extension(path: &str) -> bool {
+    let path_obj = std::path::Path::new(path);
+    if let Some(ext) = path_obj.extension().and_then(|s| s.to_str()) {
+        let ext_lower = ext.to_lowercase();
+        SKIP_EXTENSIONS.iter().any(|&skip_ext| ext_lower == skip_ext)
+    } else {
+        false
+    }
+}
+
 // ===== HELPER FUNCTIONS (Moved from window.rs) =====
 
 fn create_walk_builder(path: &str) -> WalkBuilder {
@@ -172,6 +207,64 @@ fn try_compress_with_lock_handling(
     }
 }
 
+/// Core function to process a single file (compress or decompress)
+/// 
+/// This encapsulates all the business logic:
+/// - Extension filtering (skip heuristics)
+/// - Force flag handling
+/// - Dispatch to compress/decompress
+/// - Lock handling for compression
+/// 
+/// # Arguments
+/// * `path` - Path to the file to process
+/// * `algo` - WOF algorithm for compression
+/// * `action` - Whether to compress or decompress
+/// * `force` - If true, bypass extension filtering
+/// * `main_hwnd` - Main window handle for lock dialog
+/// * `tx` - Channel for sending granular log messages
+pub fn process_file_core(
+    path: &str,
+    algo: WofAlgorithm,
+    action: BatchAction,
+    force: bool,
+    main_hwnd: usize,
+    tx: &Sender<UiMessage>,
+) -> ProcessResult {
+    match action {
+        BatchAction::Compress => {
+            // Check extension filter (unless force is enabled)
+            if !force && should_skip_extension(path) {
+                let _ = tx.send(UiMessage::Log(format!("Skipped (filtered): {}", path)));
+                return ProcessResult::Skipped("Filtered extension".to_string());
+            }
+            
+            // Attempt compression with lock handling
+            match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
+                Ok(true) => ProcessResult::Success,
+                Ok(false) => {
+                    // OS driver said compression not beneficial
+                    let _ = tx.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", path)));
+                    ProcessResult::Skipped("Not beneficial".to_string())
+                }
+                Err(msg) => {
+                    let _ = tx.send(UiMessage::Error(msg.clone()));
+                    ProcessResult::Failed(msg)
+                }
+            }
+        }
+        BatchAction::Decompress => {
+            match uncompress_file(path) {
+                Ok(_) => ProcessResult::Success,
+                Err(e) => {
+                    let msg = format!("Failed {}: {:?}", path, e);
+                    let _ = tx.send(UiMessage::Error(msg.clone()));
+                    ProcessResult::Failed(msg)
+                }
+            }
+        }
+    }
+}
+
 pub fn batch_process_worker(
     items: Vec<(String, BatchAction, usize)>, 
     algo: WofAlgorithm, 
@@ -271,52 +364,23 @@ pub fn batch_process_worker(
 
                     let (file_path, action, row_idx) = &tasks_ref[i];
                     
-                    match action {
-                        BatchAction::Compress => {
-                            // Check if compressible / beneficial, UNLESS forced
-                            let path = std::path::Path::new(file_path);
-                            // Simple extension check
-                            let compressible = if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                                !matches!(ext.to_lowercase().as_str(), "zip" | "7z" | "rar" | "jpg" | "png" | "mp4" | "mkv" | "mp3") 
-                            } else {
-                                true
-                            };
-
-                            if !force_copy && !compressible {
-                                // Not compressible extension or other rule
-                                // Treat as success (skipped)
-                                success_ref.fetch_add(1, Ordering::Relaxed);
-                                // Log skipped
-                                let _ = tx_clone.send(UiMessage::Log(format!("Skipped (filtered): {}", file_path)));
-                                continue; // Skip to next file
-                            }
-                            
-                            // Use helper with lock handling
-                            match try_compress_with_lock_handling(file_path, algo_copy, force_copy, hwnd_val) {
-                                Ok(true) => {
-                                    success_ref.fetch_add(1, Ordering::Relaxed);
-                                },
-                                Ok(false) => {
-                                    // Driver said no (not beneficial)
-                                    success_ref.fetch_add(1, Ordering::Relaxed);
-                                    let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
-                                },
-                                Err(msg) => {
-                                    failed_ref.fetch_add(1, Ordering::Relaxed);
-                                    let _ = tx_clone.send(UiMessage::Error(msg));
-                                }
-                            }
-                        },
-                        BatchAction::Decompress => {
-                            match uncompress_file(file_path) {
-                                Ok(_) => {
-                                    success_ref.fetch_add(1, Ordering::Relaxed);
-                                },
-                                Err(e) => {
-                                    failed_ref.fetch_add(1, Ordering::Relaxed);
-                                    let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
-                                }
-                            }
+                    // Use the core processing function
+                    let result = process_file_core(
+                        file_path, 
+                        algo_copy, 
+                        *action, 
+                        force_copy, 
+                        hwnd_val, 
+                        &tx_clone
+                    );
+                    
+                    // Update counters based on result
+                    match result {
+                        ProcessResult::Success | ProcessResult::Skipped(_) => {
+                            success_ref.fetch_add(1, Ordering::Relaxed);
+                        }
+                        ProcessResult::Failed(_) => {
+                            failed_ref.fetch_add(1, Ordering::Relaxed);
                         }
                     }
                     
@@ -431,56 +495,24 @@ pub fn single_item_worker(
             return;
         }
 
-        let path_obj = std::path::Path::new(&path);
-        let compressible = if let Some(ext) = path_obj.extension().and_then(|s| s.to_str()) {
-            !matches!(ext.to_lowercase().as_str(), "zip" | "7z" | "rar" | "jpg" | "png" | "mp4" | "mkv" | "mp3") 
-        } else {
-            true
-        };
-
-        if action == BatchAction::Compress && !force && !compressible {
-             let _ = tx.send(UiMessage::Log(format!("Skipped (filtered): {}", path)));
-             let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
-             let _ = tx.send(UiMessage::Status("Skipped.".to_string()));
-             let _ = tx.send(UiMessage::Finished);
-             return;
-        }
+        // Use the core processing function for single file
+        let result = process_file_core(&path, algo, action, force, main_hwnd, &tx);
         
-        // If force is ON, we proceed to compress_file even if !compressible.
-        
-        if action == BatchAction::Compress {
-             match try_compress_with_lock_handling(&path, algo, force, main_hwnd) {
-                Ok(true) => {
-                     success += 1;
-                     let compressed_size = get_real_file_size(&path);
-                     let disk_str = format_size(compressed_size, BINARY);
-                     let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
-                },
-                Ok(false) => {
-                     success += 1;
-                     let _ = tx.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", path)));
-                     let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
-                },
-                Err(msg) => {
-                    failed += 1;
-                    let _ = tx.send(UiMessage::Error(msg));
-                    let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
-                }
-             }
-        } else {
-            // Decompress
-            match uncompress_file(&path) {
-                 Ok(_) => {
-                     success += 1;
-                     let compressed_size = get_real_file_size(&path);
-                     let disk_str = format_size(compressed_size, BINARY);
-                     let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
-                 },
-                 Err(e) => {
-                     failed += 1;
-                     let _ = tx.send(UiMessage::Error(format!("Failed {}: {:?}", path, e)));
-                     let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
-                 }
+        // Handle result and update UI accordingly
+        match result {
+            ProcessResult::Success => {
+                success += 1;
+                let compressed_size = get_real_file_size(&path);
+                let disk_str = format_size(compressed_size, BINARY);
+                let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
+            }
+            ProcessResult::Skipped(_) => {
+                success += 1;
+                let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
+            }
+            ProcessResult::Failed(_) => {
+                failed += 1;
+                let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
             }
         }
 
@@ -541,48 +573,23 @@ pub fn single_item_worker(
                         
                         let file_path = &tasks_ref[i];
                         
-                        match action_copy {
-                            BatchAction::Compress => {
-                                // Check if compressible / beneficial, UNLESS forced
-                                let path = std::path::Path::new(file_path);
-                                // Simple extension check
-                                let compressible = if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                                    !matches!(ext.to_lowercase().as_str(), "zip" | "7z" | "rar" | "jpg" | "png" | "mp4" | "mkv" | "mp3") 
-                                } else {
-                                    true
-                                };
-
-                                if !force_copy && !compressible {
-                                    // Not compressible extension or other rule
-                                    // Treat as success (skipped)
-                                    success_ref.fetch_add(1, Ordering::Relaxed);
-                                    // Log skipped
-                                    let _ = tx_clone.send(UiMessage::Log(format!("Skipped (filtered): {}", file_path)));
-                                    continue; // Skip to next file
-                                }
-                                
-                                match try_compress_with_lock_handling(file_path, algo_copy, force_copy, hwnd_val) {
-                                    Ok(true) => { success_ref.fetch_add(1, Ordering::Relaxed); },
-                                    Ok(false) => {
-                                        success_ref.fetch_add(1, Ordering::Relaxed);
-                                        let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
-                                    },
-                                    Err(msg) => {
-                                        failed_ref.fetch_add(1, Ordering::Relaxed);
-                                        let _ = tx_clone.send(UiMessage::Error(msg));
-                                    }
-                                }
-                            },
-                            BatchAction::Decompress => {
-                                match uncompress_file(file_path) {
-                                    Ok(_) => {
-                                        success_ref.fetch_add(1, Ordering::Relaxed);
-                                    },
-                                    Err(e) => {
-                                        failed_ref.fetch_add(1, Ordering::Relaxed);
-                                        let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
-                                    }
-                                }
+                        // Use the core processing function
+                        let result = process_file_core(
+                            file_path, 
+                            algo_copy, 
+                            action_copy, 
+                            force_copy, 
+                            hwnd_val, 
+                            &tx_clone
+                        );
+                        
+                        // Update counters based on result
+                        match result {
+                            ProcessResult::Success | ProcessResult::Skipped(_) => {
+                                success_ref.fetch_add(1, Ordering::Relaxed);
+                            }
+                            ProcessResult::Failed(_) => {
+                                failed_ref.fetch_add(1, Ordering::Relaxed);
                             }
                         }
                          
