@@ -1061,7 +1061,14 @@ fn batch_process_worker(items: Vec<(String, BatchAction, usize)>, algo: WofAlgor
             row_count = 1;
         } else {
             // If it's a directory, walk it
-            for result in WalkBuilder::new(path).build() {
+            for result in WalkBuilder::new(path)
+                .hidden(false)
+                .git_ignore(false)
+                .git_global(false)
+                .git_exclude(false)
+                .ignore(false)
+                .build() 
+            {
                 if let Ok(entry) = result {
                     if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                         tasks.push((entry.path().to_string_lossy().to_string(), *action, *row_idx));
@@ -1209,7 +1216,14 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
     if is_single_file {
         total_files = 1;
     } else {
-        for result in WalkBuilder::new(&path).build() {
+        for result in WalkBuilder::new(&path)
+            .hidden(false)
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .ignore(false)
+            .build() 
+        {
             if let Ok(entry) = result {
                 if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                     total_files += 1;
@@ -1254,7 +1268,14 @@ fn single_item_worker(path: String, algo: WofAlgorithm, action: BatchAction, row
     } else {
         // Process folder in PARALLEL
         let mut tasks: Vec<String> = Vec::new();
-        for result in WalkBuilder::new(&path).build() {
+        for result in WalkBuilder::new(&path)
+            .hidden(false)
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .ignore(false)
+            .build() 
+        {
             if let Ok(entry) = result {
                 if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                      tasks.push(entry.path().to_string_lossy().to_string());
