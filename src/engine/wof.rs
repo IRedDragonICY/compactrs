@@ -4,6 +4,7 @@ use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::prelude::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
+use std::os::windows::process::CommandExt;
 use windows::core::{PCWSTR, Result};
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, OPEN_EXISTING, GetCompressedFileSizeW};
@@ -179,15 +180,258 @@ impl WofAlgorithm {
 }
 
 pub fn compress_file(path: &str, algo: WofAlgorithm, force: bool) -> Result<bool> {
-    // Requires Write permission for FSCTL_SET_EXTERNAL_BACKING
-    // Use permissive sharing (Read|Write|Delete = 7) to allow processing locked files
-    let file = std::fs::OpenOptions::new()
+    // First attempt: Normal open with permissive sharing
+    let file_result = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .share_mode(7)
-        .open(path)
-        .map_err(|_| windows::core::Error::from_thread())?;
-    compress_file_handle(&file, algo, force)
+        .open(path);
+    
+    match file_result {
+        Ok(file) => compress_file_handle(&file, algo, force),
+        Err(e) => {
+            // Check if Access Denied and force is enabled
+            if force && e.raw_os_error() == Some(5) { // ERROR_ACCESS_DENIED = 5
+                // Enable backup privileges first
+                enable_backup_privileges();
+                
+                // Remove read-only attribute if set
+                force_remove_readonly(path);
+                
+                // Retry normal open after removing readonly
+                if let Ok(file) = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .share_mode(7)
+                    .open(path)
+                {
+                    return compress_file_handle(&file, algo, force);
+                }
+                
+                // Try direct Win32 API with backup semantics
+                if let Some(result) = compress_file_with_backup_semantics(path, algo, force) {
+                    return result;
+                }
+            }
+            Err(windows::core::Error::from_thread())
+        }
+    }
+}
+
+/// Force remove read-only attribute from a file
+fn force_remove_readonly(path: &str) {
+    use windows::Win32::Storage::FileSystem::{
+        GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_READONLY,
+        FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES,
+    };
+    
+    unsafe {
+        let wide: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+        
+        let attrs = GetFileAttributesW(PCWSTR(wide.as_ptr()));
+        if attrs != u32::MAX { // INVALID_FILE_ATTRIBUTES
+            // Remove read-only flag
+            let new_attrs = attrs & !FILE_ATTRIBUTE_READONLY.0;
+            let new_attrs = if new_attrs == 0 { FILE_ATTRIBUTE_NORMAL.0 } else { new_attrs };
+            let _ = SetFileAttributesW(PCWSTR(wide.as_ptr()), FILE_FLAGS_AND_ATTRIBUTES(new_attrs));
+        }
+    }
+}
+
+/// Enable backup and restore privileges for the current process
+fn enable_backup_privileges() {
+    use windows::Win32::Foundation::LUID;
+    use windows::Win32::Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, 
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY, TOKEN_PRIVILEGES,
+        SE_PRIVILEGE_ENABLED, LUID_AND_ATTRIBUTES,
+    };
+    use windows::Win32::System::Threading::{OpenProcessToken, GetCurrentProcess};
+    use windows::core::w;
+    
+    unsafe {
+        let mut token_handle = HANDLE::default();
+        if OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut token_handle
+        ).is_err() {
+            return;
+        }
+        
+        let privileges = [
+            w!("SeBackupPrivilege"),
+            w!("SeRestorePrivilege"),
+            w!("SeTakeOwnershipPrivilege"),
+            w!("SeSecurityPrivilege"),
+        ];
+        
+        for priv_name in privileges {
+            let mut luid = LUID::default();
+            if LookupPrivilegeValueW(None, priv_name, &mut luid).is_ok() {
+                let mut tp = TOKEN_PRIVILEGES {
+                    PrivilegeCount: 1,
+                    Privileges: [LUID_AND_ATTRIBUTES {
+                        Luid: luid,
+                        Attributes: SE_PRIVILEGE_ENABLED,
+                    }],
+                };
+                let _ = AdjustTokenPrivileges(
+                    token_handle,
+                    false,
+                    Some(&tp),
+                    0,
+                    None,
+                    None,
+                );
+            }
+        }
+        
+        let _ = CloseHandle(token_handle);
+    }
+}
+
+/// Compress file using CreateFileW with FILE_FLAG_BACKUP_SEMANTICS
+fn compress_file_with_backup_semantics(path: &str, algo: WofAlgorithm, force: bool) -> Option<Result<bool>> {
+    use windows::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE, 
+        FILE_SHARE_DELETE, OPEN_EXISTING,
+    };
+    use windows::Win32::Foundation::GENERIC_READ;
+    use std::fs::File;
+    use std::os::windows::io::FromRawHandle;
+    
+    unsafe {
+        let wide: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+        
+        // GENERIC_READ | GENERIC_WRITE = 0x80000000 | 0x40000000
+        let access = 0x80000000u32 | 0x40000000u32;
+        
+        let handle = CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS, // Key: bypass security with backup semantics
+            None,
+        );
+        
+        match handle {
+            Ok(h) => {
+                // Convert HANDLE to File for compress_file_handle
+                let file = File::from_raw_handle(h.0 as *mut _);
+                let result = compress_file_handle(&file, algo, force);
+                // File will be dropped here, closing the handle
+                Some(result)
+            }
+            Err(_) => None
+        }
+    }
+}
+
+/// Try to force access to a file by taking ownership and granting full control.
+/// Uses low-level Win32 API with backup semantics (no external commands).
+/// Returns true if successful, false otherwise.
+fn try_force_access(path: &str) -> bool {
+    use windows::Win32::Foundation::LUID;
+    use windows::Win32::Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, 
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY, TOKEN_PRIVILEGES,
+        SE_PRIVILEGE_ENABLED, LUID_AND_ATTRIBUTES,
+        DACL_SECURITY_INFORMATION, PSID,
+    };
+    use windows::Win32::Security::Authorization::{
+        SetSecurityInfo, SE_FILE_OBJECT,
+    };
+    use windows::Win32::System::Threading::{OpenProcessToken, GetCurrentProcess};
+    use windows::core::w;
+    
+    unsafe {
+        // 1. Get current process token
+        let mut token_handle = HANDLE::default();
+        if OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut token_handle
+        ).is_err() {
+            return false;
+        }
+        
+        // 2. Enable SE_TAKE_OWNERSHIP_NAME, SE_RESTORE_NAME, SE_BACKUP_NAME privileges
+        let privileges = [
+            w!("SeTakeOwnershipPrivilege"),
+            w!("SeRestorePrivilege"),
+            w!("SeBackupPrivilege"),
+        ];
+        
+        for priv_name in privileges {
+            let mut luid = LUID::default();
+            if LookupPrivilegeValueW(None, priv_name, &mut luid).is_ok() {
+                let mut tp = TOKEN_PRIVILEGES {
+                    PrivilegeCount: 1,
+                    Privileges: [LUID_AND_ATTRIBUTES {
+                        Luid: luid,
+                        Attributes: SE_PRIVILEGE_ENABLED,
+                    }],
+                };
+                let _ = AdjustTokenPrivileges(
+                    token_handle,
+                    false,
+                    Some(&tp),
+                    0,
+                    None,
+                    None,
+                );
+            }
+        }
+        
+        // 3. Try to open file with backup semantics (bypasses security checks for backup operators)
+        let wide: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+        
+        use windows::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS as BACKUP_SEM,
+            FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_SHARE_DELETE,
+            OPEN_EXISTING,
+        };
+        
+        // WRITE_DAC | WRITE_OWNER = 0x00040000 | 0x00080000
+        let access_flags: u32 = 0x00040000 | 0x00080000;
+        
+        let file_result = CreateFileW(
+            PCWSTR(wide.as_ptr()),
+            access_flags,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            BACKUP_SEM, // Backup semantics - critical for bypassing security
+            None,
+        );
+        
+        let handle = match file_result {
+            Ok(h) => h,
+            Err(_) => {
+                let _ = CloseHandle(token_handle);
+                return false;
+            }
+        };
+        
+        // 4. Set NULL DACL (grants everyone full access)
+        let result = SetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            Some(PSID::default()),
+            Some(PSID::default()),
+            Some(std::ptr::null()), // NULL DACL = everyone has full access
+            None,
+        );
+        
+        let _ = CloseHandle(handle);
+        let _ = CloseHandle(token_handle);
+        
+        result.is_ok()
+    }
 }
 
 pub fn compress_file_handle(file: &File, algo: WofAlgorithm, force: bool) -> Result<bool> {

@@ -3,6 +3,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicBool};
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
+use crate::gui::components::FileListView;
 
 /// App Theme Preference
 #[repr(u32)]
@@ -92,7 +93,7 @@ impl BatchItem {
 
 /// UI Control handles
 pub struct Controls {
-    pub list_view: HWND,
+    pub file_list: FileListView,
     pub btn_scan: HWND,
     pub btn_compress: HWND,
     pub btn_decompress: HWND,

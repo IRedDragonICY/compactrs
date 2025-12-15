@@ -1,3 +1,4 @@
+pub mod components;
 pub mod window;
 pub mod controls;
 pub mod theme;

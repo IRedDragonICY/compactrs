@@ -23,12 +23,13 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 
 use crate::gui::controls::{
-    create_button, ButtonOpts, create_listview, create_combobox, create_progress_bar, 
+    create_button, ButtonOpts, create_combobox, create_progress_bar, 
     apply_button_theme, apply_combobox_theme,
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
     IDC_BTN_CONSOLE, IDC_CHK_FORCE, create_checkbox,
 };
+use crate::gui::components::FileListView;
 use crate::gui::settings::show_settings_modal;
 use crate::gui::about::show_about_modal;
 use crate::gui::console::{show_console_window, append_log_msg};
@@ -37,13 +38,9 @@ use crate::gui::taskbar::{TaskbarProgress, TaskbarState};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use windows::Win32::UI::Controls::{
-    PBM_SETRANGE32, PBM_SETPOS, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETITEMW,
-    LVM_DELETEITEM, LVM_GETNEXTITEM,
-    LVM_SETBKCOLOR, LVM_SETTEXTCOLOR, LVM_SETTEXTBKCOLOR, SetWindowTheme,
-    LVCOLUMNW, LVITEMW, LVCF_WIDTH, LVCF_TEXT, LVCF_FMT, LVCFMT_LEFT, LVIF_TEXT,
-    LVNI_SELECTED, LVIF_PARAM, NM_DBLCLK, NMITEMACTIVATE,
-    InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES, LVM_GETHEADER,
-    NM_CUSTOMDRAW, NMCUSTOMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, CDRF_NOTIFYITEMDRAW, CDRF_NEWFONT, NMHDR,
+    PBM_SETRANGE32, PBM_SETPOS, SetWindowTheme,
+    NM_DBLCLK, NMITEMACTIVATE,
+    InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
     LVN_ITEMCHANGED, BST_CHECKED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
@@ -86,42 +83,6 @@ unsafe fn allow_dark_mode() {
     }
 }
 
-/// ListView subclass procedure to intercept Header's NM_CUSTOMDRAW notifications
-/// Header sends NM_CUSTOMDRAW to its parent (ListView), not grandparent (main window)
-unsafe extern "system" fn listview_subclass_proc(
-    hwnd: HWND,
-    umsg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-    _uidsubclass: usize,
-    dwrefdata: usize,
-) -> LRESULT {
-    unsafe {
-        let main_hwnd = HWND(dwrefdata as *mut _);
-        if umsg == WM_NOTIFY && is_app_dark_mode(main_hwnd) {
-            let nmhdr = &*(lparam.0 as *const NMHDR);
-            
-            if nmhdr.code == NM_CUSTOMDRAW {
-                let nmcd = &mut *(lparam.0 as *mut NMCUSTOMDRAW);
-                
-                if nmcd.dwDrawStage == CDDS_PREPAINT {
-                    // Request item-level notifications
-                    return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
-                }
-                
-                if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
-                    // Set text color to white for header items
-                    SetTextColor(nmcd.hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
-                    SetBkMode(nmcd.hdc, TRANSPARENT);
-                    return LRESULT(CDRF_NEWFONT as isize);
-                }
-            }
-        }
-        
-        // Call original window procedure
-        DefSubclassProc(hwnd, umsg, wparam, lparam)
-    }
-}
 
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
     unsafe {
@@ -220,9 +181,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     None,
                 ).unwrap_or_default();
                 
-                // Create batch ListView - height 380, ends at y=420
-                let h_listview = create_listview(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
-                setup_batch_listview_columns(h_listview);
+                // Create batch ListView - uses FileListView facade
+                let file_list = FileListView::new(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
                 
                 // Create progress bar at y=430
                 let h_progress = create_progress_bar(hwnd, 10, 430, 860, 20, IDC_PROGRESS_BAR);
@@ -286,7 +246,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 }
 
                 state.controls = Some(Controls {
-                    list_view: h_listview,
+                    file_list,
                     btn_scan: h_add_folder,  // Reusing for Add Folder
                     btn_compress: h_process,  // Reusing for Process All
                     btn_decompress: h_remove,  // Reusing for Remove
@@ -394,7 +354,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         let logical_str = format_size(logical_size, BINARY);
                                         let disk_str = format_size(disk_size, BINARY);
                                         if let Some(ctrls) = &st.controls {
-                                            add_listview_item(ctrls.list_view, item_id, &file_path, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
+                                            // Get the batch item we just added
+                                            if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
+                                                ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, detected_algo);
+                                            }
                                         }
                                     }
                                 }
@@ -415,7 +378,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     let logical_str = format_size(logical_size, BINARY);
                                     let disk_str = format_size(disk_size, BINARY);
                                     if let Some(ctrls) = &st.controls {
-                                        add_listview_item(ctrls.list_view, item_id, &folder, "XPRESS8K", "Compress", &logical_str, &disk_str, detected_algo);
+                                        if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
+                                            ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, detected_algo);
+                                        }
                                     }
                                 }
                             }
@@ -424,33 +389,30 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     
                     IDC_BTN_REMOVE => {
                         if let Some(st) = get_state() {
-                            // First get the list_view handle
-                            let list_view = st.controls.as_ref().map(|c| c.list_view);
-                            if let Some(lv) = list_view {
-                                // Collect all selected indices first
-                                let mut selected_indices = Vec::new();
-                                let mut item_idx = -1;
-                                loop {
-                                    let start_param = if item_idx < 0 { usize::MAX } else { item_idx as usize };
-                                    let next = SendMessageW(lv, LVM_GETNEXTITEM, Some(WPARAM(start_param)), Some(LPARAM(LVNI_SELECTED as isize)));
-                                    if next.0 < 0 { break; }
-                                    item_idx = next.0 as i32;
-                                    selected_indices.push(item_idx as usize);
-                                }
-                                
-                                // Sort descending to remove from end first (preserves indices)
-                                selected_indices.sort_by(|a, b| b.cmp(a));
-                                
+                            // Collect selected indices first using facade
+                            let mut selected_indices = if let Some(ctrls) = &st.controls {
+                                ctrls.file_list.get_selected_indices()
+                            } else {
+                                Vec::new()
+                            };
+                            
+                            // Sort descending to remove from end first (preserves indices)
+                            selected_indices.sort_by(|a, b| b.cmp(a));
+                            
+                            // Collect IDs to remove before doing any mutations
+                            let ids_to_remove: Vec<u32> = selected_indices.iter()
+                                .filter_map(|&idx| st.batch_items.get(idx).map(|item| item.id))
+                                .collect();
+                            
+                            // Remove from state first
+                            for id in ids_to_remove {
+                                st.remove_batch_item(id);
+                            }
+                            
+                            // Then remove from ListView
+                            if let Some(ctrls) = &st.controls {
                                 for idx in selected_indices {
-                                    // Remove from State (by ID)
-                                    // Use the index directly since batch_items maps 1:1 to ListView rows
-                                    if let Some(item) = st.batch_items.get(idx) {
-                                        let id = item.id;
-                                        st.remove_batch_item(id);
-                                    }
-                                    
-                                    // Remove from ListView
-                                    SendMessageW(lv, LVM_DELETEITEM, Some(WPARAM(idx)), None);
+                                    ctrls.file_list.remove_item(idx as i32);
                                 }
                             }
                         }
@@ -462,18 +424,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 MessageBoxW(Some(hwnd), w!("Add folders first!"), w!("Info"), MB_OK | MB_ICONINFORMATION);
                             } else {
                                 if let Some(ctrls) = &st.controls {
-                                    // Collect indices to process
-                                    let mut indices_to_process = Vec::new();
-                                    
-                                    // Check for selection
-                                    let mut item_idx = -1;
-                                    loop {
-                                        let start_param = if item_idx < 0 { usize::MAX } else { item_idx as usize };
-                                        let next = SendMessageW(ctrls.list_view, LVM_GETNEXTITEM, Some(WPARAM(start_param)), Some(LPARAM(LVNI_SELECTED as isize)));
-                                        if next.0 < 0 { break; }
-                                        item_idx = next.0 as i32;
-                                        indices_to_process.push(item_idx as usize);
-                                    }
+                                    // Collect indices to process using facade
+                                    let mut indices_to_process = ctrls.file_list.get_selected_indices();
                                     
                                     // If no selection, process all
                                     if indices_to_process.is_empty() {
@@ -497,9 +449,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         WofAlgorithm::Lzx => "LZX",
                                     };
                                     
-                                    // Update Algorithm column for processed items
+                                    // Update Algorithm column for processed items using facade
                                     for &row in &indices_to_process {
-                                        update_listview_item(ctrls.list_view, row as i32, 1, algo_name);
+                                        ctrls.file_list.update_item_text(row as i32, 1, algo_name);
                                     }
                                     
                                     if let Some(tb) = &st.taskbar {
@@ -653,20 +605,20 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     UiMessage::RowUpdate(row, progress, status, _size_after) => {
                                         // Update Progress column (col 5) and Status column (col 6)
                                         if let Some(ctrls) = &st.controls {
-                                            update_listview_item(ctrls.list_view, row, 5, &progress);
-                                            update_listview_item(ctrls.list_view, row, 6, &status);
+                                            ctrls.file_list.update_item_text(row, 5, &progress);
+                                            ctrls.file_list.update_item_text(row, 6, &status);
                                         }
                                     },
                                     UiMessage::ItemFinished(row, status, disk_size_str) => {
                                         // Update Status (col 6) and On Disk column (col 4) with compressed size
                                         if let Some(ctrls) = &st.controls {
-                                            update_listview_item(ctrls.list_view, row, 6, &status);
+                                            ctrls.file_list.update_item_text(row, 6, &status);
                                             // Update On Disk column with the new compressed size
                                             if !disk_size_str.is_empty() {
-                                                update_listview_item(ctrls.list_view, row, 4, &disk_size_str);
+                                                ctrls.file_list.update_item_text(row, 4, &disk_size_str);
                                             }
                                             // Reset button to "Start"
-                                            update_listview_item(ctrls.list_view, row, 7, "▶ Start");
+                                            ctrls.file_list.update_item_text(row, 7, "▶ Start");
                                             // Update item status in AppState
                                             if let Some(item) = st.batch_items.get_mut(row as usize) {
                                                 item.status = BatchStatus::Pending;
@@ -681,12 +633,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         // Find row index by ID
                                         if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
                                             if let Some(ctrls) = &st.controls {
-                                                // Update ListView columns:
+                                                // Update ListView columns using facade:
                                                 // 1: Algorithm (if detected)
                                                 // 3: Size
                                                 // 4: On Disk
-                                                update_listview_item(ctrls.list_view, pos as i32, 3, &logical_str);
-                                                update_listview_item(ctrls.list_view, pos as i32, 4, &disk_str);
+                                                ctrls.file_list.update_item_text(pos as i32, 3, &logical_str);
+                                                ctrls.file_list.update_item_text(pos as i32, 4, &disk_str);
                                                 
                                                 if let Some(a) = algo {
                                                     let algo_str = match a {
@@ -695,10 +647,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                                         WofAlgorithm::Xpress16K => "XPRESS16K",
                                                         WofAlgorithm::Lzx => "LZX",
                                                     };
-                                                    update_listview_item(ctrls.list_view, pos as i32, 1, algo_str);
+                                                    ctrls.file_list.update_item_text(pos as i32, 1, algo_str);
                                                 }
                                                 // Reset status to Pending (from Calculating...)
-                                                update_listview_item(ctrls.list_view, pos as i32, 6, "Pending");
+                                                ctrls.file_list.update_item_text(pos as i32, 6, "Pending");
 
                                                 let msg = format!("{} item(s) analyzed.", st.batch_items.len());
                                                 let wstr = windows::core::HSTRING::from(&msg);
@@ -867,7 +819,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                          if !st.batch_items.iter().any(|item| item.path == path) {
                              let id = st.add_batch_item(path.clone());
                              if let Some(ctrls) = &st.controls {
-                                 add_listview_item(ctrls.list_view, id, &path, "XPRESS8K", "Compress", "Calculating...", "Calculating...", None);
+                                 // Get the batch item we just added and use facade
+                                 if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == id) {
+                                     ctrls.file_list.add_item(id, batch_item, "Calculating...", "Calculating...", None);
+                                 }
                              }
                              items_to_analyze.push((id, path));
                          }
@@ -926,7 +881,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             WofAlgorithm::Lzx => "LZX",
                                         };
                                         if let Some(ctrls) = &st.controls {
-                                            update_listview_item(ctrls.list_view, row, 1, algo_str);
+                                            ctrls.file_list.update_item_text(row, 1, algo_str);
                                         }
                                     }
                                 } else if col == 2 {
@@ -941,7 +896,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             BatchAction::Decompress => "Decompress",
                                         };
                                         if let Some(ctrls) = &st.controls {
-                                            update_listview_item(ctrls.list_view, row, 2, action_str);
+                                            ctrls.file_list.update_item_text(row, 2, action_str);
                                         }
                                     }
                                 } else if col == 7 {
@@ -954,7 +909,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                                 token.store(true, Ordering::Relaxed);
                                             }
                                             if let Some(ctrls) = &st.controls {
-                                                update_listview_item(ctrls.list_view, row, 7, "Stopping...");
+                                                ctrls.file_list.update_item_text(row, 7, "Stopping...");
                                             }
                                         } else {
                                             // Start
@@ -968,10 +923,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             item.cancel_token = Some(token.clone());
                                             item.status = BatchStatus::Processing;
                                             
-                                            // Update status and Button
+                                            // Update status and Button using facade
                                             if let Some(ctrls) = &st.controls {
-                                                update_listview_item(ctrls.list_view, row, 6, "Running");
-                                                update_listview_item(ctrls.list_view, row, 7, "■ Stop");
+                                                ctrls.file_list.update_item_text(row, 6, "Running");
+                                                ctrls.file_list.update_item_text(row, 7, "■ Stop");
                                             }
                                             
                                             let force = st.force_compress; // Capture force flag
@@ -989,19 +944,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     }
                     
                     if nmhdr.code == LVN_ITEMCHANGED {
-                         // Check selection count
+                         // Check selection count using facade
                          if let Some(st) = get_state() {
                               if let Some(ctrls) = &st.controls {
-                                  // Count selected items
-                                  let mut count = 0;
-                                  let mut item_idx = -1;
-                                  loop {
-                                      let start_param = if item_idx < 0 { usize::MAX } else { item_idx as usize };
-                                      let next = SendMessageW(ctrls.list_view, LVM_GETNEXTITEM, Some(WPARAM(start_param)), Some(LPARAM(LVNI_SELECTED as isize)));
-                                      if next.0 < 0 { break; }
-                                      item_idx = next.0 as i32;
-                                      count += 1;
-                                  }
+                                  let count = ctrls.file_list.get_selection_count();
                                   
                                   if count > 0 {
                                       SetWindowTextW(ctrls.btn_compress, w!("Process Selected"));
@@ -1035,113 +981,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
     }
 }
 
-unsafe fn setup_batch_listview_columns(hwnd: HWND) {
-    // Columns: Path | Algo | Action | Size | On Disk | Progress | Status | ▶ Start
-    let columns = [
-        (w!("Path"), 250),
-        (w!("Algorithm"), 70),
-        (w!("Action"), 70),
-        (w!("Size"), 75),
-        (w!("On Disk"), 75),
-        (w!("Progress"), 70),
-        (w!("Status"), 80),
-        (w!("▶ Start"), 45),
-    ];
-    
-    for (i, (name, width)) in columns.iter().enumerate() {
-        let col = LVCOLUMNW {
-            mask: LVCF_WIDTH | LVCF_TEXT | LVCF_FMT,
-            fmt: LVCFMT_LEFT,
-            cx: *width,
-            pszText: PWSTR(name.as_ptr() as *mut _),
-            ..Default::default()
-        };
-        SendMessageW(hwnd, LVM_INSERTCOLUMNW, Some(WPARAM(i)), Some(LPARAM(&col as *const _ as isize)));
-    }
-}
-
-unsafe fn add_listview_item(hwnd: HWND, id: u32, path: &str, algorithm: &str, action: &str, size_logical: &str, size_disk: &str, detected_algo: Option<WofAlgorithm>) {
-    // Columns: 0=Path | 1=Algo | 2=Action | 3=Size | 4=OnDisk | 5=Progress | 6=Status | 7=Start
-    let path_wide = path.to_wide();
-    let algo_wide = algorithm.to_wide();
-    let action_wide = action.to_wide();
-    let size_wide = size_logical.to_wide();
-    let disk_wide = size_disk.to_wide();
-    
-    // Show compression status with algorithm name if already compressed
-    let status_text = match detected_algo {
-        Some(WofAlgorithm::Xpress4K) => "XPRESS4K ✓".to_string(),
-        Some(WofAlgorithm::Xpress8K) => "XPRESS8K ✓".to_string(),
-        Some(WofAlgorithm::Xpress16K) => "XPRESS16K ✓".to_string(),
-        Some(WofAlgorithm::Lzx) => "LZX ✓".to_string(),
-        None => "Pending".to_string(),
-    };
-    let status_wide = status_text.to_wide();
-    let start_wide = "▶".to_wide();
-    
-    // Insert main item (path column)
-    let mut item = LVITEMW {
-        mask: LVIF_TEXT | LVIF_PARAM,
-        iItem: i32::MAX, // Append at end
-        iSubItem: 0,
-        pszText: PWSTR(path_wide.as_ptr() as *mut _),
-        lParam: LPARAM(id as isize),
-        ..Default::default()
-    };
-    let idx = SendMessageW(hwnd, LVM_INSERTITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-    let row = idx.0 as i32;
-    
-    // Set subitems
-    item.mask = LVIF_TEXT;
-    item.iItem = row;
-    
-    // Col 1 = Algorithm
-    item.iSubItem = 1;
-    item.pszText = PWSTR(algo_wide.as_ptr() as *mut _);
-    SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-    
-    // Col 2 = Action
-    item.iSubItem = 2;
-    item.pszText = PWSTR(action_wide.as_ptr() as *mut _);
-    SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-    
-    // Col 3 = Size (logical/uncompressed)
-    item.iSubItem = 3;
-    item.pszText = PWSTR(size_wide.as_ptr() as *mut _);
-    SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-    
-    // Col 4 = On Disk (compressed size)
-    item.iSubItem = 4;
-    item.pszText = PWSTR(disk_wide.as_ptr() as *mut _);
-    SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-    
-    // Col 5 = Progress (empty initially)
-    // Left empty
-    
-    // Col 6 = Status (shows WOF ✓ if already compressed)
-    item.iSubItem = 6;
-    item.pszText = PWSTR(status_wide.as_ptr() as *mut _);
-    SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-    
-    // Col 7 = Start button
-    item.iSubItem = 7;
-    item.pszText = PWSTR(start_wide.as_ptr() as *mut _);
-    SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-}
-
-/// Update a specific cell in the ListView
-unsafe fn update_listview_item(hwnd: HWND, row: i32, col: i32, text: &str) {
-    let text_wide = text.to_wide();
-    
-    let item = LVITEMW {
-        mask: LVIF_TEXT,
-        iItem: row,
-        iSubItem: col,
-        pszText: PWSTR(text_wide.as_ptr() as *mut _),
-        ..Default::default()
-    };
-    SendMessageW(hwnd, LVM_SETITEMW, Some(WPARAM(0)), Some(LPARAM(&item as *const _ as isize)));
-}
 
 /// Pick files (multi-select)
 unsafe fn pick_files() -> Result<Vec<String>> {
@@ -1228,37 +1067,6 @@ fn update_theme(hwnd: HWND) {
         let val = if dark { 1 } else { 0 };
         let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(attr), &val as *const _ as _, std::mem::size_of::<i32>() as u32);
         
-        // Update ListView with dark mode explorer theme and colors
-        if let Ok(list_view) = GetDlgItem(Some(hwnd), IDC_BATCH_LIST as i32) {
-            if !list_view.is_invalid() {
-                allow_dark_mode_for_window(list_view, dark);
-                // Apply dark mode explorer theme (affects header, scrollbars, etc.)
-                if dark {
-                    let _ = SetWindowTheme(list_view, w!("DarkMode_ItemsView"), None);
-                } else {
-                    let _ = SetWindowTheme(list_view, w!("Explorer"), None);
-                }
-                
-                if dark {
-                    // Dark mode colors: dark background, light text
-                    let bg_color: u32 = 0x00202020;   // Dark gray background (BGR format)
-                    let text_color: u32 = 0x00FFFFFF; // White text
-                    SendMessageW(list_view, LVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
-                    SendMessageW(list_view, LVM_SETTEXTBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
-                    SendMessageW(list_view, LVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(text_color as isize)));
-                } else {
-                    // Light mode colors: white background, black text
-                    let bg_color: u32 = 0x00FFFFFF;   // White background
-                    let text_color: u32 = 0x00000000; // Black text
-                    SendMessageW(list_view, LVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
-                    SendMessageW(list_view, LVM_SETTEXTBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
-                    SendMessageW(list_view, LVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(text_color as isize)));
-                }
-                // Force redraw
-                let _ = InvalidateRect(Some(list_view), None, true);
-            }
-        }
-        
         // Update progress bar with dark theme
         if let Ok(progress) = GetDlgItem(Some(hwnd), IDC_PROGRESS_BAR as i32) {
             if !progress.is_invalid() {
@@ -1327,41 +1135,18 @@ fn update_theme(hwnd: HWND) {
             SendMessageW(static_text, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
         }
         
-        // Update ListView Font and Header Theme
-        if let Ok(list_view) = GetDlgItem(Some(hwnd), IDC_BATCH_LIST as i32) {
-             SendMessageW(list_view, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-             allow_dark_mode_for_window(list_view, dark);
-             
-             // Subclass ListView to intercept Header's NM_CUSTOMDRAW notifications
-             let _ = SetWindowSubclass(
-                 list_view,
-                 Some(listview_subclass_proc),
-                 1, // Subclass ID
-                 hwnd.0 as usize, // Pass Main Window HWND as RefData
-             );
-             
-             // Get Header Control and skin it
-             let header_lresult = SendMessageW(list_view, LVM_GETHEADER, None, None);
-             let header = HWND(header_lresult.0 as *mut _);
-             
-             if !header.is_invalid() {
-                 allow_dark_mode_for_window(header, dark);
-                 if dark {
-                     // DarkMode_ItemsView for dark background (subclass handles white text)
-                     let _ = SetWindowTheme(header, w!("DarkMode_ItemsView"), None);
-                 } else {
-                     let _ = SetWindowTheme(header, w!("Explorer"), None);
-                 }
-             }
-             
-             // Re-apply listview colors
-             if dark {
-                let bg_color: u32 = 0x00202020;
-                let text_color: u32 = 0x00FFFFFF;
-                SendMessageW(list_view, LVM_SETBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
-                SendMessageW(list_view, LVM_SETTEXTBKCOLOR, Some(WPARAM(0)), Some(LPARAM(bg_color as isize)));
-                SendMessageW(list_view, LVM_SETTEXTCOLOR, Some(WPARAM(0)), Some(LPARAM(text_color as isize)));
-             }
+        // Update ListView using FileListView facade
+        if let Some(st) = get_window_state::<AppState>(hwnd) {
+            if let Some(ctrls) = &st.controls {
+                // Apply theme using facade (handles colors, window theme, header)
+                ctrls.file_list.set_theme(dark);
+                
+                // Apply subclass for header theming
+                ctrls.file_list.apply_subclass(hwnd);
+                
+                // Also update font
+                SendMessageW(ctrls.file_list.hwnd(), WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
+            }
         }
         
         // Force main window redraw
