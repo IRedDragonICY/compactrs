@@ -1,6 +1,5 @@
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}};
 use std::sync::mpsc::Sender;
-use std::thread;
 use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
 use crate::gui::state::{UiMessage, BatchAction};

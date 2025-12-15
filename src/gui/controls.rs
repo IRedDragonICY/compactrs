@@ -84,27 +84,27 @@ pub unsafe fn create_button_themed(parent: HWND, text: PCWSTR, x: i32, y: i32, w
 }
 
 /// Legacy create_button without theme - calls create_button_themed with is_dark=false
-pub unsafe fn create_button(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND {
+pub unsafe fn create_button(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND { unsafe {
     create_button_themed(parent, text, x, y, w, h, id, false)
-}
+}}
 
 /// Apply button theme dynamically (for theme changes after creation)
-pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
+pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) { unsafe {
     if is_dark {
         let _ = SetWindowTheme(hwnd, w!("DarkMode_Explorer"), None);
     } else {
         let _ = SetWindowTheme(hwnd, w!("Explorer"), None);
     }
-}
+}}
 
 /// Apply ComboBox theme dynamically
-pub unsafe fn apply_combobox_theme(hwnd: HWND, is_dark: bool) {
+pub unsafe fn apply_combobox_theme(hwnd: HWND, is_dark: bool) { unsafe {
     if is_dark {
         let _ = SetWindowTheme(hwnd, w!("DarkMode_CFD"), None);
     } else {
         let _ = SetWindowTheme(hwnd, w!("Explorer"), None);
     }
-}
+}}
 
 pub unsafe fn create_listview(parent: HWND, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND {
     unsafe {

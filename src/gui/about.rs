@@ -6,11 +6,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE, WM_CREATE, WM_COMMAND,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
-    PostQuitMessage, WM_CLOSE, GetParent, DestroyWindow, 
+    PostQuitMessage, WM_CLOSE, DestroyWindow, 
     WM_NOTIFY, GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA,
     WM_CTLCOLORSTATIC, WM_ERASEBKGND, GetClientRect,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetActiveWindow};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
     NMHDR, NM_CLICK, NM_RETURN, NMLINK, WC_LINK, ICC_LINK_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx,

@@ -22,7 +22,7 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, HKEY};
 use crate::gui::controls::{
-    create_button, create_button_themed, create_listview, create_combobox, create_progress_bar, 
+    create_button_themed, create_listview, create_combobox, create_progress_bar, 
     apply_button_theme, apply_combobox_theme,
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
@@ -33,8 +33,7 @@ use crate::gui::about::show_about_modal;
 use crate::gui::console::{show_console_window, append_log_msg};
 use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
 use std::thread;
-use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}};
-use std::sync::mpsc::Sender;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use windows::Win32::UI::Controls::{
     PBM_SETRANGE32, PBM_SETPOS, LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETITEMW,
     LVM_DELETEITEM, LVM_GETNEXTITEM,
@@ -46,12 +45,11 @@ use windows::Win32::UI::Controls::{
     LVN_ITEMCHANGED, BST_CHECKED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-use crate::engine::wof::{WofAlgorithm, get_real_file_size, get_wof_algorithm};
+use crate::engine::wof::WofAlgorithm;
 use crate::engine::worker::{
     batch_process_worker, single_item_worker, 
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm
 };
-use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
 
 

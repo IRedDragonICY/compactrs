@@ -1,15 +1,15 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use windows::core::{w, PCWSTR, Result};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, HINSTANCE, COLORREF};
+use windows::core::{w, PCWSTR};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF};
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkColor, CreateSolidBrush, HDC, FillRect};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::UI::WindowsAndMessaging::{
     WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_COMMAND, WM_CTLCOLORBTN, WM_ERASEBKGND,
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, 
-    LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow, TranslateMessage,
-    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, MSG, SW_SHOW, WM_DESTROY, WNDCLASSW,
-    WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, SetWindowPos, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOZORDER,
-    WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL, WM_SETFONT,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, 
+    LoadCursorW, RegisterClassW, ShowWindow,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
+    WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, SetWindowPos, SWP_NOZORDER,
+    WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL,
     SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW, GetClientRect,
 };
 use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
@@ -32,7 +32,7 @@ static mut BTN_CLEAR_HWND: Option<HWND> = None;
 static mut IS_DARK_MODE: bool = false;
 static mut DARK_BRUSH: Option<HBRUSH> = None;
 
-pub unsafe fn show_console_window(parent: HWND, initial_logs: &[String], is_dark: bool) {
+pub unsafe fn show_console_window(_parent: HWND, initial_logs: &[String], is_dark: bool) {
     IS_DARK_MODE = is_dark;
     
     if let Some(hwnd) = CONSOLE_HWND {

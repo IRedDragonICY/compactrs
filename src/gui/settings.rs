@@ -11,13 +11,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
     FindWindowW,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetActiveWindow};
+use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::SetWindowTheme;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkColor, CreateSolidBrush, HDC, DeleteObject, HGDIOBJ, InvalidateRect, FillRect, SetBkMode, TRANSPARENT};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, CreateSolidBrush, HDC, DeleteObject, HGDIOBJ, InvalidateRect, FillRect, SetBkMode, TRANSPARENT};
 use windows::Win32::Foundation::COLORREF;
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
-use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
+use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
 use crate::gui::state::AppTheme;
 use crate::gui::controls::create_button;
 
@@ -213,7 +213,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
 
 
 unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
-    let mut get_state = || {
+    let get_state = || {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
         if ptr == 0 { None } else { Some(&mut *(ptr as *mut SettingsState)) }
     };
