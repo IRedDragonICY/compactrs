@@ -163,6 +163,7 @@ pub const COMPRESSION_FORMAT_NONE: u16 = 0;
 pub const COMPRESSION_FORMAT_DEFAULT: u16 = 1;
 pub const COMPRESSION_FORMAT_LZNT1: u16 = 2;
 
+#[repr(u32)]
 #[derive(Clone, Copy, Debug)]
 pub enum WofAlgorithm {
     Xpress4K = 0,

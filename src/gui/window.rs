@@ -15,7 +15,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND, SetWindowPos, SWP_NOZORDER,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK, WM_ERASEBKGND, GetClientRect,
+    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK, WM_ERASEBKGND, GetClientRect, GetWindowRect,
+    BM_SETCHECK,
 };
 use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
@@ -52,6 +53,7 @@ use crate::engine::worker::{
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm
 };
 use humansize::{format_size, BINARY};
+use crate::config::AppConfig;
 
 
 
@@ -161,15 +163,25 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
             return Err(windows::core::Error::from_thread());
         }
 
+        // Load configuration
+        let config = AppConfig::load();
+        let (win_x, win_y) = if config.window_x < 0 || config.window_y < 0 {
+            (CW_USEDEFAULT, CW_USEDEFAULT)
+        } else {
+            (config.window_x, config.window_y)
+        };
+        let win_width = if config.window_width > 0 { config.window_width } else { 900 };
+        let win_height = if config.window_height > 0 { config.window_height } else { 600 };
+
         let hwnd = CreateWindowExW(
             Default::default(),
             WINDOW_CLASS_NAME,
             WINDOW_TITLE,
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            900,
-            600,
+            win_x,
+            win_y,
+            win_width,
+            win_height,
             None,
             None,
             Some(instance),
@@ -260,7 +272,19 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 for alg in algos {
                     SendMessageW(h_combo, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(alg.as_ptr() as isize)));
                 }
-                SendMessageW(h_combo, CB_SETCURSEL, Some(WPARAM(1)), Some(LPARAM(0))); // Default XPRESS8K
+                // Set initial combo selection based on saved config
+                let algo_index = match state.config.default_algo {
+                    WofAlgorithm::Xpress4K => 0,
+                    WofAlgorithm::Xpress8K => 1,
+                    WofAlgorithm::Xpress16K => 2,
+                    WofAlgorithm::Lzx => 3,
+                };
+                SendMessageW(h_combo, CB_SETCURSEL, Some(WPARAM(algo_index)), Some(LPARAM(0)));
+                
+                // Set initial force checkbox state
+                if state.force_compress {
+                    SendMessageW(h_force, BM_SETCHECK, Some(WPARAM(BST_CHECKED.0 as usize)), None);
+                }
 
                 state.controls = Some(Controls {
                     list_view: h_listview,
@@ -281,8 +305,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 SetTimer(Some(hwnd), 1, 100, None);
                 DragAcceptFiles(hwnd, true);
                 
-                // Apply theme (dark mode support for ListView)
-                update_theme(hwnd);
+                // Apply saved theme (dark mode support for ListView)
+                if let Some(st) = get_state() {
+                    apply_theme(hwnd, st.theme);
+                }
 
                 LRESULT(0)
             }
@@ -766,6 +792,40 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             WM_DESTROY => {
                 let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
                 if ptr != 0 {
+                    let state = &mut *(ptr as *mut AppState);
+                    
+                    // Capture window position/size
+                    let mut rect = windows::Win32::Foundation::RECT::default();
+                    if GetWindowRect(hwnd, &mut rect).is_ok() {
+                        state.config.window_x = rect.left;
+                        state.config.window_y = rect.top;
+                        state.config.window_width = rect.right - rect.left;
+                        state.config.window_height = rect.bottom - rect.top;
+                    }
+                    
+                    // Capture current UI states
+                    if let Some(ctrls) = &state.controls {
+                        // Get selected algorithm
+                        let algo_idx = SendMessageW(ctrls.combo_algo, CB_GETCURSEL, None, None).0;
+                        state.config.default_algo = match algo_idx {
+                            0 => WofAlgorithm::Xpress4K,
+                            2 => WofAlgorithm::Xpress16K,
+                            3 => WofAlgorithm::Lzx,
+                            _ => WofAlgorithm::Xpress8K,
+                        };
+                        
+                        // Get force checkbox state
+                        let force_state = SendMessageW(ctrls.btn_force, BM_GETCHECK, None, None);
+                        state.config.force_compress = force_state == LRESULT(BST_CHECKED.0 as isize);
+                    }
+                    
+                    // Save other settings
+                    state.config.theme = state.theme;
+                    state.config.enable_force_stop = state.enable_force_stop;
+                    
+                    // Save config to file
+                    state.config.save();
+                    
                     let _ = Box::from_raw(ptr as *mut AppState);
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 }

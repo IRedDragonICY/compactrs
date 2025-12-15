@@ -8,6 +8,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 pub mod gui;
 pub mod engine; // Make sure the engine module is available to the rest of the app
+pub mod config;
 
 fn main() -> Result<()> {
     // 1. Initialize GUI

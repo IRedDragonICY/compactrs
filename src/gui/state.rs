@@ -2,8 +2,10 @@ use windows::Win32::Foundation::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicBool};
 use crate::engine::wof::WofAlgorithm;
+use crate::config::AppConfig;
 
 /// App Theme Preference
+#[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AppTheme {
     System,
@@ -120,7 +122,7 @@ pub struct AppState {
     pub cancel_flag: Arc<AtomicBool>,
     
     // Settings
-    // Settings
+    pub config: AppConfig,
     pub theme: AppTheme,
     
     // Console
@@ -134,6 +136,7 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let (tx, rx) = channel();
+        let config = AppConfig::load();
         Self {
             current_folder: None,
             batch_items: Vec::new(),
@@ -142,11 +145,12 @@ impl AppState {
             tx,
             rx,
             cancel_flag: Arc::new(AtomicBool::new(false)),
-            theme: AppTheme::default(),
+            config,
+            theme: config.theme,
             logs: Vec::new(),
             console_hwnd: None,
-            force_compress: false,
-            enable_force_stop: false,
+            force_compress: config.force_compress,
+            enable_force_stop: config.enable_force_stop,
             taskbar: None,
         }
     }
