@@ -76,7 +76,7 @@ impl<'a> ButtonOpts<'a> {
 
 /// Creates a button with theme applied internally.
 /// This is the unified factory function - theme is applied inside, not by caller.
-pub unsafe fn create_button(parent: HWND, opts: ButtonOpts) -> HWND {
+pub unsafe fn create_button(parent: HWND, opts: ButtonOpts) -> HWND { unsafe {
     let module = GetModuleHandleW(None).unwrap();
     let instance = HINSTANCE(module.0);
     let hwnd = CreateWindowExW(
@@ -95,7 +95,7 @@ pub unsafe fn create_button(parent: HWND, opts: ButtonOpts) -> HWND {
     apply_button_theme(hwnd, opts.is_dark);
     
     hwnd
-}
+}}
 
 /// Apply button theme dynamically (for theme changes after creation)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) { unsafe {

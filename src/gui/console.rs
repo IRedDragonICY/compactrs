@@ -1,7 +1,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF};
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkColor, CreateSolidBrush, HDC, FillRect};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, CreateSolidBrush, HDC, FillRect};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::UI::WindowsAndMessaging::{
     WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_COMMAND, WM_CTLCOLORBTN, WM_ERASEBKGND,

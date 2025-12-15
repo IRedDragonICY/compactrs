@@ -1,12 +1,11 @@
-use windows::core::{w, PCWSTR};
+use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HWND, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateSolidBrush, GetStockObject, HBRUSH, HDC, SetBkMode, SetTextColor, TRANSPARENT, WHITE_BRUSH};
 use windows::Win32::UI::Controls::SetWindowTheme;
-use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWLP_USERDATA, SendMessageW};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWINDOWATTRIBUTE, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE};
+use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWLP_USERDATA};
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE};
 use windows::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ};
 
-use crate::gui::state::{AppState, AppTheme};
 
 pub const COLOR_DARK_BG: u32 = 0x001E1E1E;
 pub const COLOR_DARK_TEXT: u32 = 0x00FFFFFF;
@@ -18,7 +17,7 @@ pub struct ThemeManager;
 impl ThemeManager {
     /// Determines if the window should be rendered in dark mode.
     /// Checks AppState override first, then System Preference.
-    pub unsafe fn should_use_dark_mode(hwnd: HWND) -> bool {
+    pub unsafe fn should_use_dark_mode(hwnd: HWND) -> bool { unsafe {
         // 1. Check AppState Override
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
         if ptr != 0 {
@@ -37,10 +36,10 @@ impl ThemeManager {
             // and let the caller pass the override.
         }
         Self::is_system_dark_mode()
-    }
+    }}
 
     /// Returns true if the SYSTEM is in Dark Mode
-    pub unsafe fn is_system_dark_mode() -> bool {
+    pub unsafe fn is_system_dark_mode() -> bool { unsafe {
         let subkey = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
         let val_name = w!("AppsUseLightTheme");
         let mut hkey: HKEY = Default::default();
@@ -56,10 +55,10 @@ impl ThemeManager {
             }
         }
         false
-    }
+    }}
 
     /// Applies DWM Window Attributes (Dark Frame, Mica)
-    pub unsafe fn apply_window_theme(hwnd: HWND, is_dark: bool) {
+    pub unsafe fn apply_window_theme(hwnd: HWND, is_dark: bool) { unsafe {
         let true_val: i32 = 1;
         let false_val: i32 = 0;
         
@@ -75,10 +74,10 @@ impl ThemeManager {
         let system_backdrop_type = DWMWA_SYSTEMBACKDROP_TYPE;
         let mica = DWM_SYSTEMBACKDROP_TYPE(2); 
         let _ = DwmSetWindowAttribute(hwnd, system_backdrop_type, &mica as *const _ as _, 4);
-    }
+    }}
 
     /// Configures a generic control (Button, Checkbox) for the target theme
-    pub unsafe fn apply_control_theme(h_ctrl: HWND, is_dark: bool) {
+    pub unsafe fn apply_control_theme(h_ctrl: HWND, is_dark: bool) { unsafe {
         if is_dark {
             // Disable visual styles to allow custom painting (WM_CTLCOLORSTATIC)
             // This is required for Checkboxes/RadioButtons to accept text color changes
@@ -87,11 +86,11 @@ impl ThemeManager {
             // Restore standard light theme
             let _ = SetWindowTheme(h_ctrl, None, None);
         }
-    }
+    }}
 
     /// Handle WM_CTLCOLORSTATIC and WM_CTLCOLORBTN messages centrally.
     /// Returns Some(LRESULT) with brush if is_dark, None otherwise (caller should use DefWindowProcW).
-    pub unsafe fn handle_ctl_color(_hwnd: HWND, hdc_raw: WPARAM, is_dark: bool) -> Option<windows::Win32::Foundation::LRESULT> {
+    pub unsafe fn handle_ctl_color(_hwnd: HWND, hdc_raw: WPARAM, is_dark: bool) -> Option<windows::Win32::Foundation::LRESULT> { unsafe {
         if is_dark {
             let (brush, text_col, _) = Self::get_theme_colors(true);
             let hdc = HDC(hdc_raw.0 as *mut _);
@@ -101,11 +100,11 @@ impl ThemeManager {
         } else {
             None
         }
-    }
+    }}
 
     /// Returns the Background Brush and Text Color for the given mode
     /// (Brush, TextColor, BackgroundColor)
-    pub unsafe fn get_theme_colors(is_dark: bool) -> (HBRUSH, COLORREF, COLORREF) {
+    pub unsafe fn get_theme_colors(is_dark: bool) -> (HBRUSH, COLORREF, COLORREF) { unsafe {
         if is_dark {
             let brush = CreateSolidBrush(COLORREF(COLOR_DARK_BG));
             (brush, COLORREF(COLOR_DARK_TEXT), COLORREF(COLOR_DARK_BG))
@@ -114,5 +113,5 @@ impl ThemeManager {
             let brush = HBRUSH(GetStockObject(WHITE_BRUSH).0);
             (brush, COLORREF(COLOR_LIGHT_TEXT), COLORREF(COLOR_LIGHT_BG))
         }
-    }
+    }}
 }

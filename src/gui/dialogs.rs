@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkMode, TRANSPARENT, FillRect, HDC};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, FillRect, HDC};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 
 use crate::gui::controls::{create_button, ButtonOpts};
@@ -92,7 +92,7 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
     state.result
 }
 
-unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
     let get_state = || {
         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
         if ptr == 0 { None } else { Some(&mut *(ptr as *mut DialogState)) }
@@ -122,7 +122,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 let msg_text = format!("Process '{}' is locking this file.\nForce Stop and try again?", st.process_name);
                 let msg_wide: Vec<u16> = msg_text.encode_utf16().chain(std::iter::once(0)).collect();
                 
-                let h_msg = CreateWindowExW(
+                let _h_msg = CreateWindowExW(
                     Default::default(),
                     w!("STATIC"),
                     PCWSTR(msg_wide.as_ptr()),
@@ -230,4 +230,4 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
         
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
-}
+}}

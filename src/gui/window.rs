@@ -3,12 +3,12 @@ use windows::core::{Result, w, PCWSTR, PWSTR, PCSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, FillRect, HDC,
+    HBRUSH, InvalidateRect, CreateSolidBrush, FillRect, HDC,
     SetBkMode, SetTextColor, TRANSPARENT, CreateFontW, 
     DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     FW_NORMAL, DEFAULT_CHARSET,
 };
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE, DWMWINDOWATTRIBUTE};
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,

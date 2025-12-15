@@ -1,9 +1,9 @@
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, SendMessageW,
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW, WM_SETFONT,
-    WS_VISIBLE, WM_CREATE, WM_COMMAND,
+    WS_VISIBLE, WM_CREATE,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, DestroyWindow, 
@@ -20,7 +20,7 @@ use windows::Win32::UI::Controls::{
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::Win32::Graphics::Gdi::{
-    HBRUSH, COLOR_WINDOW, SetTextColor, SetBkMode, CreateSolidBrush, HDC, DeleteObject, HGDIOBJ, FillRect, TRANSPARENT,
+    HBRUSH, COLOR_WINDOW, HDC, DeleteObject, HGDIOBJ, FillRect,
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT,
 };
