@@ -17,7 +17,8 @@ use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData};
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-use crate::gui::controls::{create_button, ButtonOpts, apply_button_theme};
+use crate::gui::controls::apply_button_theme;
+use crate::gui::builder::ButtonBuilder;
 
 const CONSOLE_CLASS_NAME: PCWSTR = w!("CompactRS_Console");
 const CONSOLE_TITLE: PCWSTR = w!("Debug Console");
@@ -148,11 +149,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
              
              EDIT_HWND = Some(edit);
              
-             // Create Copy and Clear buttons using factory
-             let btn_copy = create_button(hwnd, ButtonOpts::new(w!("Copy"), 0, 0, 80, BUTTON_HEIGHT, IDC_BTN_COPY as u16, IS_DARK_MODE));
+             // Create Copy and Clear buttons using ButtonBuilder
+             let btn_copy = ButtonBuilder::new(hwnd, IDC_BTN_COPY as u16)
+                 .text("Copy").pos(0, 0).size(80, BUTTON_HEIGHT).dark_mode(IS_DARK_MODE).build();
              BTN_COPY_HWND = Some(btn_copy);
              
-             let btn_clear = create_button(hwnd, ButtonOpts::new(w!("Clear"), 90, 0, 80, BUTTON_HEIGHT, IDC_BTN_CLEAR as u16, IS_DARK_MODE));
+             let btn_clear = ButtonBuilder::new(hwnd, IDC_BTN_CLEAR as u16)
+                 .text("Clear").pos(90, 0).size(80, BUTTON_HEIGHT).dark_mode(IS_DARK_MODE).build();
              BTN_CLEAR_HWND = Some(btn_clear);
              
              // Apply dark theme to edit control if needed

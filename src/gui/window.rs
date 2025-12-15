@@ -22,12 +22,13 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 
 use crate::gui::controls::{
-    create_button, ButtonOpts, create_combobox, create_progress_bar, 
+    create_combobox, create_progress_bar,
     apply_button_theme, apply_combobox_theme,
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
     IDC_BTN_CONSOLE, IDC_CHK_FORCE, create_checkbox,
 };
+use crate::gui::builder::ButtonBuilder;
 use crate::gui::components::FileListView;
 use crate::gui::settings::show_settings_modal;
 use crate::gui::about::show_about_modal;
@@ -199,22 +200,30 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 // Check if dark mode for initial theme application
                 let is_dark_init = crate::gui::theme::ThemeManager::is_system_dark_mode();
                 
-                // Use ButtonOpts factory pattern (DRY - theme applied inside)
-                let h_add_files = create_button(hwnd, ButtonOpts::new(w!("Files"), 10, btn_y, 65, btn_h, IDC_BTN_ADD_FILES, is_dark_init));
-                let h_add_folder = create_button(hwnd, ButtonOpts::new(w!("Folder"), 85, btn_y, 65, btn_h, IDC_BTN_ADD_FOLDER, is_dark_init));
-                let h_remove = create_button(hwnd, ButtonOpts::new(w!("Remove"), 160, btn_y, 70, btn_h, IDC_BTN_REMOVE, is_dark_init));
+                // Use ButtonBuilder pattern (fluent API - theme applied inside)
+                let h_add_files = ButtonBuilder::new(hwnd, IDC_BTN_ADD_FILES)
+                    .text("Files").pos(10, btn_y).size(65, btn_h).dark_mode(is_dark_init).build();
+                let h_add_folder = ButtonBuilder::new(hwnd, IDC_BTN_ADD_FOLDER)
+                    .text("Folder").pos(85, btn_y).size(65, btn_h).dark_mode(is_dark_init).build();
+                let h_remove = ButtonBuilder::new(hwnd, IDC_BTN_REMOVE)
+                    .text("Remove").pos(160, btn_y).size(70, btn_h).dark_mode(is_dark_init).build();
                 let h_combo = create_combobox(hwnd, 240, btn_y, 110, 200, IDC_COMBO_ALGO);
                 // Force Checkbox
                 let h_force = create_checkbox(hwnd, w!("Force"), 360, btn_y, 60, btn_h, IDC_CHK_FORCE);
-                let h_process = create_button(hwnd, ButtonOpts::new(w!("Process All"), 430, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL, is_dark_init));
-                let h_cancel = create_button(hwnd, ButtonOpts::new(w!("Cancel"), 540, btn_y, 80, btn_h, IDC_BTN_CANCEL, is_dark_init));
+                let h_process = ButtonBuilder::new(hwnd, IDC_BTN_PROCESS_ALL)
+                    .text("Process All").pos(430, btn_y).size(100, btn_h).dark_mode(is_dark_init).build();
+                let h_cancel = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
+                    .text("Cancel").pos(540, btn_y).size(80, btn_h).dark_mode(is_dark_init).build();
                 
                 
                 // Settings/About items
-                let h_settings = create_button(hwnd, ButtonOpts::new(w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS, is_dark_init)); // Gear icon
-                let h_about = create_button(hwnd, ButtonOpts::new(w!("?"), 0, 0, 30, 25, IDC_BTN_ABOUT, is_dark_init)); // About icon
+                let h_settings = ButtonBuilder::new(hwnd, IDC_BTN_SETTINGS)
+                    .text("\u{2699}").pos(0, 0).size(30, 25).dark_mode(is_dark_init).build(); // Gear icon
+                let h_about = ButtonBuilder::new(hwnd, IDC_BTN_ABOUT)
+                    .text("?").pos(0, 0).size(30, 25).dark_mode(is_dark_init).build(); // About icon
                 // Console button (using a simple ">_" or similar text)
-                let h_console = create_button(hwnd, ButtonOpts::new(w!(">_"), 0, 0, 30, 25, IDC_BTN_CONSOLE, is_dark_init));
+                let h_console = ButtonBuilder::new(hwnd, IDC_BTN_CONSOLE)
+                    .text(">_").pos(0, 0).size(30, 25).dark_mode(is_dark_init).build();
 
                 // Apply dark theme to ComboBox and Checkbox
                 if is_dark_init {

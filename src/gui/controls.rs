@@ -3,7 +3,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     HMENU,
     CreateWindowExW, SendMessageW, 
     WS_CHILD, WS_VISIBLE, WS_BORDER, WS_TABSTOP, WS_VSCROLL,
-    BS_PUSHBUTTON, BS_AUTOCHECKBOX, CBS_DROPDOWNLIST, CBS_HASSTRINGS,
+    BS_AUTOCHECKBOX, CBS_DROPDOWNLIST, CBS_HASSTRINGS,
 };
 use windows::Win32::UI::Controls::{
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_FULLROWSELECT, LVS_EX_DOUBLEBUFFER, LVS_REPORT, LVS_SHOWSELALWAYS,
@@ -54,49 +54,6 @@ pub unsafe fn create_progress_bar(parent: HWND, x: i32, y: i32, w: i32, h: i32, 
         ).unwrap_or_default()
     }
 }
-
-/// Configuration struct for button creation (Factory Pattern)
-pub struct ButtonOpts<'a> {
-    pub text: PCWSTR,
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
-    pub id: u16,
-    pub is_dark: bool,
-    #[allow(dead_code)]
-    _marker: std::marker::PhantomData<&'a ()>,
-}
-
-impl<'a> ButtonOpts<'a> {
-    pub fn new(text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16, is_dark: bool) -> Self {
-        Self { text, x, y, w, h, id, is_dark, _marker: std::marker::PhantomData }
-    }
-}
-
-/// Creates a button with theme applied internally.
-/// This is the unified factory function - theme is applied inside, not by caller.
-pub unsafe fn create_button(parent: HWND, opts: ButtonOpts) -> HWND { unsafe {
-    let module = GetModuleHandleW(None).unwrap();
-    let instance = HINSTANCE(module.0);
-    let hwnd = CreateWindowExW(
-        Default::default(),
-        w!("BUTTON"),
-        opts.text,
-        windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | BS_PUSHBUTTON as u32),
-        opts.x, opts.y, opts.w, opts.h,
-        Some(parent),
-        Some(HMENU(opts.id as isize as *mut _)),
-        Some(instance),
-        None
-    ).unwrap_or_default();
-    
-    // Apply button theme immediately (DarkMode_Explorer for dark, Explorer for light)
-    apply_button_theme(hwnd, opts.is_dark);
-    
-    hwnd
-}}
-
 /// Apply button theme dynamically (for theme changes after creation)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) { unsafe {
     if is_dark {

@@ -15,7 +15,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, FillRect, HDC};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 
-use crate::gui::controls::{create_button, ButtonOpts};
+use crate::gui::builder::ButtonBuilder;
 use crate::gui::theme::ThemeManager;
 use crate::gui::utils::{ToWide, get_window_state};
 
@@ -133,12 +133,13 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 ).unwrap_or_default();
                 
                 // Yes Button
-                create_button(hwnd, ButtonOpts::new(w!("Force Stop (Yes)"), 40, 90, 130, 32, IDC_BTN_YES, is_dark));
+                ButtonBuilder::new(hwnd, IDC_BTN_YES)
+                    .text("Force Stop (Yes)").pos(40, 90).size(130, 32).dark_mode(is_dark).build();
                 
                 // No Button with Timer
                 let no_text = format!("Cancel ({})", st.seconds_left);
-                let no_wide = no_text.to_wide();
-                create_button(hwnd, ButtonOpts::new(PCWSTR(no_wide.as_ptr()), 190, 90, 130, 32, IDC_BTN_NO, is_dark));
+                ButtonBuilder::new(hwnd, IDC_BTN_NO)
+                    .text(&no_text).pos(190, 90).size(130, 32).dark_mode(is_dark).build();
                 
                 // Start Timer
                 SetTimer(Some(hwnd), TIMER_ID, 1000, None);

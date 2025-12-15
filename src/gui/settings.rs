@@ -17,7 +17,7 @@ use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, HDC, DeleteObject, HGD
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
 use crate::gui::state::AppTheme;
-use crate::gui::controls::{create_button, ButtonOpts};
+use crate::gui::builder::ButtonBuilder;
 use crate::gui::utils::get_window_state;
 
 const SETTINGS_CLASS_NAME: PCWSTR = w!("CompactRS_Settings");
@@ -333,7 +333,8 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             }
 
             // Buttons
-            let _close_btn = create_button(hwnd, ButtonOpts::new(w!("Close"), 110, 200, 80, 25, IDC_BTN_CANCEL, is_dark_mode));
+            let _close_btn = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
+                .text("Close").pos(110, 200).size(80, 25).dark_mode(is_dark_mode).build();
 
             LRESULT(0)
         },
