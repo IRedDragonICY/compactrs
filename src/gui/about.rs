@@ -26,6 +26,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 // Removed: create_button, ButtonOpts, IDC_BTN_OK - OK button removed from About dialog
+use crate::gui::utils::get_window_state;
 
 const ABOUT_CLASS_NAME: PCWSTR = w!("CompactRS_About");
 const ABOUT_TITLE: PCWSTR = w!("About CompactRS");
@@ -118,10 +119,8 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
 
 unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
-        let get_state = || {
-            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-            if ptr == 0 { None } else { Some(&mut *(ptr as *mut AboutState)) }
-        };
+        // Use centralized helper for state access
+        let get_state = || get_window_state::<AboutState>(hwnd);
 
         match msg {
             WM_CTLCOLORSTATIC => {

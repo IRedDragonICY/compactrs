@@ -54,6 +54,7 @@ use crate::engine::worker::{
 };
 use humansize::{format_size, BINARY};
 use crate::config::AppConfig;
+use crate::gui::utils::{ToWide, get_window_state};
 
 
 
@@ -198,10 +199,8 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
-        let get_state = || {
-            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-            if ptr == 0 { None } else { Some(&mut *(ptr as *mut AppState)) }
-        };
+        // Use the centralized helper for state access
+        let get_state = || get_window_state::<AppState>(hwnd);
 
         match msg {
             WM_CREATE => {
@@ -569,7 +568,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     },
 
                     IDC_BTN_CONSOLE => {
-                        if let Some(app_state) = (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut AppState).as_mut() {
+                        if let Some(app_state) = get_window_state::<AppState>(hwnd) {
                              let is_dark = is_app_dark_mode(hwnd);
                              show_console_window(hwnd, &app_state.logs, is_dark);
                         }
@@ -797,10 +796,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
             
             WM_DESTROY => {
-                let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-                if ptr != 0 {
-                    let state = &mut *(ptr as *mut AppState);
-                    
+                if let Some(state) = get_window_state::<AppState>(hwnd) {
                     // Capture window position/size
                     let mut rect = windows::Win32::Foundation::RECT::default();
                     if GetWindowRect(hwnd, &mut rect).is_ok() {
@@ -832,7 +828,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     
                     // Save config to file
                     state.config.save();
-                    
+                }
+                
+                // Clean up state allocation
+                let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+                if ptr != 0 {
                     let _ = Box::from_raw(ptr as *mut AppState);
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 }
@@ -1062,11 +1062,11 @@ unsafe fn setup_batch_listview_columns(hwnd: HWND) {
 
 unsafe fn add_listview_item(hwnd: HWND, id: u32, path: &str, algorithm: &str, action: &str, size_logical: &str, size_disk: &str, detected_algo: Option<WofAlgorithm>) {
     // Columns: 0=Path | 1=Algo | 2=Action | 3=Size | 4=OnDisk | 5=Progress | 6=Status | 7=Start
-    let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    let algo_wide: Vec<u16> = algorithm.encode_utf16().chain(std::iter::once(0)).collect();
-    let action_wide: Vec<u16> = action.encode_utf16().chain(std::iter::once(0)).collect();
-    let size_wide: Vec<u16> = size_logical.encode_utf16().chain(std::iter::once(0)).collect();
-    let disk_wide: Vec<u16> = size_disk.encode_utf16().chain(std::iter::once(0)).collect();
+    let path_wide = path.to_wide();
+    let algo_wide = algorithm.to_wide();
+    let action_wide = action.to_wide();
+    let size_wide = size_logical.to_wide();
+    let disk_wide = size_disk.to_wide();
     
     // Show compression status with algorithm name if already compressed
     let status_text = match detected_algo {
@@ -1076,8 +1076,8 @@ unsafe fn add_listview_item(hwnd: HWND, id: u32, path: &str, algorithm: &str, ac
         Some(WofAlgorithm::Lzx) => "LZX ✓".to_string(),
         None => "Pending".to_string(),
     };
-    let status_wide: Vec<u16> = status_text.encode_utf16().chain(std::iter::once(0)).collect();
-    let start_wide: Vec<u16> = "▶".encode_utf16().chain(std::iter::once(0)).collect();
+    let status_wide = status_text.to_wide();
+    let start_wide = "▶".to_wide();
     
     // Insert main item (path column)
     let mut item = LVITEMW {
@@ -1131,7 +1131,7 @@ unsafe fn add_listview_item(hwnd: HWND, id: u32, path: &str, algorithm: &str, ac
 
 /// Update a specific cell in the ListView
 unsafe fn update_listview_item(hwnd: HWND, row: i32, col: i32, text: &str) {
-    let text_wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let text_wide = text.to_wide();
     
     let item = LVITEMW {
         mask: LVIF_TEXT,
@@ -1198,9 +1198,7 @@ fn apply_backdrop(hwnd: HWND) {
 // Check effective dark mode state (System or Override)
 unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
     // Try to get AppState to check override
-    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-    if ptr != 0 {
-        let st = &*(ptr as *const AppState);
+    if let Some(st) = get_window_state::<AppState>(hwnd) {
         match st.theme {
             AppTheme::Dark => return true,
             AppTheme::Light => return false,

@@ -5,6 +5,7 @@ use windows::Win32::System::RestartManager::{
     CCH_RM_SESSION_KEY, RM_PROCESS_INFO, RmRebootReasonNone,
 };
 use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+use crate::gui::utils::ToWide;
 
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
@@ -23,7 +24,7 @@ pub fn get_file_blockers(path: &str) -> Vec<ProcessInfo> {
             return Vec::new();
         }
 
-        let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        let path_wide = path.to_wide();
         let resources = [PCWSTR(path_wide.as_ptr())];
         
         // Register connection to the file

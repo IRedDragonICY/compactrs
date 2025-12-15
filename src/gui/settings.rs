@@ -19,6 +19,7 @@ use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_D
 use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
 use crate::gui::state::AppTheme;
 use crate::gui::controls::{create_button, ButtonOpts};
+use crate::gui::utils::get_window_state;
 
 const SETTINGS_CLASS_NAME: PCWSTR = w!("CompactRS_Settings");
 const SETTINGS_TITLE: PCWSTR = w!("Settings");
@@ -228,10 +229,8 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
 
 
 unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
-    let get_state = || {
-        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-        if ptr == 0 { None } else { Some(&mut *(ptr as *mut SettingsState)) }
-    };
+    // Use centralized helper for state access
+    let get_state = || get_window_state::<SettingsState>(hwnd);
 
     match msg {
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {

@@ -6,5 +6,6 @@ pub mod settings;
 pub mod dialogs;
 pub mod about;
 pub mod console;
+pub mod utils;
 
 pub mod taskbar;

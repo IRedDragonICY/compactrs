@@ -4,6 +4,7 @@ use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
 use crate::gui::state::{UiMessage, BatchAction};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
+use crate::gui::utils::ToWide;
 use windows::Win32::Foundation::{HWND, WPARAM, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
 
@@ -179,7 +180,7 @@ fn try_compress_with_lock_handling(
                      if !blockers.is_empty() {
                          // Found a blocker. Ask Main Thread.
                          let name = &blockers[0].name;
-                         let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+                         let name_wide = name.to_wide();
                          let hwnd = HWND(main_hwnd as *mut _); // Cast usize back to HWND handle
                          
                          // Synchronous call to Main UI

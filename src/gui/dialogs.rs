@@ -18,6 +18,7 @@ use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_D
 
 use crate::gui::controls::{create_button, ButtonOpts};
 use crate::gui::theme::ThemeManager;
+use crate::gui::utils::{ToWide, get_window_state};
 
 const DIALOG_CLASS_NAME: PCWSTR = w!("CompactRS_ForceStopDialog");
 const TIMER_ID: usize = 1;
@@ -93,10 +94,8 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
 }
 
 unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
-    let get_state = || {
-        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-        if ptr == 0 { None } else { Some(&mut *(ptr as *mut DialogState)) }
-    };
+    // Use centralized helper for state access
+    let get_state = || get_window_state::<DialogState>(hwnd);
 
     match msg {
         WM_CREATE => {
@@ -120,7 +119,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
             
                 // Message Label
                 let msg_text = format!("Process '{}' is locking this file.\nForce Stop and try again?", st.process_name);
-                let msg_wide: Vec<u16> = msg_text.encode_utf16().chain(std::iter::once(0)).collect();
+                let msg_wide = msg_text.to_wide();
                 
                 let _h_msg = CreateWindowExW(
                     Default::default(),
@@ -139,7 +138,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 
                 // No Button with Timer
                 let no_text = format!("Cancel ({})", st.seconds_left);
-                let no_wide: Vec<u16> = no_text.encode_utf16().chain(std::iter::once(0)).collect();
+                let no_wide = no_text.to_wide();
                 create_button(hwnd, ButtonOpts::new(PCWSTR(no_wide.as_ptr()), 190, 90, 130, 32, IDC_BTN_NO, is_dark));
                 
                 // Start Timer
@@ -179,7 +178,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                         
                         // Update No button text
                         let no_text = format!("Cancel ({})", st.seconds_left);
-                        let no_wide: Vec<u16> = no_text.encode_utf16().chain(std::iter::once(0)).collect();
+                        let no_wide = no_text.to_wide();
                         if let Ok(h_btn) = GetDlgItem(Some(hwnd), IDC_BTN_NO.into()) {
                              let _ = SetWindowTextW(h_btn, PCWSTR(no_wide.as_ptr()));
                         }
