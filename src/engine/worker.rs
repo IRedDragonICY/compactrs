@@ -124,6 +124,54 @@ pub fn detect_path_algorithm(path: &str) -> Option<WofAlgorithm> {
 
 // ===== WORKER FUNCTIONS =====
 
+fn try_compress_with_lock_handling(
+    path: &str, 
+    algo: WofAlgorithm, 
+    force: bool, 
+    main_hwnd: usize
+) -> Result<bool, String> {
+    match compress_file(path, algo, force) {
+        Ok(res) => Ok(res),
+        Err(e) => {
+             // Check if force is true AND it is a sharing violation (0x80070020 = -2147024864)
+             if force && e.code().0 == -2147024864 {
+                 // Try to get blockers; catch unwind in case it panics
+                 let blockers_res = std::panic::catch_unwind(|| {
+                     crate::engine::process::get_file_blockers(path)
+                 });
+                 
+                 if let Ok(blockers) = blockers_res {
+                     if !blockers.is_empty() {
+                         // Found a blocker. Ask Main Thread.
+                         let name = &blockers[0].name;
+                         let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+                         let hwnd = HWND(main_hwnd as *mut _); // Cast usize back to HWND handle
+                         
+                         // Synchronous call to Main UI
+                         let res = unsafe { 
+                             SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
+                         };
+                         
+                         if res.0 == 1 {
+                             // Kill approved
+                             for b in blockers {
+                                 let _ = crate::engine::process::kill_process(b.pid);
+                             }
+                             // Slight delay to allow OS to release lock
+                             std::thread::sleep(std::time::Duration::from_millis(100));
+                             
+                             // Retry Compression
+                             return compress_file(path, algo, force)
+                                .map_err(|e2| format!("Failed retry {}: {:?}", path, e2));
+                         }
+                     }
+                 }
+             }
+             Err(format!("Failed {}: {:?}", path, e))
+        }
+    }
+}
+
 pub fn batch_process_worker(
     items: Vec<(String, BatchAction, usize)>, 
     algo: WofAlgorithm, 
@@ -209,7 +257,7 @@ pub fn batch_process_worker(
             let hwnd_val = main_hwnd; // Capture HWND value
 
             s.spawn(move || {
-                let hwnd = HWND(hwnd_val as *mut _); // Reconstruct HWND
+                // let hwnd = HWND(hwnd_val as *mut _); // HWND handled in helper
                 loop {
                     // Claim the next task index
                     let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
@@ -223,7 +271,7 @@ pub fn batch_process_worker(
 
                     let (file_path, action, row_idx) = &tasks_ref[i];
                     
-                    let result = match action {
+                    match action {
                         BatchAction::Compress => {
                             // Check if compressible / beneficial, UNLESS forced
                             let path = std::path::Path::new(file_path);
@@ -243,72 +291,31 @@ pub fn batch_process_worker(
                                 continue; // Skip to next file
                             }
                             
-                            // If force is ON, we might try compressing even if extension is bad.
-                            // But usually we just pass it to compress_file.
-                            compress_file(file_path, algo_copy, force_copy)
-                        },
-                        BatchAction::Decompress => uncompress_file(file_path).map(|_| true),
-                    };
-                    
-                    match result {
-                        Ok(true) => {
-                             success_ref.fetch_add(1, Ordering::Relaxed);
-                        },
-                        Ok(false) => {
-                             // Driver said no (not beneficial)
-                             success_ref.fetch_add(1, Ordering::Relaxed);
-                             let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
-                        },
-                        Err(e) => {
-                            // Check for Sharing Violation (0x80070020 = -2147024864)
-                            let mut handled = false;
-                            if force_copy && e.code().0 == -2147024864 {
-                                if let Ok(blockers) = std::panic::catch_unwind(|| {
-                                     crate::engine::process::get_file_blockers(file_path)
-                                }) {
-                                    if !blockers.is_empty() {
-                                        // Found a blocker. Ask Main Thread.
-                                        let name = &blockers[0].name;
-                                        let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-                                        
-                                        // Synchronous call to Main UI
-                                        let res = unsafe { 
-                                            SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
-                                        };
-                                        
-                                        if res.0 == 1 {
-                                            // Kill approved
-                                            for b in blockers {
-                                                let _ = crate::engine::process::kill_process(b.pid);
-                                            }
-                                            // Slight delay to allow OS to release lock
-                                            std::thread::sleep(std::time::Duration::from_millis(100));
-                                            
-                                            // Retry Compression
-                                            match compress_file(file_path, algo_copy, force_copy) {
-                                                Ok(true) => {
-                                                    success_ref.fetch_add(1, Ordering::Relaxed);
-                                                    handled = true;
-                                                },
-                                                Ok(false) => { // Still not beneficial?
-                                                     success_ref.fetch_add(1, Ordering::Relaxed);
-                                                     let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial) after kill: {}", file_path)));
-                                                     handled = true;
-                                                },
-                                                Err(e2) => {
-                                                    // Failed again
-                                                    let _ = tx_clone.send(UiMessage::Error(format!("Failed retry {}: {:?}", file_path, e2)));
-                                                    // Fallthrough to failure count
-                                                }
-                                            }
-                                        }
-                                    }
+                            // Use helper with lock handling
+                            match try_compress_with_lock_handling(file_path, algo_copy, force_copy, hwnd_val) {
+                                Ok(true) => {
+                                    success_ref.fetch_add(1, Ordering::Relaxed);
+                                },
+                                Ok(false) => {
+                                    // Driver said no (not beneficial)
+                                    success_ref.fetch_add(1, Ordering::Relaxed);
+                                    let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
+                                },
+                                Err(msg) => {
+                                    failed_ref.fetch_add(1, Ordering::Relaxed);
+                                    let _ = tx_clone.send(UiMessage::Error(msg));
                                 }
                             }
-                            
-                            if !handled {
-                                failed_ref.fetch_add(1, Ordering::Relaxed);
-                                let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                        },
+                        BatchAction::Decompress => {
+                            match uncompress_file(file_path) {
+                                Ok(_) => {
+                                    success_ref.fetch_add(1, Ordering::Relaxed);
+                                },
+                                Err(e) => {
+                                    failed_ref.fetch_add(1, Ordering::Relaxed);
+                                    let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                                }
                             }
                         }
                     }
@@ -441,74 +448,39 @@ pub fn single_item_worker(
         
         // If force is ON, we proceed to compress_file even if !compressible.
         
-        let result = match action {
-            BatchAction::Compress => compress_file(&path, algo, force),
-            BatchAction::Decompress => uncompress_file(&path).map(|_| true),
-        };
-        
-        match result {
-            Ok(true) => {
-                 success += 1;
-                 let compressed_size = get_real_file_size(&path);
-                 let disk_str = format_size(compressed_size, BINARY);
-                 let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
-            },
-            Ok(false) => {
-                 // Skipped (not beneficial)
-                 success += 1;
-                 let _ = tx.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", path)));
-                 let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
-            },
-            Err(e) => {
-                // Check for Sharing Violation (0x80070020 = -2147024864)
-                let mut handled = false;
-                if force && e.code().0 == -2147024864 {
-                    if let Ok(blockers) = std::panic::catch_unwind(|| {
-                         crate::engine::process::get_file_blockers(&path)
-                    }) {
-                        if !blockers.is_empty() {
-                            let name = &blockers[0].name;
-                            let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-                            // Reconstruct HWND
-                            let hwnd = HWND(main_hwnd as *mut _);
-                            let res = unsafe { 
-                                SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
-                            };
-                            
-                            if res.0 == 1 {
-                                for b in blockers {
-                                    let _ = crate::engine::process::kill_process(b.pid);
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                                match compress_file(&path, algo, force) {
-                                    Ok(true) => {
-                                        success += 1;
-                                        let compressed_size = get_real_file_size(&path);
-                                        let disk_str = format_size(compressed_size, BINARY);
-                                        let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
-                                        handled = true;
-                                    },
-                                    Ok(false) => {
-                                        success += 1;
-                                        let _ = tx.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", path)));
-                                        let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
-                                        handled = true;
-                                    },
-                                    Err(e2) => {
-                                        let _ = tx.send(UiMessage::Error(format!("Failed retry {}: {}", path, e2)));
-                                        // Fallthrough
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                if !handled {
+        if action == BatchAction::Compress {
+             match try_compress_with_lock_handling(&path, algo, force, main_hwnd) {
+                Ok(true) => {
+                     success += 1;
+                     let compressed_size = get_real_file_size(&path);
+                     let disk_str = format_size(compressed_size, BINARY);
+                     let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
+                },
+                Ok(false) => {
+                     success += 1;
+                     let _ = tx.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", path)));
+                     let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
+                },
+                Err(msg) => {
                     failed += 1;
-                    let _ = tx.send(UiMessage::Error(format!("Failed {}: {}", path, e)));
+                    let _ = tx.send(UiMessage::Error(msg));
                     let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
                 }
+             }
+        } else {
+            // Decompress
+            match uncompress_file(&path) {
+                 Ok(_) => {
+                     success += 1;
+                     let compressed_size = get_real_file_size(&path);
+                     let disk_str = format_size(compressed_size, BINARY);
+                     let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
+                 },
+                 Err(e) => {
+                     failed += 1;
+                     let _ = tx.send(UiMessage::Error(format!("Failed {}: {:?}", path, e)));
+                     let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
+                 }
             }
         }
 
@@ -556,7 +528,7 @@ pub fn single_item_worker(
                  let hwnd_val = main_hwnd; 
 
                  s.spawn(move || {
-                     let hwnd = HWND(hwnd_val as *mut _);
+                     // let hwnd = HWND(hwnd_val as *mut _); // HWND handled in helper
                      loop {
                         let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
                         if i >= tasks_len {
@@ -569,7 +541,7 @@ pub fn single_item_worker(
                         
                         let file_path = &tasks_ref[i];
                         
-                        let result = match action_copy {
+                        match action_copy {
                             BatchAction::Compress => {
                                 // Check if compressible / beneficial, UNLESS forced
                                 let path = std::path::Path::new(file_path);
@@ -589,50 +561,27 @@ pub fn single_item_worker(
                                     continue; // Skip to next file
                                 }
                                 
-                                compress_file(file_path, algo_copy, force_copy)
-                            },
-                            BatchAction::Decompress => uncompress_file(file_path).map(|_| true),
-                        };
-                        
-                        match result {
-                            Ok(true) => {
-                                 success_ref.fetch_add(1, Ordering::Relaxed);
-                            },
-                            Ok(false) => {
-                                 // Skipped (not beneficial)
-                                 success_ref.fetch_add(1, Ordering::Relaxed);
-                                 let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
-                            },
-                            Err(e) => {
-                                // Check for Sharing Violation (0x80070020 = -2147024864)
-                                let mut handled = false;
-                                if force_copy && e.code().0 == -2147024864 {
-                                    if let Ok(blockers) = std::panic::catch_unwind(|| {
-                                         crate::engine::process::get_file_blockers(file_path)
-                                    }) {
-                                        if !blockers.is_empty() {
-                                            let name = &blockers[0].name;
-                                            let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
-                                            let res = unsafe { 
-                                                SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
-                                            };
-                                            
-                                            if res.0 == 1 {
-                                                for b in blockers { let _ = crate::engine::process::kill_process(b.pid); }
-                                                std::thread::sleep(std::time::Duration::from_millis(100));
-                                                match compress_file(file_path, algo_copy, force_copy) {
-                                                    Ok(true) => { success_ref.fetch_add(1, Ordering::Relaxed); handled = true; },
-                                                    Ok(false) => { success_ref.fetch_add(1, Ordering::Relaxed); handled = true; },
-                                                    Err(_) => {}
-                                                }
-                                            }
-                                        }
+                                match try_compress_with_lock_handling(file_path, algo_copy, force_copy, hwnd_val) {
+                                    Ok(true) => { success_ref.fetch_add(1, Ordering::Relaxed); },
+                                    Ok(false) => {
+                                        success_ref.fetch_add(1, Ordering::Relaxed);
+                                        let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
+                                    },
+                                    Err(msg) => {
+                                        failed_ref.fetch_add(1, Ordering::Relaxed);
+                                        let _ = tx_clone.send(UiMessage::Error(msg));
                                     }
                                 }
-                                
-                                if !handled {
-                                    failed_ref.fetch_add(1, Ordering::Relaxed);
-                                    let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                            },
+                            BatchAction::Decompress => {
+                                match uncompress_file(file_path) {
+                                    Ok(_) => {
+                                        success_ref.fetch_add(1, Ordering::Relaxed);
+                                    },
+                                    Err(e) => {
+                                        failed_ref.fetch_add(1, Ordering::Relaxed);
+                                        let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                                    }
                                 }
                             }
                         }
