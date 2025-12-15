@@ -7,6 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::Win32::UI::Controls::{
     LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_FULLROWSELECT, LVS_EX_DOUBLEBUFFER, LVS_REPORT, LVS_SHOWSELALWAYS,
+    SetWindowTheme,
 };
 use windows::core::{w, PCWSTR};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -54,7 +55,9 @@ pub unsafe fn create_progress_bar(parent: HWND, x: i32, y: i32, w: i32, h: i32, 
     }
 }
 
-pub unsafe fn create_button(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND {
+/// Creates a button with dark mode theme applied immediately if is_dark is true.
+/// This is the shared function used by both Console and Main Window.
+pub unsafe fn create_button_themed(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16, is_dark: bool) -> HWND {
     unsafe {
         let module = GetModuleHandleW(None).unwrap();
         let instance = HINSTANCE(module.0);
@@ -62,14 +65,44 @@ pub unsafe fn create_button(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, 
             Default::default(),
             w!("BUTTON"),
             text,
-            windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | WS_TABSTOP.0 | BS_PUSHBUTTON as u32),
+            // Console-style button: WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON (no WS_TABSTOP)
+            windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | BS_PUSHBUTTON as u32),
             x, y, w, h,
             Some(parent),
             Some(HMENU(id as isize as *mut _)),
             Some(instance),
             None
         ).unwrap_or_default();
+        
+        // Apply theme immediately after creation (like Console does)
+        if is_dark {
+            let _ = SetWindowTheme(hwnd, w!("DarkMode_Explorer"), None);
+        }
+        
         hwnd
+    }
+}
+
+/// Legacy create_button without theme - calls create_button_themed with is_dark=false
+pub unsafe fn create_button(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND {
+    create_button_themed(parent, text, x, y, w, h, id, false)
+}
+
+/// Apply button theme dynamically (for theme changes after creation)
+pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
+    if is_dark {
+        let _ = SetWindowTheme(hwnd, w!("DarkMode_Explorer"), None);
+    } else {
+        let _ = SetWindowTheme(hwnd, w!("Explorer"), None);
+    }
+}
+
+/// Apply ComboBox theme dynamically
+pub unsafe fn apply_combobox_theme(hwnd: HWND, is_dark: bool) {
+    if is_dark {
+        let _ = SetWindowTheme(hwnd, w!("DarkMode_CFD"), None);
+    } else {
+        let _ = SetWindowTheme(hwnd, w!("Explorer"), None);
     }
 }
 

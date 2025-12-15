@@ -3,7 +3,7 @@ use windows::core::{Result, w, PCWSTR, PWSTR, PCSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, 
+    HBRUSH, COLOR_WINDOW, InvalidateRect, CreateSolidBrush, FillRect, HDC,
     SetBkMode, SetTextColor, TRANSPARENT, CreateFontW, 
     DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     FW_NORMAL, DEFAULT_CHARSET,
@@ -15,15 +15,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND, SetWindowPos, SWP_NOZORDER,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK,
+    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK, WM_ERASEBKGND, GetClientRect,
 };
 use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles, SetWindowSubclass, DefSubclassProc};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 use windows::Win32::System::Registry::{RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_READ, HKEY};
 use crate::gui::controls::{
-    create_button, create_listview, create_combobox, create_progress_bar, IDC_COMBO_ALGO, 
-    IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
+    create_button, create_button_themed, create_listview, create_combobox, create_progress_bar, 
+    apply_button_theme, apply_combobox_theme,
+    IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
     IDC_BTN_CONSOLE, IDC_CHK_FORCE, create_checkbox,
 };
@@ -132,12 +133,21 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
         InitCommonControlsEx(&iccex);
 
 
+        // Check dark mode for window class background
+        let is_dark = is_system_dark_mode_preference();
+        let bg_brush = if is_dark {
+            // Dark background brush (same as get_dark_brush color 0x001E1E1E)
+            unsafe { CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x001E1E1E)) }
+        } else {
+            HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _)
+        };
+
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wnd_proc),
             hInstance: instance,
             hCursor: LoadCursorW(None, IDC_ARROW)?,
-            hbrBackground: HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _),
+            hbrBackground: bg_brush,
             lpszClassName: WINDOW_CLASS_NAME,
             ..Default::default()
         };
@@ -211,21 +221,31 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let btn_h = 32;
                 let btn_y = 460;
                 
-                let h_add_files = create_button(hwnd, w!("Files"), 10, btn_y, 65, btn_h, IDC_BTN_ADD_FILES);
-                let h_add_folder = create_button(hwnd, w!("Folder"), 85, btn_y, 65, btn_h, IDC_BTN_ADD_FOLDER);
-                let h_remove = create_button(hwnd, w!("Remove"), 160, btn_y, 70, btn_h, IDC_BTN_REMOVE);
+                // Check if dark mode for initial theme application
+                let is_dark_init = is_system_dark_mode_preference();
+                
+                // Use shared create_button_themed function (same as Console)
+                let h_add_files = create_button_themed(hwnd, w!("Files"), 10, btn_y, 65, btn_h, IDC_BTN_ADD_FILES, is_dark_init);
+                let h_add_folder = create_button_themed(hwnd, w!("Folder"), 85, btn_y, 65, btn_h, IDC_BTN_ADD_FOLDER, is_dark_init);
+                let h_remove = create_button_themed(hwnd, w!("Remove"), 160, btn_y, 70, btn_h, IDC_BTN_REMOVE, is_dark_init);
                 let h_combo = create_combobox(hwnd, 240, btn_y, 110, 200, IDC_COMBO_ALGO);
                 // Force Checkbox
                 let h_force = create_checkbox(hwnd, w!("Force"), 360, btn_y, 60, btn_h, IDC_CHK_FORCE);
-                let h_process = create_button(hwnd, w!("Process All"), 430, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL);
-                let h_cancel = create_button(hwnd, w!("Cancel"), 540, btn_y, 80, btn_h, IDC_BTN_CANCEL);
+                let h_process = create_button_themed(hwnd, w!("Process All"), 430, btn_y, 100, btn_h, IDC_BTN_PROCESS_ALL, is_dark_init);
+                let h_cancel = create_button_themed(hwnd, w!("Cancel"), 540, btn_y, 80, btn_h, IDC_BTN_CANCEL, is_dark_init);
                 
                 
                 // Settings/About items
-                let h_settings = create_button(hwnd, w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS); // Gear icon
-                let h_about = create_button(hwnd, w!("?"), 0, 0, 30, 25, IDC_BTN_ABOUT); // About icon
+                let h_settings = create_button_themed(hwnd, w!("\u{2699}"), 0, 0, 30, 25, IDC_BTN_SETTINGS, is_dark_init); // Gear icon
+                let h_about = create_button_themed(hwnd, w!("?"), 0, 0, 30, 25, IDC_BTN_ABOUT, is_dark_init); // About icon
                 // Console button (using a simple ">_" or similar text)
-                let h_console = create_button(hwnd, w!(">_"), 0, 0, 30, 25, IDC_BTN_CONSOLE);
+                let h_console = create_button_themed(hwnd, w!(">_"), 0, 0, 30, 25, IDC_BTN_CONSOLE, is_dark_init);
+
+                // Apply dark theme to ComboBox and Checkbox
+                if is_dark_init {
+                    let _ = SetWindowTheme(h_combo, w!("DarkMode_CFD"), None);
+                    let _ = SetWindowTheme(h_force, w!("DarkMode_Explorer"), None);
+                }
 
                 let _ = h_add_files; // Used via IDC_BTN_ADD_FILES
                 EnableWindow(h_cancel, false);
@@ -262,7 +282,19 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 LRESULT(0)
             }
             
-
+            // WM_ERASEBKGND - Paint dark background when in dark mode
+            WM_ERASEBKGND => {
+                if is_app_dark_mode(hwnd) {
+                    let hdc = HDC(wparam.0 as *mut _);
+                    let mut rc = windows::Win32::Foundation::RECT::default();
+                    GetClientRect(hwnd, &mut rc);
+                    
+                    let brush = get_dark_brush();
+                    FillRect(hdc, &rc, brush);
+                    return LRESULT(1);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             
             // WM_THEME_CHANGED (Custom Message)
             0x8001 => {
@@ -1187,50 +1219,39 @@ fn update_theme(hwnd: HWND) {
             w!("Segoe UI Variable Display"),
         );
         
-        // Helper to update button theme, font, and force dark mode
-        let update_btn_theme = |id: u16| {
+        // Helper to update button font and theme using shared function
+        let update_btn = |id: u16| {
             if let Ok(btn) = GetDlgItem(Some(hwnd), id as i32) {
                 if !btn.is_invalid() {
-                    // Force dark mode on control itself (Ordinal 133)
-                    allow_dark_mode_for_window(btn, dark);
-                    
-                    let font_height = -12;
-                    let hfont = CreateFontW(
-                        font_height, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
-                        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
-                        w!("Segoe UI Variable Display"));
-                    
                     SendMessageW(btn, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-                    
-                    if dark {
-                         // DarkMode_Explorer gives dark buttons (with border)
-                        let _ = SetWindowTheme(btn, w!("DarkMode_Explorer"), None);
-                    } else {
-                         let _ = SetWindowTheme(btn, w!("Explorer"), None);
-                    }
+                    apply_button_theme(btn, dark);
                 }
             }
         };
         
-        // Update all buttons
-        update_btn_theme(IDC_BTN_ADD_FILES);
-        update_btn_theme(IDC_BTN_ADD_FOLDER);
-        update_btn_theme(IDC_BTN_REMOVE);
-        update_btn_theme(IDC_BTN_PROCESS_ALL);
-        update_btn_theme(IDC_BTN_CANCEL);
-        update_btn_theme(IDC_BTN_SETTINGS);
-        update_btn_theme(IDC_BTN_ABOUT);
+        // Update all buttons using shared apply_button_theme
+        update_btn(IDC_BTN_ADD_FILES);
+        update_btn(IDC_BTN_ADD_FOLDER);
+        update_btn(IDC_BTN_REMOVE);
+        update_btn(IDC_BTN_PROCESS_ALL);
+        update_btn(IDC_BTN_CANCEL);
+        update_btn(IDC_BTN_SETTINGS);
+        update_btn(IDC_BTN_ABOUT);
+        update_btn(IDC_BTN_CONSOLE);
         
-        // Update ComboBox
+        // Update ComboBox using shared apply_combobox_theme
         if let Ok(combo) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO as i32) {
              if !combo.is_invalid() {
                  SendMessageW(combo, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-                 allow_dark_mode_for_window(combo, dark);
-                 if dark {
-                     let _ = SetWindowTheme(combo, w!("Explorer"), None); 
-                 } else {
-                     let _ = SetWindowTheme(combo, w!("Explorer"), None);
-                 }
+                 apply_combobox_theme(combo, dark);
+             }
+        }
+        
+        // Update Force Checkbox using shared apply_button_theme (same theme as buttons)
+        if let Ok(chk) = GetDlgItem(Some(hwnd), IDC_CHK_FORCE as i32) {
+             if !chk.is_invalid() {
+                 SendMessageW(chk, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
+                 apply_button_theme(chk, dark);
              }
         }
         

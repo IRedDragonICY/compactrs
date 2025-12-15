@@ -1,26 +1,34 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use windows::core::{w, PCWSTR, Result};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, HINSTANCE, COLORREF};
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkColor, CreateSolidBrush, HDC};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkColor, CreateSolidBrush, HDC, FillRect};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT,
+    WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_COMMAND, WM_CTLCOLORBTN, WM_ERASEBKGND,
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, 
     LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow, TranslateMessage,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, MSG, SW_SHOW, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, SetWindowPos, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOZORDER,
     WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL, WM_SETFONT,
-    SendMessageW, GetWindowTextLengthW,
+    SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW, GetClientRect,
 };
-use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL}; // Correct import location
+use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData};
+use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use crate::gui::controls::{create_button_themed, apply_button_theme};
 
 const CONSOLE_CLASS_NAME: PCWSTR = w!("CompactRS_Console");
 const CONSOLE_TITLE: PCWSTR = w!("Debug Console");
 const IDC_EDIT_CONSOLE: i32 = 1001;
+const IDC_BTN_COPY: i32 = 1002;
+const IDC_BTN_CLEAR: i32 = 1003;
+const BUTTON_HEIGHT: i32 = 30;
 
 static mut CONSOLE_HWND: Option<HWND> = None;
 static mut EDIT_HWND: Option<HWND> = None;
+static mut BTN_COPY_HWND: Option<HWND> = None;
+static mut BTN_CLEAR_HWND: Option<HWND> = None;
 static mut IS_DARK_MODE: bool = false;
 static mut DARK_BRUSH: Option<HBRUSH> = None;
 
@@ -128,19 +136,120 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
              ).unwrap();
              
              EDIT_HWND = Some(edit);
+             
+             // Create Copy and Clear buttons using shared function
+             let btn_copy = create_button_themed(hwnd, w!("Copy"), 0, 0, 80, BUTTON_HEIGHT, IDC_BTN_COPY as u16, IS_DARK_MODE);
+             BTN_COPY_HWND = Some(btn_copy);
+             
+             let btn_clear = create_button_themed(hwnd, w!("Clear"), 90, 0, 80, BUTTON_HEIGHT, IDC_BTN_CLEAR as u16, IS_DARK_MODE);
+             BTN_CLEAR_HWND = Some(btn_clear);
+             
+             // Apply dark theme to edit control if needed
+             if IS_DARK_MODE {
+                 let _ = SetWindowTheme(edit, w!("DarkMode_Explorer"), None);
+             }
+             
              LRESULT(0)
+        },
+        WM_ERASEBKGND => {
+            if IS_DARK_MODE {
+                let hdc = HDC(wparam.0 as *mut _);
+                let mut rc = windows::Win32::Foundation::RECT::default();
+                GetClientRect(hwnd, &mut rc);
+                
+                let brush = if let Some(b) = DARK_BRUSH {
+                    b
+                } else {
+                    let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
+                    DARK_BRUSH = Some(new_brush);
+                    new_brush
+                };
+                FillRect(hdc, &rc, brush);
+                return LRESULT(1);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         },
         WM_SIZE => {
             let width = (lparam.0 & 0xFFFF) as i32;
             let height = ((lparam.0 >> 16) & 0xFFFF) as i32;
+            
+            // Position edit control (leave space for buttons at bottom)
             if let Some(edit) = EDIT_HWND {
-                SetWindowPos(edit, None, 0, 0, width, height, SWP_NOZORDER);
+                SetWindowPos(edit, None, 0, 0, width, height - BUTTON_HEIGHT - 5, SWP_NOZORDER);
+            }
+            
+            // Position buttons at bottom
+            let btn_y = height - BUTTON_HEIGHT;
+            if let Some(btn) = BTN_COPY_HWND {
+                SetWindowPos(btn, None, 5, btn_y, 80, BUTTON_HEIGHT - 5, SWP_NOZORDER);
+            }
+            if let Some(btn) = BTN_CLEAR_HWND {
+                SetWindowPos(btn, None, 90, btn_y, 80, BUTTON_HEIGHT - 5, SWP_NOZORDER);
+            }
+            
+            LRESULT(0)
+        },
+        WM_COMMAND => {
+            let id = (wparam.0 & 0xFFFF) as i32;
+            match id {
+                IDC_BTN_COPY => {
+                    // Copy edit content to clipboard
+                    if let Some(edit) = EDIT_HWND {
+                        let len = GetWindowTextLengthW(edit);
+                        if len > 0 {
+                            let mut buffer: Vec<u16> = vec![0; (len + 1) as usize];
+                            GetWindowTextW(edit, &mut buffer);
+                            
+                            // Copy to clipboard
+                            if OpenClipboard(Some(hwnd)).is_ok() {
+                                let _ = EmptyClipboard();
+                                let size = (buffer.len() * 2) as usize;
+                                if let Ok(hmem) = GlobalAlloc(GMEM_MOVEABLE, size) {
+                                    let ptr = GlobalLock(hmem);
+                                    if !ptr.is_null() {
+                                        std::ptr::copy_nonoverlapping(buffer.as_ptr(), ptr as *mut u16, buffer.len());
+                                        GlobalUnlock(hmem);
+                                        // CF_UNICODETEXT = 13
+                                        let _ = SetClipboardData(13, Some(windows::Win32::Foundation::HANDLE(hmem.0)));
+                                    }
+                                }
+                                let _ = CloseClipboard();
+                            }
+                        }
+                    }
+                },
+                IDC_BTN_CLEAR => {
+                    // Clear edit content
+                    if let Some(edit) = EDIT_HWND {
+                        SetWindowTextW(edit, w!(""));
+                    }
+                },
+                _ => {}
             }
             LRESULT(0)
+        },
+        WM_CTLCOLORBTN => {
+            if IS_DARK_MODE {
+                let hdc = HDC(wparam.0 as *mut _);
+                SetTextColor(hdc, COLORREF(0x00FFFFFF));
+                SetBkColor(hdc, COLORREF(0x001E1E1E));
+                
+                let brush = if let Some(b) = DARK_BRUSH {
+                    b
+                } else {
+                    let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
+                    DARK_BRUSH = Some(new_brush);
+                    new_brush
+                };
+                return LRESULT(brush.0 as isize);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         },
         WM_DESTROY => {
             CONSOLE_HWND = None;
             EDIT_HWND = None;
+            BTN_COPY_HWND = None;
+            BTN_CLEAR_HWND = None;
             if let Some(brush) = DARK_BRUSH {
                 windows::Win32::Graphics::Gdi::DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
                 DARK_BRUSH = None;
@@ -175,13 +284,28 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 DARK_BRUSH = None;
             }
             
+            // Update edit control theme for scrollbar
+            if let Some(edit) = EDIT_HWND {
+                if new_is_dark {
+                    let _ = SetWindowTheme(edit, w!("DarkMode_Explorer"), None);
+                } else {
+                    let _ = SetWindowTheme(edit, w!("Explorer"), None);
+                }
+            }
+            
+            // Update button themes using shared function
+            if let Some(btn) = BTN_COPY_HWND {
+                apply_button_theme(btn, new_is_dark);
+            }
+            if let Some(btn) = BTN_CLEAR_HWND {
+                apply_button_theme(btn, new_is_dark);
+            }
+            
             // Update DWM title bar
             update_console_theme(hwnd, new_is_dark);
             
-            // Force repaint
-            if let Some(edit) = EDIT_HWND {
-                windows::Win32::Graphics::Gdi::InvalidateRect(Some(edit), None, true);
-            }
+            // Force repaint entire window
+            windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, true);
             LRESULT(0)
         },
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),

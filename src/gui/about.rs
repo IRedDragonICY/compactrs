@@ -1,8 +1,8 @@
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
-    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, SendMessageW,
+    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW, WM_SETFONT,
     WS_VISIBLE, WM_CREATE, WM_COMMAND,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
@@ -18,7 +18,11 @@ use windows::Win32::UI::Controls::{
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, SetTextColor, SetBkMode, CreateSolidBrush, HDC, DeleteObject, HGDIOBJ, FillRect, TRANSPARENT};
+use windows::Win32::Graphics::Gdi::{
+    HBRUSH, COLOR_WINDOW, SetTextColor, SetBkMode, CreateSolidBrush, HDC, DeleteObject, HGDIOBJ, FillRect, TRANSPARENT,
+    CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
+    DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT,
+};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use crate::gui::controls::{create_button, IDC_BTN_OK};
 
@@ -63,8 +67,8 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
         windows::Win32::UI::WindowsAndMessaging::GetWindowRect(parent, &mut rect).unwrap_or_default();
         let p_width = rect.right - rect.left;
         let p_height = rect.bottom - rect.top;
-        let width = 400;
-        let height = 320;
+        let width = 450;  // Wider for better text display
+        let height = 420; // Taller for better spacing
         let x = rect.left + (p_width - width) / 2;
         let y = rect.top + (p_height - height) / 2;
 
@@ -196,73 +200,119 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 };
                 InitCommonControlsEx(&iccex);
 
-                // App Name
+                let content_width = 410; // Wider content area
+                let margin = 20;
+
+                // Create modern fonts for visual hierarchy
+                let title_font = CreateFontW(
+                    -28, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
+                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI Variable Display"));
+                
+                let version_font = CreateFontW(
+                    -14, 0, 0, 0, FW_LIGHT.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
+                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI Variable Display"));
+                
+                let body_font = CreateFontW(
+                    -13, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
+                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI"));
+                
+                let creator_font = CreateFontW(
+                    -12, 0, 0, 0, FW_NORMAL.0 as i32, 1, 0, 0, DEFAULT_CHARSET, // Italic
+                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI"));
+
+                // App Name - Large bold title
                 let app_name = CreateWindowExW(
                     Default::default(),
                     w!("STATIC"),
                     w!("CompactRS"),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    10, 20, 360, 30,
+                    margin, 20, content_width, 40,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
                     None
                 ).unwrap_or_default();
+                SendMessageW(app_name, WM_SETFONT, Some(WPARAM(title_font.0 as usize)), Some(LPARAM(1)));
                 if is_dark_mode {
                     let _ = SetWindowTheme(app_name, w!(""), w!(""));
                 }
 
-                // Version
+                // Version - Lighter font
                 let version = CreateWindowExW(
                     Default::default(),
                     w!("STATIC"),
                     w!("Version 0.1.0"),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    10, 50, 360, 20,
+                    margin, 65, content_width, 20,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
                     None
                 ).unwrap_or_default();
+                SendMessageW(version, WM_SETFONT, Some(WPARAM(version_font.0 as usize)), Some(LPARAM(1)));
                 if is_dark_mode {
                     let _ = SetWindowTheme(version, w!(""), w!(""));
                 }
 
-                // Description
+                // Description - Regular body text
                 let desc = CreateWindowExW(
                     Default::default(),
                     w!("STATIC"),
-                    w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss. Features a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."),
+                    w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    10, 80, 360, 140,
+                    margin, 100, content_width, 130,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
                     None
                 ).unwrap_or_default();
+                SendMessageW(desc, WM_SETFONT, Some(WPARAM(body_font.0 as usize)), Some(LPARAM(1)));
                 if is_dark_mode {
                     let _ = SetWindowTheme(desc, w!(""), w!(""));
                 }
 
-                // GitHub Link (SysLink)
-                let link_text = w!("Check out the code on <a href=\"https://github.com/IRedDragonICY/compactrs\">GitHub</a> or view the <a href=\"https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE\">License</a>.");
+                // Created by - Italic style
+                let creator = CreateWindowExW(
+                    Default::default(),
+                    w!("STATIC"),
+                    w!("Created by IRedDragonICY\n(Mohammad Farid Hendianto)"),
+                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
+                    margin, 245, content_width, 40,
+                    Some(hwnd),
+                    None,
+                    Some(instance.into()),
+                    None
+                ).unwrap_or_default();
+                SendMessageW(creator, WM_SETFONT, Some(WPARAM(creator_font.0 as usize)), Some(LPARAM(1)));
+                if is_dark_mode {
+                    let _ = SetWindowTheme(creator, w!(""), w!(""));
+                }
+
+                // GitHub Link (SysLink) - Centered
+                let link_text = w!("<a href=\"https://github.com/IRedDragonICY/compactrs\">GitHub</a>  •  <a href=\"https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE\">License</a>");
                 let link = CreateWindowExW(
                     Default::default(),
                     WC_LINK,
                     link_text,
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | windows::Win32::UI::WindowsAndMessaging::WS_TABSTOP.0),
-                    10, 230, 360, 20,
+                    margin, 300, content_width, 25,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
                     None
                 ).unwrap_or_default();
+                SendMessageW(link, WM_SETFONT, Some(WPARAM(body_font.0 as usize)), Some(LPARAM(1)));
                 if is_dark_mode {
                     let _ = SetWindowTheme(link, w!(""), w!(""));
                 }
 
-                // OK Button
-                let ok_btn = create_button(hwnd, w!("OK"), 160, 260, 80, 25, IDC_BTN_OK);
+                // OK Button - Centered
+                let ok_btn = create_button(hwnd, w!("OK"), 185, 350, 80, 30, IDC_BTN_OK);
+                SendMessageW(ok_btn, WM_SETFONT, Some(WPARAM(body_font.0 as usize)), Some(LPARAM(1)));
                 if is_dark_mode {
                     let _ = SetWindowTheme(ok_btn, w!(""), w!(""));
                 }
