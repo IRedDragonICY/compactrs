@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: compactrs
@@ -62,9 +65,9 @@ jobs:
       - name: Get version and changelog
         id: info
         run: |
-          $date = Get-Date -Format "yyyy.MM.dd"
+          $date = Get-Date -Format "yyyy.MM.dd-HHmm"
           $shortSha = "${{ github.sha }}".Substring(0, 7)
-          $version = "v$date-$shortSha"
+          $version = "v$date"
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
           
           $commitMsg = git log -1 --pretty=format:"%s"
