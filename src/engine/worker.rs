@@ -4,6 +4,8 @@ use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
 use crate::gui::state::{UiMessage, BatchAction};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
+use windows::Win32::Foundation::{HWND, WPARAM, LPARAM};
+use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
 
 // ===== HELPER FUNCTIONS (Moved from window.rs) =====
 
@@ -131,7 +133,8 @@ pub fn batch_process_worker(
     algo: WofAlgorithm, 
     tx: Sender<UiMessage>, 
     cancel: Arc<AtomicBool>,
-    force: bool
+    force: bool,
+    main_hwnd: usize // Passed as usize to avoid Send/Sync issues if any (HWND is usually fine though)
 ) {
     // 1. Discovery Phase
     let _ = tx.send(UiMessage::Status("Discovering files...".to_string()));
@@ -212,8 +215,10 @@ pub fn batch_process_worker(
             let next_idx_ref = &next_idx;
             let tasks_ref = &tasks; // Reference to the full vector
             let force_copy = force; // Pass force to the thread
+            let hwnd_val = main_hwnd; // Capture HWND value
 
             s.spawn(move || {
+                let hwnd = HWND(hwnd_val as *mut _); // Reconstruct HWND
                 loop {
                     // Claim the next task index
                     let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
@@ -264,8 +269,56 @@ pub fn batch_process_worker(
                              let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
                         },
                         Err(e) => {
-                            failed_ref.fetch_add(1, Ordering::Relaxed);
-                            let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                            // Check for Sharing Violation (0x80070020 = -2147024864)
+                            let mut handled = false;
+                            if force_copy && e.code().0 == -2147024864 {
+                                if let Ok(blockers) = std::panic::catch_unwind(|| {
+                                     crate::engine::process::get_file_blockers(file_path)
+                                }) {
+                                    if !blockers.is_empty() {
+                                        // Found a blocker. Ask Main Thread.
+                                        let name = &blockers[0].name;
+                                        let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+                                        
+                                        // Synchronous call to Main UI
+                                        let res = unsafe { 
+                                            SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
+                                        };
+                                        
+                                        if res.0 == 1 {
+                                            // Kill approved
+                                            for b in blockers {
+                                                let _ = crate::engine::process::kill_process(b.pid);
+                                            }
+                                            // Slight delay to allow OS to release lock
+                                            std::thread::sleep(std::time::Duration::from_millis(100));
+                                            
+                                            // Retry Compression
+                                            match compress_file(file_path, algo_copy, force_copy) {
+                                                Ok(true) => {
+                                                    success_ref.fetch_add(1, Ordering::Relaxed);
+                                                    handled = true;
+                                                },
+                                                Ok(false) => { // Still not beneficial?
+                                                     success_ref.fetch_add(1, Ordering::Relaxed);
+                                                     let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial) after kill: {}", file_path)));
+                                                     handled = true;
+                                                },
+                                                Err(e2) => {
+                                                    // Failed again
+                                                    let _ = tx_clone.send(UiMessage::Error(format!("Failed retry {}: {:?}", file_path, e2)));
+                                                    // Fallthrough to failure count
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if !handled {
+                                failed_ref.fetch_add(1, Ordering::Relaxed);
+                                let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                            }
                         }
                     }
                     
@@ -335,7 +388,8 @@ pub fn single_item_worker(
     row: i32, 
     tx: Sender<UiMessage>, 
     cancel: Arc<AtomicBool>,
-    force: bool
+    force: bool,
+    main_hwnd: usize
 ) {
     let mut total_files = 0u64;
     let mut processed = 0u64;
@@ -420,9 +474,55 @@ pub fn single_item_worker(
                  let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
             },
             Err(e) => {
-                failed += 1;
-                let _ = tx.send(UiMessage::Error(format!("Failed {}: {}", path, e)));
-                let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
+                // Check for Sharing Violation (0x80070020 = -2147024864)
+                let mut handled = false;
+                if force && e.code().0 == -2147024864 {
+                    if let Ok(blockers) = std::panic::catch_unwind(|| {
+                         crate::engine::process::get_file_blockers(&path)
+                    }) {
+                        if !blockers.is_empty() {
+                            let name = &blockers[0].name;
+                            let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+                            // Reconstruct HWND
+                            let hwnd = HWND(main_hwnd as *mut _);
+                            let res = unsafe { 
+                                SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
+                            };
+                            
+                            if res.0 == 1 {
+                                for b in blockers {
+                                    let _ = crate::engine::process::kill_process(b.pid);
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                match compress_file(&path, algo, force) {
+                                    Ok(true) => {
+                                        success += 1;
+                                        let compressed_size = get_real_file_size(&path);
+                                        let disk_str = format_size(compressed_size, BINARY);
+                                        let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
+                                        handled = true;
+                                    },
+                                    Ok(false) => {
+                                        success += 1;
+                                        let _ = tx.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", path)));
+                                        let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
+                                        handled = true;
+                                    },
+                                    Err(e2) => {
+                                        let _ = tx.send(UiMessage::Error(format!("Failed retry {}: {}", path, e2)));
+                                        // Fallthrough
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if !handled {
+                    failed += 1;
+                    let _ = tx.send(UiMessage::Error(format!("Failed {}: {}", path, e)));
+                    let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
+                }
             }
         }
 
@@ -472,8 +572,10 @@ pub fn single_item_worker(
                  let tasks_ref = &tasks;
                  let row_copy = row; // Capture row for use in closure
                  let force_copy = force;
+                 let hwnd_val = main_hwnd; 
 
                  s.spawn(move || {
+                     let hwnd = HWND(hwnd_val as *mut _);
                      loop {
                         let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
                         if i >= tasks_len {
@@ -521,8 +623,36 @@ pub fn single_item_worker(
                                  let _ = tx_clone.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", file_path)));
                             },
                             Err(e) => {
-                                failed_ref.fetch_add(1, Ordering::Relaxed);
-                                let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                                // Check for Sharing Violation (0x80070020 = -2147024864)
+                                let mut handled = false;
+                                if force_copy && e.code().0 == -2147024864 {
+                                    if let Ok(blockers) = std::panic::catch_unwind(|| {
+                                         crate::engine::process::get_file_blockers(file_path)
+                                    }) {
+                                        if !blockers.is_empty() {
+                                            let name = &blockers[0].name;
+                                            let name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+                                            let res = unsafe { 
+                                                SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
+                                            };
+                                            
+                                            if res.0 == 1 {
+                                                for b in blockers { let _ = crate::engine::process::kill_process(b.pid); }
+                                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                                match compress_file(file_path, algo_copy, force_copy) {
+                                                    Ok(true) => { success_ref.fetch_add(1, Ordering::Relaxed); handled = true; },
+                                                    Ok(false) => { success_ref.fetch_add(1, Ordering::Relaxed); handled = true; },
+                                                    Err(_) => {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                if !handled {
+                                    failed_ref.fetch_add(1, Ordering::Relaxed);
+                                    let _ = tx_clone.send(UiMessage::Error(format!("Failed {}: {:?}", file_path, e)));
+                                }
                             }
                         }
                          

@@ -3,6 +3,7 @@ use std::fs::File;
 use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::prelude::OsStrExt;
+use std::os::windows::fs::OpenOptionsExt;
 use windows::core::{PCWSTR, Result};
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, OPEN_EXISTING, GetCompressedFileSizeW};
@@ -178,9 +179,11 @@ impl WofAlgorithm {
 
 pub fn compress_file(path: &str, algo: WofAlgorithm, force: bool) -> Result<bool> {
     // Requires Write permission for FSCTL_SET_EXTERNAL_BACKING
+    // Use permissive sharing (Read|Write|Delete = 7) to allow processing locked files
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
+        .share_mode(7)
         .open(path)
         .map_err(|_| windows::core::Error::from_thread())?;
     compress_file_handle(&file, algo, force)
@@ -266,11 +269,13 @@ pub fn compress_file_handle(file: &File, algo: WofAlgorithm, force: bool) -> Res
 
 pub fn uncompress_file(path: &str) -> Result<()> {
     // Requires Write permission for FSCTL_DELETE_EXTERNAL_BACKING
+    // Use permissive sharing (Read|Write|Delete = 7) to allow processing locked files
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
+        .share_mode(7)
         .open(path)
-        .map_err(|_| windows::core::Error::from_thread())?; 
+        .map_err(|_| windows::core::Error::from_thread())?;  
     uncompress_file_handle(&file)
 }
 

@@ -133,13 +133,8 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
 
 
         // Check dark mode for window class background
-        let is_dark = is_system_dark_mode_preference();
-        let bg_brush = if is_dark {
-            // Dark background brush (same as get_dark_brush color 0x001E1E1E)
-            unsafe { CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x001E1E1E)) }
-        } else {
-            HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _)
-        };
+        let is_dark = crate::gui::theme::ThemeManager::is_system_dark_mode();
+        let (bg_brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
 
         // Load icon (ID 1)
         let icon_handle = windows::Win32::UI::WindowsAndMessaging::LoadImageW(
@@ -294,17 +289,44 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             
             // WM_ERASEBKGND - Paint dark background when in dark mode
             WM_ERASEBKGND => {
-                if is_app_dark_mode(hwnd) {
-                    let hdc = HDC(wparam.0 as *mut _);
-                    let mut rc = windows::Win32::Foundation::RECT::default();
-                    GetClientRect(hwnd, &mut rc);
-                    
-                    let brush = get_dark_brush();
-                    FillRect(hdc, &rc, brush);
+                let hdc = HDC(wparam.0 as *mut _);
+                let mut rect = windows::Win32::Foundation::RECT::default();
+                if GetClientRect(hwnd, &mut rect).is_ok() {
+                    let is_dark = is_app_dark_mode(hwnd);
+                    let (brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                    FillRect(hdc, &rect, brush);
                     return LRESULT(1);
                 }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
+                LRESULT(0)
             }
+            
+            // WM_APP + 3: Set Enable Force Stop
+            // WPARAM: 0 = disable, 1 = enable
+            0x8003 => {
+                if let Some(st) = get_state() {
+                    st.enable_force_stop = wparam.0 != 0;
+                }
+                LRESULT(0)
+            },
+            
+            // WM_APP + 4: Query Force Stop
+            // WPARAM: Pointer to null-terminated Utf16 process name
+            // Return: 1 (Kill), 0 (Cancel)
+            0x8004 => {
+                let mut should_kill = false;
+                if let Some(st) = get_state() {
+                    if st.enable_force_stop {
+                        should_kill = true;
+                    } else {
+                        // Show Dialog
+                        let name_ptr = wparam.0 as *const u16;
+                        let name = windows::core::PCWSTR(name_ptr).to_string().unwrap_or_default();
+                        let is_dark = is_app_dark_mode(hwnd);
+                        should_kill = crate::gui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark);
+                    }
+                }
+                LRESULT(if should_kill { 1 } else { 0 })
+            },
             
             // WM_THEME_CHANGED (Custom Message)
             0x8001 => {
@@ -471,9 +493,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     }).collect();
                                     
                                     let force = st.force_compress; // Capture force flag
+                                    let main_hwnd_usize = hwnd.0 as usize; // Cast to usize for thread safety
 
                                     thread::spawn(move || {
-                                        batch_process_worker(items, algo, tx, cancel, force);
+                                        batch_process_worker(items, algo, tx, cancel, force, main_hwnd_usize);
                                     });
                                 }
                             }
@@ -498,11 +521,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                             let theme = st.theme;
                             let is_dark = is_app_dark_mode(hwnd);
                             // Modal will block until closed
-                            if let Some(new_theme) = show_settings_modal(hwnd, theme, is_dark) {
-                                st.theme = new_theme;
-                                // Apply immediately
-                                apply_theme(hwnd, new_theme);
+                            let (new_theme, new_force) = show_settings_modal(hwnd, theme, is_dark, st.enable_force_stop);
+                            if let Some(t) = new_theme {
+                                st.theme = t;
+                                apply_theme(hwnd, st.theme);
                             }
+                            st.enable_force_stop = new_force;
                         }
                     },
                     
@@ -770,7 +794,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                      }
                      
                      // 1. Add Placeholders immediately to UI
-                     let mut items_to_analyze = Vec::new();
+                     let mut items_to_analyze: Vec<(u32, String)> = Vec::new();
                      for path in paths {
                          // Check duplicates (simple O(N) check is fine for drag-drop)
                          if !st.batch_items.iter().any(|item| item.path == path) {
@@ -886,8 +910,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             let force = st.force_compress; // Capture force flag
                                             
                                             let row_for_thread = row;
+                                            let main_hwnd_usize = hwnd.0 as usize;
                                             thread::spawn(move || {
-                                                single_item_worker(path, algo, action, row_for_thread, tx, token, force);
+                                                single_item_worker(path, algo, action, row_for_thread, tx, token, force, main_hwnd_usize);
                                             });
                                         }
                                     }
@@ -927,30 +952,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 LRESULT(0)
             }
             
-            // WM_CTLCOLORSTATIC - handle static text colors in dark mode
+            // WM_CTLCOLORSTATIC - handle static text colors
             0x0138 => { // WM_CTLCOLORSTATIC
-                if is_app_dark_mode(hwnd) {
-                    let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
-                    SetTextColor(hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF)); // White text
-                    SetBkMode(hdc, TRANSPARENT);
-                    return LRESULT(get_dark_brush().0 as isize);
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            }
-            
-            // WM_ERASEBKGND - paint dark background
-            0x0014 => { // WM_ERASEBKGND
-                if is_app_dark_mode(hwnd) {
-                    let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
-                    let mut rect = windows::Win32::Foundation::RECT::default();
-                    if windows::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rect).is_ok() {
-                        let brush = get_dark_brush();
-                        windows::Win32::Graphics::Gdi::FillRect(hdc, &rect, brush);
-                        return LRESULT(1);
-                    }
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            }
+                let is_dark = is_app_dark_mode(hwnd);
+                let (brush, text_col, bg_col) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                
+                let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as *mut _);
+                SetTextColor(hdc, text_col);
+                SetBkMode(hdc, TRANSPARENT);
+                return LRESULT(brush.0 as isize);
+            },
+
+
             
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
@@ -1111,26 +1124,7 @@ fn apply_backdrop(hwnd: HWND) {
     unsafe {
         // 1. Monitor System Dark Mode
         let is_dark = is_app_dark_mode(hwnd);
-        let true_val: i32 = 1;
-        let false_val: i32 = 0;
-        
-        // 2. Force Dark Mode Frame (Titlebar & Borders)
-        // DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-        let dwm_dark_mode = DWMWINDOWATTRIBUTE(20); 
-        if is_dark {
-            let _ = DwmSetWindowAttribute(hwnd, dwm_dark_mode, &true_val as *const _ as _, 4);
-        } else {
-             let _ = DwmSetWindowAttribute(hwnd, dwm_dark_mode, &false_val as *const _ as _, 4);
-        }
-
-        // 3. Apply Mica Backdrop (Windows 11 Standard)
-        // This matches Task Manager and Explorer design
-        let system_backdrop_type = DWMWA_SYSTEMBACKDROP_TYPE;
-        let mica = DWM_SYSTEMBACKDROP_TYPE(2); // 2 = Mica
-        let _ = DwmSetWindowAttribute(hwnd, system_backdrop_type, &mica as *const _ as _, 4);
-        
-        // Note: We DO NOT call DwmExtendFrameIntoClientArea for Mica. 
-        // We want the system to draw the Mica background, not transparency.
+        crate::gui::theme::ThemeManager::apply_window_theme(hwnd, is_dark);
     }
 }
 

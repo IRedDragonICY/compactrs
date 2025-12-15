@@ -102,19 +102,13 @@ jobs:
           $changelog | Out-File -FilePath changelog.md -Encoding utf8
         shell: pwsh
 
-      - name: Delete existing release
-        run: |
-          gh release delete latest --yes --cleanup-tag 2>$null
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-        shell: pwsh
+
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: CompactRS Latest (${{ steps.info.outputs.VERSION }})
-          tag_name: latest
+          name: CompactRS ${{ steps.info.outputs.VERSION }}
+          tag_name: ${{ steps.info.outputs.VERSION }}
           body_path: changelog.md
           draft: false
           prerelease: false

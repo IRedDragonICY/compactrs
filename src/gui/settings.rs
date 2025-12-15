@@ -31,12 +31,14 @@ const IDC_RADIO_DARK: u16 = 2003;
 const IDC_RADIO_LIGHT: u16 = 2004;
 const IDC_BTN_OK: u16 = 2005;
 const IDC_BTN_CANCEL: u16 = 2006;
+const IDC_CHK_FORCE_STOP: u16 = 2007;
 
 struct SettingsState {
     theme: AppTheme,
     result: Option<AppTheme>,
     is_dark: bool,
     dark_brush: Option<HBRUSH>,
+    enable_force_stop: bool, // Track checkbox state
 }
 
 impl Drop for SettingsState {
@@ -82,6 +84,7 @@ pub unsafe fn show_settings(parent: HWND, current_theme: AppTheme) -> Option<App
             result: None,
             is_dark: false, // Default for this unused path
             dark_brush: None,
+            enable_force_stop: false,
         });
 
         let _hwnd = CreateWindowExW(
@@ -140,7 +143,7 @@ pub unsafe fn show_settings(parent: HWND, current_theme: AppTheme) -> Option<App
 }
 
 // Redefining proper function with data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool) -> Option<AppTheme> {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool) -> (Option<AppTheme>, bool) {
     unsafe {
         let instance = GetModuleHandleW(None).unwrap_or_default();
         
@@ -172,7 +175,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         let p_width = rect.right - rect.left;
         let p_height = rect.bottom - rect.top;
         let width = 300;
-        let height = 250;
+        let height = 300;
         let x = rect.left + (p_width - width) / 2;
         let y = rect.top + (p_height - height) / 2;
 
@@ -181,6 +184,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
             result: None,
             is_dark,
             dark_brush: None,
+            enable_force_stop,
         };
 
         let _hwnd = CreateWindowExW(
@@ -207,7 +211,9 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         // Non-modal: DON'T re-enable parent window
         // EnableWindow(parent, true);
         
-        state.result
+        // EnableWindow(parent, true);
+        
+        (state.result, state.enable_force_stop)
     }
 }
 
@@ -221,40 +227,27 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
     match msg {
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
             if let Some(st) = get_state() {
-                if st.is_dark {
-                    let hdc = HDC(wparam.0 as *mut _);
-                    SetTextColor(hdc, COLORREF(0x00FFFFFF)); // White text
-                    SetBkMode(hdc, TRANSPARENT);   // Transparent background for text
-                    
-                    let brush = if let Some(b) = st.dark_brush {
-                        b
-                    } else {
-                        let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
-                        st.dark_brush = Some(new_brush);
-                        new_brush
-                    };
-                    return LRESULT(brush.0 as isize);
-                }
+                let is_dark = st.is_dark;
+                let (brush, text_col, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                
+                let hdc = HDC(wparam.0 as *mut _);
+                SetTextColor(hdc, text_col);
+                SetBkMode(hdc, TRANSPARENT);
+                
+                return LRESULT(brush.0 as isize);
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
         WM_ERASEBKGND => {
             if let Some(st) = get_state() {
-                if st.is_dark {
-                    let hdc = HDC(wparam.0 as *mut _);
-                    let mut rc = windows::Win32::Foundation::RECT::default();
-                    GetClientRect(hwnd, &mut rc);
-                    
-                    let brush = if let Some(b) = st.dark_brush {
-                        b
-                    } else {
-                        let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
-                        st.dark_brush = Some(new_brush);
-                        new_brush
-                    };
-                    FillRect(hdc, &rc, brush);
-                    return LRESULT(1); // We handled it
-                }
+                let is_dark = st.is_dark;
+                let (brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                
+                let hdc = HDC(wparam.0 as *mut _);
+                let mut rc = windows::Win32::Foundation::RECT::default();
+                GetClientRect(hwnd, &mut rc);
+                FillRect(hdc, &rc, brush);
+                return LRESULT(1);
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
@@ -325,8 +318,20 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             create_radio(w!("Dark Mode"), IDC_RADIO_DARK, 70, theme == AppTheme::Dark);
             create_radio(w!("Light Mode"), IDC_RADIO_LIGHT, 100, theme == AppTheme::Light);
             
+            // Checkbox: Enable Force Stop (Auto-kill)
+            let enable_force = if let Some(st) = state_ptr.as_ref() { st.enable_force_stop } else { false };
+            let chk = crate::gui::controls::create_checkbox(hwnd, w!("Enable Force Stop (Auto-kill)"), 30, 160, 240, 25, IDC_CHK_FORCE_STOP);
+            if enable_force {
+                 SendMessageW(chk, BM_SETCHECK, Some(WPARAM(1)), None);
+            }
+            if let Some(st) = state_ptr.as_ref() {
+                if st.is_dark {
+                     let _ = SetWindowTheme(chk, w!(""), w!(""));
+                }
+            }
+
             // Buttons
-            let close_btn = create_button(hwnd, w!("Close"), 110, 170, 80, 25, IDC_BTN_CANCEL);
+            let close_btn = create_button(hwnd, w!("Close"), 110, 200, 80, 25, IDC_BTN_CANCEL);
             if is_dark_mode {
                 let _ = SetWindowTheme(close_btn, w!(""), w!(""));
             }
@@ -396,15 +401,26 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                          
                          // Update Settings window title bar
                          let dark_mode: u32 = if new_is_dark { 1 } else { 0 };
-                         let _ = DwmSetWindowAttribute(
-                             hwnd,
-                             DWMWA_USE_IMMERSIVE_DARK_MODE,
-                             &dark_mode as *const u32 as *const _,
-                             4
-                         );
-                         
-                         // Repaint entire window
-                         InvalidateRect(Some(hwnd), None, true);
+                            let _ = DwmSetWindowAttribute(
+                                hwnd,
+                                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                                &dark_mode as *const u32 as *const _,
+                                4
+                            );
+                            
+                            // 5. Update controls theme
+                            use windows::Win32::UI::WindowsAndMessaging::GetDlgItem;
+                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_BTN_CANCEL];
+                            
+                            for &ctrl_id in &controls {
+                                if let Ok(h_ctl) = GetDlgItem(Some(hwnd), ctrl_id.into()) {
+                                    crate::gui::theme::ThemeManager::apply_control_theme(h_ctl, new_is_dark);
+                                    InvalidateRect(Some(h_ctl), None, true);
+                                }
+                            }
+                            
+                            // Repaint entire window
+                            InvalidateRect(Some(hwnd), None, true);
                          
                          // Notify Parent Immediately (WM_APP + 1)
                          if let Ok(parent) = GetParent(hwnd) {
@@ -441,7 +457,24 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                      // }
                      DestroyWindow(hwnd);
                  },
-                 _ => {}
+                  IDC_CHK_FORCE_STOP => {
+                      if (code as u32) == BN_CLICKED {
+                          if let Some(st) = get_state() {
+                               let mut checked = false;
+                               if let Ok(h_ctl) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), IDC_CHK_FORCE_STOP.into()) {
+                                   checked = SendMessageW(h_ctl, windows::Win32::UI::WindowsAndMessaging::BM_GETCHECK, None, None) == LRESULT(1);
+                                   st.enable_force_stop = checked;
+                               }
+                               
+                               // Notify Parent immediately (WM_APP + 3)
+                               if let Ok(parent) = GetParent(hwnd) {
+                                   let val = if checked { 1 } else { 0 };
+                                   SendMessageW(parent, 0x8000 + 3, Some(WPARAM(val)), None);
+                               }
+                          }
+                      }
+                  },
+                  _ => {}
              }
              LRESULT(0)
         },

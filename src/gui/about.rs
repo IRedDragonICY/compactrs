@@ -60,7 +60,7 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             lpszClassName: ABOUT_CLASS_NAME,
-            hIcon: unsafe {
+            hIcon: {
                 let h = LoadImageW(
                     Some(instance.into()), 
                     PCWSTR(1 as *const u16), 
@@ -126,40 +126,27 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
         match msg {
             WM_CTLCOLORSTATIC => {
                 if let Some(st) = get_state() {
-                    if st.is_dark {
-                        let hdc = HDC(wparam.0 as *mut _);
-                        SetTextColor(hdc, COLORREF(0x00FFFFFF)); // White text
-                        SetBkMode(hdc, TRANSPARENT);
-                        
-                        let brush = if let Some(b) = st.dark_brush {
-                            b
-                        } else {
-                            let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
-                            st.dark_brush = Some(new_brush);
-                            new_brush
-                        };
-                        return LRESULT(brush.0 as isize);
-                    }
+                    let is_dark = st.is_dark;
+                    let (brush, text_col, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                    
+                    let hdc = HDC(wparam.0 as *mut _);
+                    SetTextColor(hdc, text_col);
+                    SetBkMode(hdc, TRANSPARENT);
+                    
+                    return LRESULT(brush.0 as isize);
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             },
             WM_ERASEBKGND => {
                 if let Some(st) = get_state() {
-                    if st.is_dark {
-                        let hdc = HDC(wparam.0 as *mut _);
-                        let mut rc = windows::Win32::Foundation::RECT::default();
-                        GetClientRect(hwnd, &mut rc);
-                        
-                        let brush = if let Some(b) = st.dark_brush {
-                            b
-                        } else {
-                            let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
-                            st.dark_brush = Some(new_brush);
-                            new_brush
-                        };
-                        FillRect(hdc, &rc, brush);
-                        return LRESULT(1);
-                    }
+                    let is_dark = st.is_dark;
+                    let (brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                    
+                    let hdc = HDC(wparam.0 as *mut _);
+                    let mut rc = windows::Win32::Foundation::RECT::default();
+                    GetClientRect(hwnd, &mut rc);
+                    FillRect(hdc, &rc, brush);
+                    return LRESULT(1);
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             },

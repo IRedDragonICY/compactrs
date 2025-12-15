@@ -127,6 +127,7 @@ pub struct AppState {
     pub logs: Vec<String>,
     pub console_hwnd: Option<HWND>,
     pub force_compress: bool,
+    pub enable_force_stop: bool,
     pub taskbar: Option<super::taskbar::TaskbarProgress>,
 }
 
@@ -145,6 +146,7 @@ impl AppState {
             logs: Vec::new(),
             console_hwnd: None,
             force_compress: false,
+            enable_force_stop: false,
             taskbar: None,
         }
     }
