@@ -9,7 +9,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BS_AUTORADIOBUTTON, BM_SETCHECK,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
-    FindWindowW,
+    FindWindowW, LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, HICON,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -147,11 +147,21 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     unsafe {
         let instance = GetModuleHandleW(None).unwrap_or_default();
         
+        // Load App Icon (ID 1)
+        let icon_handle = LoadImageW(
+            Some(instance.into()),
+            PCWSTR(1 as *const u16),
+            IMAGE_ICON,
+            0, 0,
+            LR_DEFAULTSIZE | LR_SHARED
+        ).unwrap_or_default();
+        
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(settings_wnd_proc),
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hIcon: HICON(icon_handle.0),
             lpszClassName: SETTINGS_CLASS_NAME,
             hbrBackground: HBRUSH(if is_dark {
                 // Use a dark brush initially if possible, but standard is COLOR_WINDOW
