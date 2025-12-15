@@ -4,7 +4,7 @@ use std::env;
 fn main() -> io::Result<()> {
     if cfg!(target_os = "windows") {
         let mut res = winres::WindowsResource::new();
-        // res.set_icon("icon.ico"); // If we had an icon
+        res.set_icon("icon.ico");
         
         // Use different manifest based on build profile
         // Release: requireAdministrator (app.manifest)

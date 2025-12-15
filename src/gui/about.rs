@@ -9,7 +9,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostQuitMessage, WM_CLOSE, DestroyWindow, 
     WM_NOTIFY, GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA,
     WM_CTLCOLORSTATIC, WM_ERASEBKGND, GetClientRect,
+    STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
 };
+use windows::Win32::Foundation::HINSTANCE;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
     NMHDR, NM_CLICK, NM_RETURN, NMLINK, WC_LINK, ICC_LINK_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx,
@@ -30,6 +32,8 @@ const ABOUT_TITLE: PCWSTR = w!("About CompactRS");
 const GITHUB_URL: PCWSTR = w!("https://github.com/IRedDragonICY/compactrs");
 const LICENSE_URL: PCWSTR = w!("https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE");
 const SS_CENTER: u32 = 1;
+const SS_ICON: u32 = 0x3;
+const SS_REALSIZEIMAGE: u32 = 0x800;
 
 struct AboutState {
     is_dark: bool,
@@ -56,6 +60,16 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             lpszClassName: ABOUT_CLASS_NAME,
+            hIcon: unsafe {
+                let h = LoadImageW(
+                    Some(instance.into()), 
+                    PCWSTR(1 as *const u16), 
+                    IMAGE_ICON, 
+                    0, 0, 
+                    windows::Win32::UI::WindowsAndMessaging::LR_DEFAULTSIZE | windows::Win32::UI::WindowsAndMessaging::LR_SHARED
+                ).unwrap_or_default();
+                windows::Win32::UI::WindowsAndMessaging::HICON(h.0)
+            },
             hbrBackground: HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _),
             ..Default::default()
         };
@@ -67,7 +81,7 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
         let p_width = rect.right - rect.left;
         let p_height = rect.bottom - rect.top;
         let width = 450;  // Wider for better text display
-        let height = 420; // Taller for better spacing
+        let height = 560; // Taller for better spacing and large icon
         let x = rect.left + (p_width - width) / 2;
         let y = rect.top + (p_height - height) / 2;
 
@@ -223,13 +237,49 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                     (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI"));
 
+                // Icon - Centered at top (Large Hero Icon)
+                let icon_size = 128;
+                let icon_x = (450 - icon_size) / 2;
+                
+                // Load icon from resources (ID 1)
+                // Instance is HMODULE, need HINSTANCE
+                let hinstance = HINSTANCE(instance.0);
+                
+                let hicon = LoadImageW(
+                    Some(hinstance),
+                    PCWSTR(1 as *const u16), // Resource ID 1
+                    IMAGE_ICON,
+                    icon_size, icon_size,
+                    LR_DEFAULTCOLOR
+                ).unwrap_or_default();
+                
+                let icon_static = CreateWindowExW(
+                    Default::default(),
+                    w!("STATIC"),
+                    None,
+                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_ICON | SS_REALSIZEIMAGE | SS_CENTER),
+                    icon_x, 20, icon_size, icon_size,
+                    Some(hwnd),
+                    None,
+                    Some(instance.into()),
+                    None
+                ).unwrap_or_default();
+                
+                // Set the icon image
+                SendMessageW(icon_static, STM_SETICON, Some(WPARAM(hicon.0 as usize)), Some(LPARAM(0)));
+                
+                if is_dark_mode {
+                    // For static icons, theme might not be needed but good practice
+                    let _ = SetWindowTheme(icon_static, w!(""), w!(""));
+                }
+
                 // App Name - Large bold title
                 let app_name = CreateWindowExW(
                     Default::default(),
                     w!("STATIC"),
                     w!("CompactRS"),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 20, content_width, 40,
+                    margin, 160, content_width, 40,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
@@ -246,7 +296,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                     w!("STATIC"),
                     w!("Version 0.1.0"),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 65, content_width, 20,
+                    margin, 205, content_width, 20,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
@@ -263,7 +313,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                     w!("STATIC"),
                     w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 100, content_width, 130,
+                    margin, 240, content_width, 130,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
@@ -280,7 +330,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                     w!("STATIC"),
                     w!("Created by IRedDragonICY\n(Mohammad Farid Hendianto)"),
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 245, content_width, 40,
+                    margin, 385, content_width, 40,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
@@ -298,7 +348,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                     WC_LINK,
                     link_text,
                     windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | windows::Win32::UI::WindowsAndMessaging::WS_TABSTOP.0),
-                    margin, 300, content_width, 25,
+                    margin, 440, content_width, 25,
                     Some(hwnd),
                     None,
                     Some(instance.into()),
@@ -310,7 +360,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 }
 
                 // OK Button - Centered
-                let ok_btn = create_button(hwnd, w!("OK"), 185, 350, 80, 30, IDC_BTN_OK);
+                let ok_btn = create_button(hwnd, w!("OK"), 185, 490, 80, 30, IDC_BTN_OK);
                 SendMessageW(ok_btn, WM_SETFONT, Some(WPARAM(body_font.0 as usize)), Some(LPARAM(1)));
                 if is_dark_mode {
                     let _ = SetWindowTheme(ok_btn, w!(""), w!(""));

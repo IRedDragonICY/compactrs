@@ -140,10 +140,20 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
             HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _)
         };
 
+        // Load icon (ID 1)
+        let icon_handle = windows::Win32::UI::WindowsAndMessaging::LoadImageW(
+            Some(instance),
+            PCWSTR(1 as *const u16),
+            windows::Win32::UI::WindowsAndMessaging::IMAGE_ICON,
+            0, 0, // Default size
+            windows::Win32::UI::WindowsAndMessaging::LR_DEFAULTSIZE | windows::Win32::UI::WindowsAndMessaging::LR_SHARED
+        ).unwrap_or_default();
+        
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wnd_proc),
             hInstance: instance,
+            hIcon: windows::Win32::UI::WindowsAndMessaging::HICON(icon_handle.0),
             hCursor: LoadCursorW(None, IDC_ARROW)?,
             hbrBackground: bg_brush,
             lpszClassName: WINDOW_CLASS_NAME,
