@@ -25,20 +25,21 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, HMENU, SendMessageW, WM_NOTIFY, WS_BORDER, WS_CHILD, WS_VISIBLE,
 };
 
-use crate::engine::wof::WofAlgorithm;
+use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::ui::state::BatchItem;
 use crate::ui::utils::ToWide;
 
 /// Column indices for the FileListView
 pub mod columns {
     pub const PATH: i32 = 0;
-    pub const ALGORITHM: i32 = 1;
-    pub const ACTION: i32 = 2;
-    pub const SIZE: i32 = 3;
-    pub const ON_DISK: i32 = 4;
-    pub const PROGRESS: i32 = 5;
-    pub const STATUS: i32 = 6;
-    pub const START: i32 = 7;
+    pub const CURRENT: i32 = 1;
+    pub const ALGORITHM: i32 = 2;
+    pub const ACTION: i32 = 3;
+    pub const SIZE: i32 = 4;
+    pub const ON_DISK: i32 = 5;
+    pub const PROGRESS: i32 = 6;
+    pub const STATUS: i32 = 7;
+    pub const START: i32 = 8;
 }
 
 /// A high-level facade for the Win32 ListView control used to display batch items.
@@ -108,9 +109,10 @@ impl FileListView {
 
     /// Sets up the ListView columns.
     fn setup_columns(&self) {
-        // Columns: Path | Algo | Action | Size | On Disk | Progress | Status | ▶ Start
+        // Columns: Path | Current | Algo | Action | Size | On Disk | Progress | Status | ▶ Start
         let columns = [
             (w!("Path"), 250),
+            (w!("Current"), 70),
             (w!("Algorithm"), 70),
             (w!("Action"), 70),
             (w!("Size"), 75),
@@ -148,7 +150,7 @@ impl FileListView {
     /// * `item` - The BatchItem containing path, algorithm, action data
     /// * `size_logical` - Logical size string (e.g., "1.5 GiB")
     /// * `size_disk` - On-disk size string
-    /// * `detected_algo` - Optional detected compression algorithm
+    /// * `state` - Current compression state
     ///
     /// # Returns
     /// The row index where the item was inserted.
@@ -158,7 +160,7 @@ impl FileListView {
         item: &BatchItem,
         size_logical: &str,
         size_disk: &str,
-        detected_algo: Option<WofAlgorithm>,
+        state: CompressionState,
     ) -> i32 {
         let path_wide = item.path.to_wide();
         let algo_str = Self::algo_to_str(item.algorithm);
@@ -172,14 +174,16 @@ impl FileListView {
         let size_wide = size_logical.to_wide();
         let disk_wide = size_disk.to_wide();
 
-        // Show compression status with algorithm name if already compressed
-        let status_text = match detected_algo {
-            Some(WofAlgorithm::Xpress4K) => "XPRESS4K ✓".to_string(),
-            Some(WofAlgorithm::Xpress8K) => "XPRESS8K ✓".to_string(),
-            Some(WofAlgorithm::Xpress16K) => "XPRESS16K ✓".to_string(),
-            Some(WofAlgorithm::Lzx) => "LZX ✓".to_string(),
-            None => "Pending".to_string(),
+        // Format current state string
+        let current_text = match state {
+            CompressionState::None => "-".to_string(),
+            CompressionState::Specific(algo) => Self::algo_to_str(algo).to_string(),
+            CompressionState::Mixed => "Mixed".to_string(),
         };
+        let current_wide = current_text.to_wide();
+
+        // Show pending status initially
+        let status_text = "Pending".to_string();
         let status_wide = status_text.to_wide();
         let start_wide = "▶".to_wide();
 
@@ -207,7 +211,17 @@ impl FileListView {
             lvi.mask = LVIF_TEXT;
             lvi.iItem = row;
 
-            // Col 1 = Algorithm
+            // Col 1 = Current State
+            lvi.iSubItem = columns::CURRENT;
+            lvi.pszText = PWSTR(current_wide.as_ptr() as *mut _);
+            SendMessageW(
+                self.hwnd,
+                LVM_SETITEMW,
+                Some(WPARAM(0)),
+                Some(LPARAM(&lvi as *const _ as isize)),
+            );
+
+            // Col 2 = Algorithm
             lvi.iSubItem = columns::ALGORITHM;
             lvi.pszText = PWSTR(algo_wide.as_ptr() as *mut _);
             SendMessageW(
@@ -217,7 +231,7 @@ impl FileListView {
                 Some(LPARAM(&lvi as *const _ as isize)),
             );
 
-            // Col 2 = Action
+            // Col 3 = Action
             lvi.iSubItem = columns::ACTION;
             lvi.pszText = PWSTR(action_wide.as_ptr() as *mut _);
             SendMessageW(
@@ -227,7 +241,7 @@ impl FileListView {
                 Some(LPARAM(&lvi as *const _ as isize)),
             );
 
-            // Col 3 = Size (logical/uncompressed)
+            // Col 4 = Size (logical/uncompressed)
             lvi.iSubItem = columns::SIZE;
             lvi.pszText = PWSTR(size_wide.as_ptr() as *mut _);
             SendMessageW(
@@ -237,7 +251,7 @@ impl FileListView {
                 Some(LPARAM(&lvi as *const _ as isize)),
             );
 
-            // Col 4 = On Disk (compressed size)
+            // Col 5 = On Disk (compressed size)
             lvi.iSubItem = columns::ON_DISK;
             lvi.pszText = PWSTR(disk_wide.as_ptr() as *mut _);
             SendMessageW(
@@ -247,10 +261,10 @@ impl FileListView {
                 Some(LPARAM(&lvi as *const _ as isize)),
             );
 
-            // Col 5 = Progress (empty initially)
+            // Col 6 = Progress (empty initially)
             // Left empty
 
-            // Col 6 = Status (shows WOF ✓ if already compressed)
+            // Col 7 = Status (shows Pending)
             lvi.iSubItem = columns::STATUS;
             lvi.pszText = PWSTR(status_wide.as_ptr() as *mut _);
             SendMessageW(
@@ -260,7 +274,7 @@ impl FileListView {
                 Some(LPARAM(&lvi as *const _ as isize)),
             );
 
-            // Col 7 = Start button
+            // Col 8 = Start button
             lvi.iSubItem = columns::START;
             lvi.pszText = PWSTR(start_wide.as_ptr() as *mut _);
             SendMessageW(

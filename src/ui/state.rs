@@ -30,10 +30,10 @@ pub enum UiMessage {
     Log(String),
     Status(String),
     Finished,
-    /// Single item finished: (row_index, status, size_after)
-    ItemFinished(i32, String, String),
-    /// Item analyzed (id, logical_size, disk_size, algorithm)
-    BatchItemAnalyzed(u32, u64, u64, Option<WofAlgorithm>),
+    /// Single item finished: (row_index, status, size_after, final_state)
+    ItemFinished(i32, String, String, crate::engine::wof::CompressionState),
+    /// Item analyzed (id, logical_size, disk_size, compression_state)
+    BatchItemAnalyzed(u32, u64, u64, crate::engine::wof::CompressionState),
     Error(String),
 }
 

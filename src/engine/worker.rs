@@ -88,42 +88,46 @@ pub fn is_folder_compressed(logical_size: u64, disk_size: u64) -> bool {
 }
 
 /// Detect the predominant WOF algorithm used in a folder
-/// Samples up to 10 files to determine the algorithm
-pub fn detect_folder_algorithm(path: &str) -> Option<WofAlgorithm> {
-    let mut algo_counts = [0u32; 4]; // Xpress4K, Lzx, Xpress8K, Xpress16K
-    let mut sampled = 0;
+/// Returns Mixed if multiple algorithms are found
+pub fn detect_folder_algorithm(path: &str) -> crate::engine::wof::CompressionState {
+    use crate::engine::wof::CompressionState;
+    
+    let mut found_algos = std::collections::HashSet::new();
+    let mut scanned_files = 0;
     
     for result in create_walk_builder(path)
         .build()
     {
-        if sampled >= 20 { break; } // Sample enough files
+        if scanned_files >= 50 { break; } // Sample limit
         
         if let Ok(entry) = result {
             if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
                 let file_path = entry.path().to_string_lossy().to_string();
                 if let Some(algo) = get_wof_algorithm(&file_path) {
-                    algo_counts[algo as usize] += 1;
-                    sampled += 1;
+                    found_algos.insert(algo as u32);
                 }
+                scanned_files += 1;
             }
         }
     }
     
-    // Find the most common algorithm
-    let max_idx = algo_counts.iter().enumerate().max_by_key(|(_, v)| *v).map(|(i, _)| i);
-    
-    if let Some(idx) = max_idx {
-        if algo_counts[idx] > 0 {
-            return match idx {
-                0 => Some(WofAlgorithm::Xpress4K),
-                1 => Some(WofAlgorithm::Lzx),
-                2 => Some(WofAlgorithm::Xpress8K),
-                3 => Some(WofAlgorithm::Xpress16K),
-                _ => None,
-            };
-        }
+    if found_algos.is_empty() {
+        return CompressionState::None;
     }
-    None
+    
+    if found_algos.len() > 1 {
+        return CompressionState::Mixed;
+    }
+    
+    // Only one algorithm found
+    let algo_val = found_algos.into_iter().next().unwrap();
+    match algo_val {
+        0 => CompressionState::Specific(WofAlgorithm::Xpress4K),
+        1 => CompressionState::Specific(WofAlgorithm::Lzx),
+        2 => CompressionState::Specific(WofAlgorithm::Xpress8K),
+        3 => CompressionState::Specific(WofAlgorithm::Xpress16K),
+        _ => CompressionState::None,
+    }
 }
 
 // ===== PATH-AWARE FUNCTIONS (work for both files and folders) =====
@@ -149,10 +153,15 @@ pub fn calculate_path_disk_size(path: &str) -> u64 {
 }
 
 /// Detect WOF algorithm for a path (file or folder)  
-pub fn detect_path_algorithm(path: &str) -> Option<WofAlgorithm> {
+pub fn detect_path_algorithm(path: &str) -> crate::engine::wof::CompressionState {
+    use crate::engine::wof::CompressionState;
+    
     let p = std::path::Path::new(path);
     if p.is_file() {
-        get_wof_algorithm(path)
+        match get_wof_algorithm(path) {
+            Some(algo) => CompressionState::Specific(algo),
+            None => CompressionState::None,
+        }
     } else {
         detect_folder_algorithm(path)
     }
@@ -428,7 +437,8 @@ pub fn batch_process_worker(
         // Check if there were failed items for this row?
         // We tracked global failures, but not per-row failures. 
         // For now just mark as Done.
-        let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, "Done".to_string(), size_str));
+        let end_state = detect_path_algorithm(&path);
+        let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, "Done".to_string(), size_str, end_state));
     }
 
     let s = success.load(Ordering::Relaxed);
@@ -490,7 +500,7 @@ pub fn single_item_worker(
     if is_single_file {
         // Process single file directly
         if cancel.load(Ordering::Relaxed) {
-            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
+            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
             let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
             let _ = tx.send(UiMessage::Finished);
             return;
@@ -505,15 +515,17 @@ pub fn single_item_worker(
                 success += 1;
                 let compressed_size = get_real_file_size(&path);
                 let disk_str = format_size(compressed_size, BINARY);
-                let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str));
+                let final_state = detect_path_algorithm(&path);
+                let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str, final_state));
             }
             ProcessResult::Skipped(_) => {
                 success += 1;
-                let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string()));
+                let final_state = detect_path_algorithm(&path);
+                let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string(), final_state));
             }
             ProcessResult::Failed(_) => {
                 failed += 1;
-                let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string()));
+                let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
             }
         }
 
@@ -612,7 +624,7 @@ pub fn single_item_worker(
         });
         
         if cancel.load(Ordering::Relaxed) {
-            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string()));
+            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
             let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
             let _ = tx.send(UiMessage::Finished);
             return;
@@ -630,7 +642,8 @@ pub fn single_item_worker(
     
     // Send final status with disk size for On Disk column
     let status = if failed > 0 { format!("Done+{} err", failed) } else { "Done".to_string() };
-    let _ = tx.send(UiMessage::ItemFinished(row, status, size_after_str));
+    let final_state = detect_path_algorithm(&path);
+    let _ = tx.send(UiMessage::ItemFinished(row, status, size_after_str, final_state));
     
     let report = format!("Done! {} files | Success: {} | Failed: {}", 
         processed, success, failed);

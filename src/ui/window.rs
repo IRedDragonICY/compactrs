@@ -43,7 +43,7 @@ use windows::Win32::UI::Controls::{
     LVN_ITEMCHANGED, BST_CHECKED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-use crate::engine::wof::WofAlgorithm;
+use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::engine::worker::{
     batch_process_worker, single_item_worker, 
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm
@@ -404,9 +404,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         WofAlgorithm::Lzx => "LZX",
                                     };
                                     
-                                    // Update Algorithm column for processed items using facade
+                                    // Update Algorithm column for processed items using facade (Col 2)
                                     for &row in &indices_to_process {
-                                        ctrls.file_list.update_item_text(row as i32, 1, algo_name);
+                                        ctrls.file_list.update_item_text(row as i32, 2, algo_name);
                                     }
                                     
                                     if let Some(tb) = &st.taskbar {
@@ -558,22 +558,36 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         }
                                     },
                                     UiMessage::RowUpdate(row, progress, status, _size_after) => {
-                                        // Update Progress column (col 5) and Status column (col 6)
+                                        // Update Progress column (col 6) and Status column (col 7)
                                         if let Some(ctrls) = &st.controls {
-                                            ctrls.file_list.update_item_text(row, 5, &progress);
-                                            ctrls.file_list.update_item_text(row, 6, &status);
+                                            ctrls.file_list.update_item_text(row, 6, &progress);
+                                            ctrls.file_list.update_item_text(row, 7, &status);
                                         }
                                     },
-                                    UiMessage::ItemFinished(row, status, disk_size_str) => {
-                                        // Update Status (col 6) and On Disk column (col 4) with compressed size
+                                    UiMessage::ItemFinished(row, status, disk_size_str, final_state) => {
+                                        // Update Status (col 7) and On Disk column (col 5) with compressed size
                                         if let Some(ctrls) = &st.controls {
-                                            ctrls.file_list.update_item_text(row, 6, &status);
+                                            ctrls.file_list.update_item_text(row, 7, &status);
                                             // Update On Disk column with the new compressed size
                                             if !disk_size_str.is_empty() {
-                                                ctrls.file_list.update_item_text(row, 4, &disk_size_str);
+                                                ctrls.file_list.update_item_text(row, 5, &disk_size_str);
                                             }
+                                            
+                                            // Update Current column (col 1) with final state
+                                            let state_str = match final_state {
+                                                CompressionState::None => "-",
+                                                CompressionState::Specific(algo) => match algo {
+                                                    WofAlgorithm::Xpress4K => "XPRESS4K",
+                                                    WofAlgorithm::Xpress8K => "XPRESS8K",
+                                                    WofAlgorithm::Xpress16K => "XPRESS16K",
+                                                    WofAlgorithm::Lzx => "LZX",
+                                                },
+                                                CompressionState::Mixed => "Mixed",
+                                            };
+                                            ctrls.file_list.update_item_text(row, 1, state_str);
+                                            
                                             // Reset button to "Start"
-                                            ctrls.file_list.update_item_text(row, 7, "▶ Start");
+                                            ctrls.file_list.update_item_text(row, 8, "▶ Start");
                                             // Update item status in AppState
                                             if let Some(item) = st.batch_items.get_mut(row as usize) {
                                                 item.status = BatchStatus::Pending;
@@ -581,7 +595,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             }
                                         }
                                     },
-                                    UiMessage::BatchItemAnalyzed(id, logical_size, disk_size, algo) => {
+                                    UiMessage::BatchItemAnalyzed(id, logical_size, disk_size, state) => {
                                         let logical_str = format_size(logical_size, BINARY);
                                         let disk_str = format_size(disk_size, BINARY);
                                         
@@ -589,23 +603,34 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
                                             if let Some(ctrls) = &st.controls {
                                                 // Update ListView columns using facade:
-                                                // 1: Algorithm (if detected)
-                                                // 3: Size
-                                                // 4: On Disk
-                                                ctrls.file_list.update_item_text(pos as i32, 3, &logical_str);
-                                                ctrls.file_list.update_item_text(pos as i32, 4, &disk_str);
+                                                // 1: Current
+                                                // 2: Algorithm
+                                                // 4: Size
+                                                // 5: On Disk
+                                                // 7: Status
+                                                ctrls.file_list.update_item_text(pos as i32, 4, &logical_str);
+                                                ctrls.file_list.update_item_text(pos as i32, 5, &disk_str);
                                                 
-                                                if let Some(a) = algo {
-                                                    let algo_str = match a {
+                                                // Update Current State Column (1)
+                                                let state_str = match state {
+                                                    CompressionState::None => "-",
+                                                    CompressionState::Specific(algo) => match algo {
                                                         WofAlgorithm::Xpress4K => "XPRESS4K",
                                                         WofAlgorithm::Xpress8K => "XPRESS8K",
                                                         WofAlgorithm::Xpress16K => "XPRESS16K",
                                                         WofAlgorithm::Lzx => "LZX",
-                                                    };
-                                                    ctrls.file_list.update_item_text(pos as i32, 1, algo_str);
-                                                }
+                                                    },
+                                                    CompressionState::Mixed => "Mixed",
+                                                };
+                                                ctrls.file_list.update_item_text(pos as i32, 1, state_str);
+                                                
+                                                // If Specific(algo), also update target algo if we want? 
+                                                // No, Requirement says "Update the new 'Current' column with this text".
+                                                // It does NOT say to auto-update the target algorithm.
+                                                // So we leave Algorithm (Col 2) as default (Xpress8K).
+
                                                 // Reset status to Pending (from Calculating...)
-                                                ctrls.file_list.update_item_text(pos as i32, 6, "Pending");
+                                                ctrls.file_list.update_item_text(pos as i32, 7, "Pending");
 
                                                 let msg = format!("{} item(s) analyzed.", st.batch_items.len());
                                                 let wstr = windows::core::HSTRING::from(&msg);
@@ -715,7 +740,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                              if let Some(ctrls) = &st.controls {
                                  // Get the batch item we just added and use facade
                                  if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == id) {
-                                     ctrls.file_list.add_item(id, batch_item, "Calculating...", "Calculating...", None);
+                                     ctrls.file_list.add_item(id, batch_item, "Calculating...", "Calculating...", CompressionState::None);
                                  }
                              }
                              items_to_analyze.push((id, path));
@@ -758,8 +783,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                             if let Some(st) = get_state() {
                                 let row_idx = row as usize;
                                 
-                                // Column 1 = Algorithm, Column 2 = Action
-                                if col == 1 {
+                                // Column 2 = Algorithm, Column 3 = Action, Column 8 = Start
+                                if col == 2 {
                                     // Cycle Algorithm
                                     if let Some(item) = st.batch_items.get_mut(row_idx) {
                                         item.algorithm = match item.algorithm {
@@ -775,10 +800,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             WofAlgorithm::Lzx => "LZX",
                                         };
                                         if let Some(ctrls) = &st.controls {
-                                            ctrls.file_list.update_item_text(row, 1, algo_str);
+                                            ctrls.file_list.update_item_text(row, 2, algo_str);
                                         }
                                     }
-                                } else if col == 2 {
+                                } else if col == 3 {
                                     // Toggle Action
                                     if let Some(item) = st.batch_items.get_mut(row_idx) {
                                         item.action = match item.action {
@@ -790,10 +815,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             BatchAction::Decompress => "Decompress",
                                         };
                                         if let Some(ctrls) = &st.controls {
-                                            ctrls.file_list.update_item_text(row, 2, action_str);
+                                            ctrls.file_list.update_item_text(row, 3, action_str);
                                         }
                                     }
-                                } else if col == 7 {
+                                } else if col == 8 {
                                     // Start/Stop button clicked
                                     if let Some(item) = st.batch_items.get_mut(row_idx) {
                                         // Check if running

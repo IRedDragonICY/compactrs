@@ -164,7 +164,7 @@ pub const COMPRESSION_FORMAT_DEFAULT: u16 = 1;
 pub const COMPRESSION_FORMAT_LZNT1: u16 = 2;
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WofAlgorithm {
     Xpress4K = 0,
     Lzx = 1,
@@ -176,6 +176,17 @@ impl WofAlgorithm {
     fn to_u32(self) -> u32 {
         self as u32
     }
+}
+
+/// Represents the compression state of a file or folder
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CompressionState {
+    /// Not compressed (or not WOF compressed)
+    None,
+    /// Compressed with a specific algorithm (all files if folder)
+    Specific(WofAlgorithm),
+    /// Contains files with different compression algorithms (folder only)
+    Mixed,
 }
 
 pub fn compress_file(path: &str, algo: WofAlgorithm, force: bool) -> Result<bool> {
