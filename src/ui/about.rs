@@ -24,7 +24,7 @@ use windows::Win32::Graphics::Gdi::{
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT,
 };
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+
 // Removed: create_button, ButtonOpts, IDC_BTN_OK - OK button removed from About dialog
 use crate::ui::utils::get_window_state;
 
@@ -146,14 +146,8 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                         DeleteObject(HGDIOBJ(brush.0));
                     }
                     
-                    // Update DWM title bar
-                    let dark_mode: u32 = if new_is_dark { 1 } else { 0 };
-                    let _ = DwmSetWindowAttribute(
-                        hwnd,
-                        DWMWA_USE_IMMERSIVE_DARK_MODE,
-                        &dark_mode as *const u32 as *const _,
-                        4
-                    );
+                    // Update DWM title bar using centralized helper
+                    crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
                     
                     // Force repaint
                     windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, true);
@@ -167,14 +161,8 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 
                 let is_dark_mode = if let Some(st) = state_ptr.as_ref() { st.is_dark } else { false };
                 
-                // Apply DWM title bar color (must always set, not just for dark)
-                let dark_mode: u32 = if is_dark_mode { 1 } else { 0 };
-                let _ = DwmSetWindowAttribute(
-                    hwnd,
-                    DWMWA_USE_IMMERSIVE_DARK_MODE,
-                    &dark_mode as *const u32 as *const _,
-                    4
-                );
+                // Apply DWM title bar color using centralized helper
+                crate::ui::theme::set_window_frame_theme(hwnd, is_dark_mode);
                 
                 let instance = GetModuleHandleW(None).unwrap_or_default();
                 

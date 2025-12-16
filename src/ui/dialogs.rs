@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, FillRect, HDC};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+
 
 use crate::ui::builder::ButtonBuilder;
 use crate::ui::theme;
@@ -107,14 +107,8 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
             if let Some(st) = unsafe { state_ptr.as_ref() } {
                 let is_dark = st.is_dark;
                 
-                // Apply Dark Mode to Title Bar
-                let dark_mode_val: u32 = if is_dark { 1 } else { 0 };
-                let _ = DwmSetWindowAttribute(
-                     hwnd, 
-                     DWMWA_USE_IMMERSIVE_DARK_MODE, 
-                     &dark_mode_val as *const u32 as *const _, 
-                     4
-                );
+                // Apply Dark Mode to Title Bar using centralized helper
+                crate::ui::theme::set_window_frame_theme(hwnd, is_dark);
             
                 // Message Label
                 let msg_text = format!("Process '{}' is locking this file.\nForce Stop and try again?", st.process_name);

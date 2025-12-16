@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::SetWindowTheme;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, HDC, DeleteObject, HGDIOBJ, InvalidateRect, FillRect};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+
 use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
 use crate::ui::state::AppTheme;
 use crate::ui::builder::ButtonBuilder;
@@ -160,14 +160,9 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             let state_ptr = createstruct.lpCreateParams as *mut SettingsState;
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
             
-            // Apply DWM title bar color (must always set, not just for dark)
-            let dark_mode: u32 = if let Some(st) = state_ptr.as_ref() { if st.is_dark { 1 } else { 0 } } else { 0 };
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                &dark_mode as *const u32 as *const _,
-                4
-            );
+            // Apply DWM title bar color using centralized helper
+            let is_dark = state_ptr.as_ref().map(|st| st.is_dark).unwrap_or(false);
+            crate::ui::theme::set_window_frame_theme(hwnd, is_dark);
             
             let instance = GetModuleHandleW(None).unwrap_or_default();
             
@@ -276,14 +271,8 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              }
                          }
                          
-                         // Update Settings window title bar
-                         let dark_mode: u32 = if new_is_dark { 1 } else { 0 };
-                            let _ = DwmSetWindowAttribute(
-                                hwnd,
-                                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                                &dark_mode as *const u32 as *const _,
-                                4
-                            );
+                         // Update Settings window title bar using centralized helper
+                         crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
                             
                             // 5. Update controls theme
                             use windows::Win32::UI::WindowsAndMessaging::GetDlgItem;

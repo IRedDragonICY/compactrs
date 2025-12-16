@@ -2,7 +2,7 @@
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF};
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, CreateSolidBrush, HDC, FillRect};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+
 use windows::Win32::UI::WindowsAndMessaging::{
     WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_COMMAND, WM_CTLCOLORBTN, WM_ERASEBKGND,
     CreateWindowExW, DefWindowProcW, DestroyWindow, 
@@ -298,13 +298,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 }
 
 unsafe fn update_console_theme(hwnd: HWND, is_dark: bool) {
-    let dark_mode = if is_dark { 1 } else { 0 };
-    let _ = DwmSetWindowAttribute(
-        hwnd,
-        DWMWA_USE_IMMERSIVE_DARK_MODE,
-        &dark_mode as *const i32 as *const _,
-        4
-    );
+    // Delegate to centralized helper
+    crate::ui::theme::set_window_frame_theme(hwnd, is_dark);
     
     // Force redraw to apply GDI colors
     if let Some(edit) = EDIT_HWND {
