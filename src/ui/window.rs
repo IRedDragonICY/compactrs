@@ -162,7 +162,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let _ = status_bar.create(hwnd);
                 
                 // 2. FileListView
-                let mut file_list = FileListView::new(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
+                let file_list = FileListView::new(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
                 
                 // 3. ActionPanel (all action buttons + combo + checkbox)
                 let mut action_panel = ActionPanel::new(ActionPanelIds {
