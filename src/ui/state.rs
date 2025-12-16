@@ -102,7 +102,7 @@ pub struct Controls {
 /// Application state
 pub struct AppState {
     // Legacy - single folder (will be phased out)
-    pub current_folder: Option<String>,
+
     
     // New batch processing state
     pub batch_items: Vec<BatchItem>,
@@ -131,7 +131,7 @@ impl AppState {
         let (tx, rx) = channel();
         let config = AppConfig::load();
         Self {
-            current_folder: None,
+
             batch_items: Vec::new(),
             next_item_id: 1,
             controls: None,

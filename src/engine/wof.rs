@@ -24,43 +24,7 @@ pub fn get_real_file_size(path: &str) -> u64 {
     }
 }
 
-pub fn is_wof_compressed(path: &str) -> bool {
-    // Check if WOF backing exists
-    unsafe {
-        let wide: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
-        let handle = CreateFileW(
-            PCWSTR(wide.as_ptr()),
-            GENERIC_READ.0, // Read access
-            FILE_SHARE_READ,
-            None,
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            None,
-        ).unwrap_or(INVALID_HANDLE_VALUE);
 
-        if handle == INVALID_HANDLE_VALUE {
-            return false;
-        }
-
-        let mut out_buffer = [0u8; 1024]; // WOF_EXTERNAL_INFO buffer
-        let mut bytes_returned = 0u32;
-        
-        // We don't really care about the content, just success
-        let result = DeviceIoControl(
-            handle,
-            FSCTL_GET_EXTERNAL_BACKING,
-            None,
-            0,
-            Some(out_buffer.as_mut_ptr() as *mut _),
-            out_buffer.len() as u32,
-            Some(&mut bytes_returned),
-            None,
-        );
-        
-        let _ = CloseHandle(handle);
-        result.is_ok()
-    }
-}
 
 /// Get the WOF compression algorithm used for a file
 /// Returns None if file is not WOF-compressed, Some(algorithm) if it is

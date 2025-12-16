@@ -79,13 +79,7 @@ pub fn calculate_folder_disk_size(path: &str) -> u64 {
         .sum()
 }
 
-/// Check if a folder has any WOF-compressed files
-/// Returns true if disk size < logical size (meaning compression is active)
-pub fn is_folder_compressed(logical_size: u64, disk_size: u64) -> bool {
-    // If disk size is noticeably smaller, folder has compressed files
-    // Use a small threshold to account for rounding
-    disk_size < logical_size && (logical_size - disk_size) > 1024
-}
+
 
 /// Detect the predominant WOF algorithm used in a folder
 /// Returns Mixed if multiple algorithms are found

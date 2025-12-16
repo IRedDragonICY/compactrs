@@ -54,15 +54,7 @@ use crate::ui::utils::get_window_state;
 
 
 
-#[allow(dead_code)]
-fn lo_word(l: u32) -> u16 {
-    (l & 0xffff) as u16
-}
 
-#[allow(dead_code)]
-fn hi_word(l: u32) -> u16 {
-    ((l >> 16) & 0xffff) as u16
-}
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("CompactRS_Class");
 const WINDOW_TITLE: PCWSTR = w!("CompactRS");
