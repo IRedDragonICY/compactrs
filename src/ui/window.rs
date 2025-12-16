@@ -21,20 +21,20 @@ use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialo
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 
-use crate::gui::controls::{
+use crate::ui::controls::{
     create_combobox, create_progress_bar,
     apply_button_theme, apply_combobox_theme,
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
     IDC_BTN_CONSOLE, IDC_CHK_FORCE, create_checkbox,
 };
-use crate::gui::builder::ButtonBuilder;
-use crate::gui::components::FileListView;
-use crate::gui::settings::show_settings_modal;
-use crate::gui::about::show_about_modal;
-use crate::gui::console::{show_console_window, append_log_msg};
-use crate::gui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
-use crate::gui::taskbar::{TaskbarProgress, TaskbarState};
+use crate::ui::builder::ButtonBuilder;
+use crate::ui::components::FileListView;
+use crate::ui::settings::show_settings_modal;
+use crate::ui::about::show_about_modal;
+use crate::ui::console::{show_console_window, append_log_msg};
+use crate::ui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
+use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use windows::Win32::UI::Controls::{
@@ -51,7 +51,7 @@ use crate::engine::worker::{
 };
 use humansize::{format_size, BINARY};
 use crate::config::AppConfig;
-use crate::gui::utils::get_window_state;
+use crate::ui::utils::get_window_state;
 
 
 
@@ -97,8 +97,8 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
 
 
         // Check dark mode for window class background
-        let is_dark = crate::gui::theme::ThemeManager::is_system_dark_mode();
-        let (bg_brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+        let is_dark = crate::ui::theme::ThemeManager::is_system_dark_mode();
+        let (bg_brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
 
         // Load icon (ID 1)
         let icon_handle = windows::Win32::UI::WindowsAndMessaging::LoadImageW(
@@ -198,7 +198,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let btn_y = 460;
                 
                 // Check if dark mode for initial theme application
-                let is_dark_init = crate::gui::theme::ThemeManager::is_system_dark_mode();
+                let is_dark_init = crate::ui::theme::ThemeManager::is_system_dark_mode();
                 
                 // Use ButtonBuilder pattern (fluent API - theme applied inside)
                 let h_add_files = ButtonBuilder::new(hwnd, IDC_BTN_ADD_FILES)
@@ -293,7 +293,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let mut rect = windows::Win32::Foundation::RECT::default();
                 if GetClientRect(hwnd, &mut rect).is_ok() {
                     let is_dark = is_app_dark_mode(hwnd);
-                    let (brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                    let (brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
                     FillRect(hdc, &rect, brush);
                     return LRESULT(1);
                 }
@@ -322,7 +322,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         let name_ptr = wparam.0 as *const u16;
                         let name = windows::core::PCWSTR(name_ptr).to_string().unwrap_or_default();
                         let is_dark = is_app_dark_mode(hwnd);
-                        should_kill = crate::gui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark);
+                        should_kill = crate::ui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark);
                     }
                 }
                 LRESULT(if should_kill { 1 } else { 0 })
@@ -976,7 +976,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             // WM_CTLCOLORSTATIC - handle static text colors
             0x0138 => { // WM_CTLCOLORSTATIC
                 let is_dark = is_app_dark_mode(hwnd);
-                if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, is_dark) {
+                if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, is_dark) {
                     return result;
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -1036,7 +1036,7 @@ fn apply_backdrop(hwnd: HWND) {
     unsafe {
         // 1. Monitor System Dark Mode
         let is_dark = is_app_dark_mode(hwnd);
-        crate::gui::theme::ThemeManager::apply_window_theme(hwnd, is_dark);
+        crate::ui::theme::ThemeManager::apply_window_theme(hwnd, is_dark);
     }
 }
 
@@ -1049,11 +1049,11 @@ unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
         match st.theme {
             AppTheme::Dark => return true,
             AppTheme::Light => return false,
-            AppTheme::System => return crate::gui::theme::ThemeManager::is_system_dark_mode(),
+            AppTheme::System => return crate::ui::theme::ThemeManager::is_system_dark_mode(),
         }
     }
     // Fallback if no state yet (e.g. during creation)
-    crate::gui::theme::ThemeManager::is_system_dark_mode()
+    crate::ui::theme::ThemeManager::is_system_dark_mode()
 }
 
 #[allow(non_snake_case)]
@@ -1179,7 +1179,7 @@ fn get_dark_brush() -> HBRUSH {
 
 unsafe fn apply_theme(hwnd: HWND, theme: AppTheme) {
     let is_dark = match theme {
-        AppTheme::System => crate::gui::theme::ThemeManager::is_system_dark_mode(),
+        AppTheme::System => crate::ui::theme::ThemeManager::is_system_dark_mode(),
         AppTheme::Dark => true,
         AppTheme::Light => false,
     };

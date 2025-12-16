@@ -26,7 +26,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 // Removed: create_button, ButtonOpts, IDC_BTN_OK - OK button removed from About dialog
-use crate::gui::utils::get_window_state;
+use crate::ui::utils::get_window_state;
 
 const ABOUT_CLASS_NAME: PCWSTR = w!("CompactRS_About");
 const ABOUT_TITLE: PCWSTR = w!("About CompactRS");
@@ -125,7 +125,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
         match msg {
             WM_CTLCOLORSTATIC => {
                 if let Some(st) = get_state() {
-                    if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                    if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
                         return result;
                     }
                 }
@@ -134,7 +134,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             WM_ERASEBKGND => {
                 if let Some(st) = get_state() {
                     let is_dark = st.is_dark;
-                    let (brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                    let (brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
                     
                     let hdc = HDC(wparam.0 as *mut _);
                     let mut rc = windows::Win32::Foundation::RECT::default();

@@ -3,7 +3,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicBool};
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
-use crate::gui::components::FileListView;
+use crate::ui::components::FileListView;
 
 /// App Theme Preference
 #[repr(u32)]

@@ -5,7 +5,7 @@ use windows::Win32::System::RestartManager::{
     CCH_RM_SESSION_KEY, RM_PROCESS_INFO, RmRebootReasonNone,
 };
 use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-use crate::gui::utils::ToWide;
+use crate::ui::utils::ToWide;
 
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {

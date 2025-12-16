@@ -2,9 +2,9 @@ use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}};
 use std::sync::mpsc::Sender;
 use ignore::WalkBuilder;
 use humansize::{format_size, BINARY};
-use crate::gui::state::{UiMessage, BatchAction};
+use crate::ui::state::{UiMessage, BatchAction};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
-use crate::gui::utils::ToWide;
+use crate::ui::utils::ToWide;
 use windows::Win32::Foundation::{HWND, WPARAM, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
 

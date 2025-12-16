@@ -16,9 +16,9 @@ use windows::Win32::UI::Controls::SetWindowTheme;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, HDC, DeleteObject, HGDIOBJ, InvalidateRect, FillRect};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
-use crate::gui::state::AppTheme;
-use crate::gui::builder::ButtonBuilder;
-use crate::gui::utils::get_window_state;
+use crate::ui::state::AppTheme;
+use crate::ui::builder::ButtonBuilder;
+use crate::ui::utils::get_window_state;
 
 const SETTINGS_CLASS_NAME: PCWSTR = w!("CompactRS_Settings");
 const SETTINGS_TITLE: PCWSTR = w!("Settings");
@@ -234,7 +234,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
     match msg {
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
             if let Some(st) = get_state() {
-                if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
                     return result;
                 }
             }
@@ -243,7 +243,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
         WM_ERASEBKGND => {
             if let Some(st) = get_state() {
                 let is_dark = st.is_dark;
-                let (brush, _, _) = crate::gui::theme::ThemeManager::get_theme_colors(is_dark);
+                let (brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
                 
                 let hdc = HDC(wparam.0 as *mut _);
                 let mut rc = windows::Win32::Foundation::RECT::default();
@@ -322,7 +322,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             
             // Checkbox: Enable Force Stop (Auto-kill)
             let enable_force = if let Some(st) = state_ptr.as_ref() { st.enable_force_stop } else { false };
-            let chk = crate::gui::controls::create_checkbox(hwnd, w!("Enable Force Stop (Auto-kill)"), 30, 160, 240, 25, IDC_CHK_FORCE_STOP);
+            let chk = crate::ui::controls::create_checkbox(hwnd, w!("Enable Force Stop (Auto-kill)"), 30, 160, 240, 25, IDC_CHK_FORCE_STOP);
             if enable_force {
                  SendMessageW(chk, BM_SETCHECK, Some(WPARAM(1)), None);
             }
@@ -358,7 +358,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              AppTheme::Dark => true,
                              AppTheme::Light => false,
                              AppTheme::System => {
-                                 crate::gui::theme::ThemeManager::is_system_dark_mode()
+                                 crate::ui::theme::ThemeManager::is_system_dark_mode()
                              }
                          };
                          
@@ -389,7 +389,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                             
                             for &ctrl_id in &controls {
                                 if let Ok(h_ctl) = GetDlgItem(Some(hwnd), ctrl_id.into()) {
-                                    crate::gui::theme::ThemeManager::apply_control_theme(h_ctl, new_is_dark);
+                                    crate::ui::theme::ThemeManager::apply_control_theme(h_ctl, new_is_dark);
                                     InvalidateRect(Some(h_ctl), None, true);
                                 }
                             }

@@ -9,8 +9,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, WS_CHILD, WS_VISIBLE, BS_PUSHBUTTON, HMENU,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use crate::gui::utils::ToWide;
-use crate::gui::controls::apply_button_theme;
+use crate::ui::utils::ToWide;
+use crate::ui::controls::apply_button_theme;
 
 /// Fluent builder for creating Win32 Button controls.
 ///

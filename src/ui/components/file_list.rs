@@ -23,8 +23,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::engine::wof::WofAlgorithm;
-use crate::gui::state::BatchItem;
-use crate::gui::utils::ToWide;
+use crate::ui::state::BatchItem;
+use crate::ui::utils::ToWide;
 
 /// Column indices for the FileListView
 pub mod columns {
@@ -160,7 +160,7 @@ impl FileListView {
         let path_wide = item.path.to_wide();
         let algo_str = Self::algo_to_str(item.algorithm);
         let algo_wide = algo_str.to_wide();
-        let action_str = if item.action == crate::gui::state::BatchAction::Compress {
+        let action_str = if item.action == crate::ui::state::BatchAction::Compress {
             "Compress"
         } else {
             "Decompress"
@@ -495,8 +495,8 @@ unsafe extern "system" fn listview_subclass_proc(
 ///
 /// This is a helper that accesses the main window's AppState to determine theme.
 fn is_app_dark_mode(hwnd: HWND) -> bool {
-    use crate::gui::state::{AppState, AppTheme};
-    use crate::gui::utils::get_window_state;
+    use crate::ui::state::{AppState, AppTheme};
+    use crate::ui::utils::get_window_state;
 
     // SAFETY: get_window_state returns None if pointer is null.
     // The HWND is the main window which stores AppState in GWLP_USERDATA.
@@ -505,11 +505,11 @@ fn is_app_dark_mode(hwnd: HWND) -> bool {
             match st.theme {
                 AppTheme::Dark => true,
                 AppTheme::Light => false,
-                AppTheme::System => crate::gui::theme::ThemeManager::is_system_dark_mode(),
+                AppTheme::System => crate::ui::theme::ThemeManager::is_system_dark_mode(),
             }
         } else {
             // Fallback during initialization
-            crate::gui::theme::ThemeManager::is_system_dark_mode()
+            crate::ui::theme::ThemeManager::is_system_dark_mode()
         }
     }
 }

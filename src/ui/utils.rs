@@ -11,7 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWLP_USERDATA};
 /// 
 /// # Example
 /// ```
-/// use crate::gui::utils::ToWide;
+/// use crate::ui::utils::ToWide;
 /// 
 /// let wide = "Hello".to_wide();
 /// // wide is now a Vec<u16> with null terminator

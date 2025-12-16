@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use crate::engine::wof::WofAlgorithm;
-use crate::gui::state::AppTheme;
+use crate::ui::state::AppTheme;
 
 // NOTE: We use #[repr(C)] to ensure predictable memory layout for binary dumping.
 // WARNING: Changing fields later will invalidate existing config files.

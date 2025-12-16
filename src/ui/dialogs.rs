@@ -15,9 +15,9 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, FillRect, HDC};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 
-use crate::gui::builder::ButtonBuilder;
-use crate::gui::theme::ThemeManager;
-use crate::gui::utils::{ToWide, get_window_state};
+use crate::ui::builder::ButtonBuilder;
+use crate::ui::theme::ThemeManager;
+use crate::ui::utils::{ToWide, get_window_state};
 
 const DIALOG_CLASS_NAME: PCWSTR = w!("CompactRS_ForceStopDialog");
 const TIMER_ID: usize = 1;

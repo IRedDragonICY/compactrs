@@ -17,8 +17,8 @@ use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData};
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-use crate::gui::controls::apply_button_theme;
-use crate::gui::builder::ButtonBuilder;
+use crate::ui::controls::apply_button_theme;
+use crate::ui::builder::ButtonBuilder;
 
 const CONSOLE_CLASS_NAME: PCWSTR = w!("CompactRS_Console");
 const CONSOLE_TITLE: PCWSTR = w!("Debug Console");
@@ -243,7 +243,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         },
         WM_CTLCOLORBTN => {
-            if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
+            if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
                 return result;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -260,7 +260,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         },
         WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => {
-            if let Some(result) = crate::gui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
+            if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
                 return result;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
