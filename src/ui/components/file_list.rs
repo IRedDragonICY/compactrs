@@ -528,7 +528,7 @@ unsafe extern "system" fn listview_subclass_proc(
     // SAFETY: dwrefdata contains the main window HWND passed during subclass setup.
     let main_hwnd = HWND(dwrefdata as *mut _);
 
-    if umsg == WM_NOTIFY && is_app_dark_mode(main_hwnd) {
+    if umsg == WM_NOTIFY && crate::ui::theme::is_app_dark_mode(main_hwnd) {
         // SAFETY: lparam points to NMHDR struct provided by the system.
         let nmhdr = &*(lparam.0 as *const NMHDR);
 
@@ -553,27 +553,4 @@ unsafe extern "system" fn listview_subclass_proc(
     // SAFETY: DefSubclassProc is called with valid parameters.
     DefSubclassProc(hwnd, umsg, wparam, lparam)
 }}
-
-/// Checks if the app is in dark mode.
-///
-/// This is a helper that accesses the main window's AppState to determine theme.
-fn is_app_dark_mode(hwnd: HWND) -> bool {
-    use crate::ui::state::{AppState, AppTheme};
-    use crate::ui::utils::get_window_state;
-
-    // SAFETY: get_window_state returns None if pointer is null.
-    // The HWND is the main window which stores AppState in GWLP_USERDATA.
-    unsafe {
-        if let Some(st) = get_window_state::<AppState>(hwnd) {
-            match st.theme {
-                AppTheme::Dark => true,
-                AppTheme::Light => false,
-                AppTheme::System => crate::ui::theme::is_system_dark_mode(),
-            }
-        } else {
-            // Fallback during initialization
-            crate::ui::theme::is_system_dark_mode()
-        }
-    }
-}
 

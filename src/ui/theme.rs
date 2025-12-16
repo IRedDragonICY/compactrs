@@ -193,6 +193,33 @@ pub unsafe fn allow_dark_mode() {
     }
 }
 
+/// Checks if the app is in dark mode by querying window state.
+///
+/// This helper retrieves the AppTheme from the window's GWLP_USERDATA
+/// and calls `resolve_mode` to determine the effective dark mode state.
+///
+/// # Arguments
+/// * `hwnd` - Main window handle containing AppState in GWLP_USERDATA
+///
+/// # Returns
+/// `true` if dark mode is active, `false` otherwise.
+///
+/// # Safety
+/// Accesses window user data pointer which must point to valid AppState.
+pub unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
+    use crate::ui::state::AppState;
+    use crate::ui::utils::get_window_state;
+
+    unsafe {
+        if let Some(st) = get_window_state::<AppState>(hwnd) {
+            resolve_mode(st.theme)
+        } else {
+            // Fallback during initialization
+            is_system_dark_mode()
+        }
+    }
+}
+
 // ============================================================================
 // Helper Functions (kept for compatibility)
 // ============================================================================
