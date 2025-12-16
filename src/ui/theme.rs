@@ -1,10 +1,11 @@
-use windows::core::w;
+use windows::core::{w, PCSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, WPARAM};
 use windows::Win32::Graphics::Gdi::{CreateSolidBrush, GetStockObject, HBRUSH, HDC, SetBkMode, SetTextColor, TRANSPARENT, WHITE_BRUSH};
 use windows::Win32::UI::Controls::SetWindowTheme;
 use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWLP_USERDATA};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE};
 use windows::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ};
+use windows::Win32::System::LibraryLoader::{LoadLibraryW, GetProcAddress};
 
 
 pub const COLOR_DARK_BG: u32 = 0x001E1E1E;
@@ -114,4 +115,19 @@ impl ThemeManager {
             (brush, COLORREF(COLOR_LIGHT_TEXT), COLORREF(COLOR_LIGHT_BG))
         }
     }}
+
+    /// Enables dark mode for the application by calling SetPreferredAppMode.
+    /// Should be called once at application startup before creating windows.
+    #[allow(non_snake_case)]
+    pub unsafe fn allow_dark_mode() {
+        unsafe {
+            if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
+                // Ordinal 135: SetPreferredAppMode
+                if let Some(set_preferred_app_mode) = GetProcAddress(uxtheme, PCSTR(135 as *const u8)) {
+                    let set_preferred_app_mode: extern "system" fn(i32) -> i32 = std::mem::transmute(set_preferred_app_mode);
+                    set_preferred_app_mode(2); // 2 = AllowDark (or ForceDark)
+                }
+            }
+        }
+    }
 }

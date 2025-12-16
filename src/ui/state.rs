@@ -91,20 +91,12 @@ impl BatchItem {
     }
 }
 
-/// UI Control handles
+/// UI Control handles organized by component
 pub struct Controls {
     pub file_list: FileListView,
-    pub btn_scan: HWND,
-    pub btn_compress: HWND,
-    pub btn_decompress: HWND,
-    pub combo_algo: HWND,
-    pub static_text: HWND,
-    pub progress_bar: HWND,
-    pub btn_cancel: HWND,
-    pub btn_settings: HWND,
-    pub btn_about: HWND,
-    pub btn_console: HWND,
-    pub btn_force: HWND,
+    pub status_bar: crate::ui::components::StatusBar,
+    pub action_panel: crate::ui::components::ActionPanel,
+    pub header_panel: crate::ui::components::HeaderPanel,
 }
 
 /// Application state

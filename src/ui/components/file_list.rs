@@ -4,8 +4,11 @@
 //! high-level Rust interface. All unsafe Win32 operations are contained within
 //! this module.
 
-use windows::core::{w, PWSTR};
-use windows::Win32::Foundation::{HWND, HINSTANCE, LPARAM, LRESULT, WPARAM};
+use windows::core::{w, Result, PWSTR};
+use windows::Win32::Foundation::{HWND, HINSTANCE, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::SetWindowPos;
+
+use super::base::Component;
 use windows::Win32::Graphics::Gdi::{InvalidateRect, SetBkMode, SetTextColor, TRANSPARENT};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::Controls::{
@@ -445,6 +448,52 @@ impl FileListView {
             }
         }
     }}
+}
+
+impl Component for FileListView {
+    /// FileListView is created in its constructor, so this just returns Ok.
+    unsafe fn create(&mut self, _parent: HWND) -> Result<()> {
+        // Already created in `new()` - nothing to do here
+        Ok(())
+    }
+
+    fn hwnd(&self) -> Option<HWND> {
+        Some(self.hwnd)
+    }
+
+    unsafe fn on_resize(&mut self, parent_rect: &RECT) {
+        use windows::Win32::UI::WindowsAndMessaging::SWP_NOZORDER;
+        
+        unsafe {
+            let width = parent_rect.right - parent_rect.left;
+            let height = parent_rect.bottom - parent_rect.top;
+
+            let padding = 10;
+            let header_height = 25;
+            let progress_height = 25;
+            let btn_height = 30;
+
+            // Calculate list height: total height minus header, progress bar, buttons, and padding
+            let list_height = height - header_height - progress_height - btn_height - (padding * 5);
+
+            // Position ListView below header
+            let list_y = padding + header_height + padding;
+
+            SetWindowPos(
+                self.hwnd,
+                None,
+                padding,
+                list_y,
+                width - padding * 2,
+                list_height,
+                SWP_NOZORDER,
+            );
+        }
+    }
+
+    unsafe fn on_theme_change(&mut self, is_dark: bool) {
+        self.set_theme(is_dark);
+    }
 }
 
 /// ListView subclass procedure to intercept Header's NM_CUSTOMDRAW notifications.

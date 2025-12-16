@@ -1,5 +1,5 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use windows::core::{Result, w, PCWSTR, PCSTR};
+use windows::core::{Result, w, PCWSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -11,25 +11,24 @@ use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
-    WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND, SetWindowPos, SWP_NOZORDER,
+    WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
-    SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WS_CHILD, HMENU, WM_TIMER, SetTimer,
+    SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WM_TIMER, SetTimer,
     MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK, WM_ERASEBKGND, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
 };
 use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 
 use crate::ui::controls::{
-    create_combobox, create_progress_bar,
-    apply_button_theme, apply_combobox_theme,
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
     IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
-    IDC_BTN_CONSOLE, IDC_CHK_FORCE, create_checkbox,
+    IDC_BTN_CONSOLE, IDC_CHK_FORCE,
 };
-use crate::ui::builder::ButtonBuilder;
-use crate::ui::components::FileListView;
+use crate::ui::components::{
+    Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
+    HeaderPanel, HeaderPanelIds,
+};
 use crate::ui::settings::show_settings_modal;
 use crate::ui::about::show_about_modal;
 use crate::ui::console::{show_console_window, append_log_msg};
@@ -38,7 +37,7 @@ use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use windows::Win32::UI::Controls::{
-    PBM_SETRANGE32, PBM_SETPOS, SetWindowTheme,
+    PBM_SETRANGE32, PBM_SETPOS,
     NM_DBLCLK, NMITEMACTIVATE,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
     LVN_ITEMCHANGED, BST_CHECKED,
@@ -68,25 +67,10 @@ fn hi_word(l: u32) -> u16 {
 const WINDOW_CLASS_NAME: PCWSTR = w!("CompactRS_Class");
 const WINDOW_TITLE: PCWSTR = w!("CompactRS");
 
-// ===== PATH-AWARE FUNCTIONS moved to engine::worker =====
-
-#[allow(non_snake_case)]
-unsafe fn allow_dark_mode() {
-    unsafe {
-        if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
-            // Ordinal 135: SetPreferredAppMode
-            if let Some(set_preferred_app_mode) = GetProcAddress(uxtheme, PCSTR(135 as *const u8)) {
-                let set_preferred_app_mode: extern "system" fn(i32) -> i32 = std::mem::transmute(set_preferred_app_mode);
-                set_preferred_app_mode(2); // 2 = AllowDark (or ForceDark)
-            }
-        }
-    }
-}
-
 
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
     unsafe {
-        allow_dark_mode();
+        crate::ui::theme::ThemeManager::allow_dark_mode();
         
         // Initialize Common Controls to ensure Visual Styles are applied
         let iccex = INITCOMMONCONTROLSEX {
@@ -168,73 +152,43 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let mut state = Box::new(AppState::new());
                 state.taskbar = Some(TaskbarProgress::new(hwnd));
                 
-                // Create header label
-                let h_label = CreateWindowExW(
-                    Default::default(),
-                    w!("STATIC"),
-                    w!("Drag and drop files or folders, or use 'Files'/'Folder' buttons. Then click 'Process All'."),
-                    WS_CHILD | WS_VISIBLE,
-                    10, 10, 860, 25,
-                    Some(hwnd),
-                    Some(HMENU(IDC_STATIC_TEXT as isize as *mut _)),
-                    Some(HINSTANCE(GetModuleHandleW(None).unwrap_or_default().0)),
-                    None,
-                ).unwrap_or_default();
+                // Create components using the new architecture
                 
-                // Create batch ListView - uses FileListView facade
-                let file_list = FileListView::new(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
+                // 1. StatusBar (label + progress bar)
+                let mut status_bar = StatusBar::new(StatusBarIds {
+                    label_id: IDC_STATIC_TEXT,
+                    progress_id: IDC_PROGRESS_BAR,
+                });
+                let _ = status_bar.create(hwnd);
                 
-                // Create progress bar at y=430
-                let h_progress = create_progress_bar(hwnd, 10, 430, 860, 20, IDC_PROGRESS_BAR);
+                // 2. FileListView
+                let mut file_list = FileListView::new(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
                 
-                // Create ALL buttons at y=460 - Taller buttons (32px) for modern look
-                // Files: x=10, width=65
-                // Folder: x=85, width=65
-                // Remove: x=160, width=70
-                // Combo: x=240, width=110
-                // Process: x=360, width=100
-                // Cancel: x=470, width=80
-                let btn_h = 32;
-                let btn_y = 460;
+                // 3. ActionPanel (all action buttons + combo + checkbox)
+                let mut action_panel = ActionPanel::new(ActionPanelIds {
+                    btn_files: IDC_BTN_ADD_FILES,
+                    btn_folder: IDC_BTN_ADD_FOLDER,
+                    btn_remove: IDC_BTN_REMOVE,
+                    combo_algo: IDC_COMBO_ALGO,
+                    chk_force: IDC_CHK_FORCE,
+                    btn_process: IDC_BTN_PROCESS_ALL,
+                    btn_cancel: IDC_BTN_CANCEL,
+                });
+                let _ = action_panel.create(hwnd);
                 
-                // Check if dark mode for initial theme application
-                let is_dark_init = crate::ui::theme::ThemeManager::is_system_dark_mode();
+                // 4. HeaderPanel (settings, about, console buttons)
+                let mut header_panel = HeaderPanel::new(HeaderPanelIds {
+                    btn_settings: IDC_BTN_SETTINGS,
+                    btn_about: IDC_BTN_ABOUT,
+                    btn_console: IDC_BTN_CONSOLE,
+                });
+                let _ = header_panel.create(hwnd);
                 
-                // Use ButtonBuilder pattern (fluent API - theme applied inside)
-                let h_add_files = ButtonBuilder::new(hwnd, IDC_BTN_ADD_FILES)
-                    .text("Files").pos(10, btn_y).size(65, btn_h).dark_mode(is_dark_init).build();
-                let h_add_folder = ButtonBuilder::new(hwnd, IDC_BTN_ADD_FOLDER)
-                    .text("Folder").pos(85, btn_y).size(65, btn_h).dark_mode(is_dark_init).build();
-                let h_remove = ButtonBuilder::new(hwnd, IDC_BTN_REMOVE)
-                    .text("Remove").pos(160, btn_y).size(70, btn_h).dark_mode(is_dark_init).build();
-                let h_combo = create_combobox(hwnd, 240, btn_y, 110, 200, IDC_COMBO_ALGO);
-                // Force Checkbox
-                let h_force = create_checkbox(hwnd, w!("Force"), 360, btn_y, 60, btn_h, IDC_CHK_FORCE);
-                let h_process = ButtonBuilder::new(hwnd, IDC_BTN_PROCESS_ALL)
-                    .text("Process All").pos(430, btn_y).size(100, btn_h).dark_mode(is_dark_init).build();
-                let h_cancel = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
-                    .text("Cancel").pos(540, btn_y).size(80, btn_h).dark_mode(is_dark_init).build();
-                
-                
-                // Settings/About items
-                let h_settings = ButtonBuilder::new(hwnd, IDC_BTN_SETTINGS)
-                    .text("\u{2699}").pos(0, 0).size(30, 25).dark_mode(is_dark_init).build(); // Gear icon
-                let h_about = ButtonBuilder::new(hwnd, IDC_BTN_ABOUT)
-                    .text("?").pos(0, 0).size(30, 25).dark_mode(is_dark_init).build(); // About icon
-                // Console button (using a simple ">_" or similar text)
-                let h_console = ButtonBuilder::new(hwnd, IDC_BTN_CONSOLE)
-                    .text(">_").pos(0, 0).size(30, 25).dark_mode(is_dark_init).build();
-
-                // Apply dark theme to ComboBox and Checkbox
-                if is_dark_init {
-                    let _ = SetWindowTheme(h_combo, w!("DarkMode_CFD"), None);
-                    let _ = SetWindowTheme(h_force, w!("DarkMode_Explorer"), None);
-                }
-
-                let _ = h_add_files; // Used via IDC_BTN_ADD_FILES
-                EnableWindow(h_cancel, false);
+                // Disable cancel button initially
+                EnableWindow(action_panel.cancel_hwnd(), false);
 
                 // Populate algorithm combo
+                let h_combo = action_panel.combo_hwnd();
                 let algos = [w!("XPRESS4K"), w!("XPRESS8K"), w!("XPRESS16K"), w!("LZX")];
                 for alg in algos {
                     SendMessageW(h_combo, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(alg.as_ptr() as isize)));
@@ -250,22 +204,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 
                 // Set initial force checkbox state
                 if state.force_compress {
-                    SendMessageW(h_force, BM_SETCHECK, Some(WPARAM(BST_CHECKED.0 as usize)), None);
+                    SendMessageW(action_panel.force_hwnd(), BM_SETCHECK, Some(WPARAM(BST_CHECKED.0 as usize)), None);
                 }
 
+                // Store all component HWNDs in Controls for backwards compatibility
                 state.controls = Some(Controls {
                     file_list,
-                    btn_scan: h_add_folder,  // Reusing for Add Folder
-                    btn_compress: h_process,  // Reusing for Process All
-                    btn_decompress: h_remove,  // Reusing for Remove
-                    combo_algo: h_combo,
-                    static_text: h_label,
-                    progress_bar: h_progress,
-                    btn_cancel: h_cancel,
-                    btn_settings: h_settings,
-                    btn_about: h_about,
-                    btn_console: h_console,
-                    btn_force: h_force,
+                    status_bar,
+                    action_panel,
+                    header_panel,
                 });
 
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
@@ -441,7 +388,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     }
                                     
                                     // Get selected algorithm
-                                    let idx = SendMessageW(ctrls.combo_algo, CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
+                                    let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
                                     let algo = match idx.0 {
                                         0 => WofAlgorithm::Xpress4K,
                                         2 => WofAlgorithm::Xpress16K,
@@ -466,14 +413,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         tb.set_state(TaskbarState::Normal);
                                     }
                                     
-                                    EnableWindow(ctrls.btn_cancel, true);
+                                    EnableWindow(ctrls.action_panel.cancel_hwnd(), true);
                                     let status_msg = if indices_to_process.len() == st.batch_items.len() {
                                         "Processing all items...".to_string()
                                     } else {
                                         format!("Processing {} selected items...", indices_to_process.len())
                                     };
                                     let wstr = windows::core::HSTRING::from(&status_msg);
-                                    SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                    SetWindowTextW(ctrls.status_bar.label_hwnd(), PCWSTR::from_raw(wstr.as_ptr()));
                                     
                                     let tx = st.tx.clone();
                                     let cancel = st.cancel_flag.clone();
@@ -502,8 +449,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 tb.set_state(TaskbarState::Paused);
                             }
                             if let Some(ctrls) = &st.controls {
-                                let _ = EnableWindow(ctrls.btn_cancel, false);
-                                let _ = SetWindowTextW(ctrls.static_text, w!("Cancelling..."));
+                                let _ = EnableWindow(ctrls.action_panel.cancel_hwnd(), false);
+                                let _ = SetWindowTextW(ctrls.status_bar.label_hwnd(), w!("Cancelling..."));
                             }
                         }
                     },
@@ -557,8 +504,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 match msg {
                                     UiMessage::Progress(cur, total) => {
                                         if let Some(ctrls) = &st.controls {
-                                            SendMessageW(ctrls.progress_bar, PBM_SETRANGE32, Some(WPARAM(0)), Some(LPARAM(total as isize)));
-                                            SendMessageW(ctrls.progress_bar, PBM_SETPOS, Some(WPARAM(cur as usize)), Some(LPARAM(0)));
+                                            SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETRANGE32, Some(WPARAM(0)), Some(LPARAM(total as isize)));
+                                            SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETPOS, Some(WPARAM(cur as usize)), Some(LPARAM(0)));
                                         }
                                         if let Some(tb) = &st.taskbar {
                                             tb.set_value(cur, total);
@@ -568,7 +515,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         if let Some(st) = get_state() {
                                             if let Some(ctrls) = &st.controls {
                                                 let wstr = windows::core::HSTRING::from(&text);
-                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                                SetWindowTextW(ctrls.status_bar.label_hwnd(), PCWSTR::from_raw(wstr.as_ptr()));
                                             }
                                         }
                                     },
@@ -580,7 +527,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             // Also update status text? Optional.
                                             if let Some(ctrls) = &st.controls {
                                                 let wstr = windows::core::HSTRING::from(&text);
-                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                                SetWindowTextW(ctrls.status_bar.label_hwnd(), PCWSTR::from_raw(wstr.as_ptr()));
                                             }
                                         }
                                     },
@@ -596,7 +543,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                              // Update status text
                                              if let Some(ctrls) = &st.controls {
                                                 let wstr = windows::core::HSTRING::from(&text);
-                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                                SetWindowTextW(ctrls.status_bar.label_hwnd(), PCWSTR::from_raw(wstr.as_ptr()));
                                              }
                                          }
                                     },
@@ -606,7 +553,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                                 tb.set_state(TaskbarState::NoProgress);
                                             }
                                             if let Some(ctrls) = &st.controls {
-                                                EnableWindow(ctrls.btn_cancel, false);
+                                                EnableWindow(ctrls.action_panel.cancel_hwnd(), false);
                                             }
                                         }
                                     },
@@ -662,7 +609,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 
                                                 let msg = format!("{} item(s) analyzed.", st.batch_items.len());
                                                 let wstr = windows::core::HSTRING::from(&msg);
-                                                SetWindowTextW(ctrls.static_text, PCWSTR::from_raw(wstr.as_ptr()));
+                                                SetWindowTextW(ctrls.status_bar.label_hwnd(), PCWSTR::from_raw(wstr.as_ptr()));
                                             }
                                         }
                                     },
@@ -677,79 +624,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
             
             WM_SIZE => {
-                let width = (lparam.0 & 0xFFFF) as i32;
-                let height = ((lparam.0 >> 16) & 0xFFFF) as i32;
-                
-                let padding = 10;
-                let btn_height = 30;
-                let progress_height = 25;
-                let header_height = 25;
-                let list_height = height - header_height - progress_height - btn_height - (padding * 5);
-                
-                // Resize header
-                // Resize header - leave space for settings (30), about (30), console (30) + spacing
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_STATIC_TEXT.into()) {
-                    // Previous width: width - padding - 80 (was overlapping console)
-                    // New width: width - padding - 120 (leaves space for 3 buttons + gaps)
-                    SetWindowPos(h, None, padding, padding, width - padding - 120, header_height, SWP_NOZORDER);
-                }
-                
-                // Position Settings button (Rightmost)
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_SETTINGS.into()) {
-                     SetWindowPos(h, None, width - padding - 30, padding, 30, header_height, SWP_NOZORDER);
-                }
-
-                // Position About button (Left of Settings)
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_ABOUT.into()) {
-                     SetWindowPos(h, None, width - padding - 65, padding, 30, header_height, SWP_NOZORDER);
-                }
-
-                // Position Console button (Left of About)
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_CONSOLE.into()) {
-                     SetWindowPos(h, None, width - padding - 100, padding, 30, header_height, SWP_NOZORDER);
-                }
-                
-                // Resize ListView
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BATCH_LIST.into()) {
-                    SetWindowPos(h, None, padding, padding + header_height + padding, width - padding * 2, list_height, SWP_NOZORDER);
-                }
-                
-                // Resize progress bar
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_PROGRESS_BAR.into()) {
-                    let y = padding + header_height + padding + list_height + padding;
-                    SetWindowPos(h, None, padding, y, width - padding * 2, progress_height, SWP_NOZORDER);
-                }
-                
-                // Position buttons at bottom - all on same row
-                let btn_y = height - btn_height - padding;
-                
-                // Files button
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_ADD_FILES.into()) {
-                    SetWindowPos(h, None, padding, btn_y, 55, btn_height, SWP_NOZORDER);
-                }
-                // Folder button
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_ADD_FOLDER.into()) {
-                    SetWindowPos(h, None, padding + 60, btn_y, 55, btn_height, SWP_NOZORDER);
-                }
-                // Remove button
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_REMOVE.into()) {
-                    SetWindowPos(h, None, padding + 120, btn_y, 65, btn_height, SWP_NOZORDER);
-                }
-                // Algorithm combo
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO.into()) {
-                    SetWindowPos(h, None, padding + 190, btn_y, 110, btn_height, SWP_NOZORDER);
-                }
-                // Force Checkbox
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_CHK_FORCE.into()) {
-                    SetWindowPos(h, None, padding + 310, btn_y, 60, btn_height, SWP_NOZORDER);
-                }
-                // Process All button
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_PROCESS_ALL.into()) {
-                    SetWindowPos(h, None, padding + 380, btn_y, 90, btn_height, SWP_NOZORDER);
-                }
-                // Cancel button
-                if let Ok(h) = GetDlgItem(Some(hwnd), IDC_BTN_CANCEL.into()) {
-                    SetWindowPos(h, None, padding + 480, btn_y, 70, btn_height, SWP_NOZORDER);
+                // Get client rect for component layout
+                let mut client_rect = windows::Win32::Foundation::RECT::default();
+                if GetClientRect(hwnd, &mut client_rect).is_ok() {
+                    // Delegate resize to components
+                    if let Some(st) = get_state() {
+                        if let Some(ctrls) = &mut st.controls {
+                            ctrls.status_bar.on_resize(&client_rect);
+                            ctrls.file_list.on_resize(&client_rect);
+                            ctrls.action_panel.on_resize(&client_rect);
+                            ctrls.header_panel.on_resize(&client_rect);
+                        }
+                    }
                 }
                 
                 LRESULT(0)
@@ -769,7 +655,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     // Capture current UI states
                     if let Some(ctrls) = &state.controls {
                         // Get selected algorithm
-                        let algo_idx = SendMessageW(ctrls.combo_algo, CB_GETCURSEL, None, None).0;
+                        let algo_idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, None, None).0;
                         state.config.default_algo = match algo_idx {
                             0 => WofAlgorithm::Xpress4K,
                             2 => WofAlgorithm::Xpress16K,
@@ -778,7 +664,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         };
                         
                         // Get force checkbox state
-                        let force_state = SendMessageW(ctrls.btn_force, BM_GETCHECK, None, None);
+                        let force_state = SendMessageW(ctrls.action_panel.force_hwnd(), BM_GETCHECK, None, None);
                         state.config.force_compress = force_state == LRESULT(BST_CHECKED.0 as isize);
                     }
                     
@@ -817,7 +703,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
 
                 if let Some(st) = get_state() {
                      if let Some(ctrls) = &st.controls {
-                         SetWindowTextW(ctrls.static_text, w!("Analyzing dropped files..."));
+                         SetWindowTextW(ctrls.status_bar.label_hwnd(), w!("Analyzing dropped files..."));
                      }
                      
                      // 1. Add Placeholders immediately to UI
@@ -958,9 +844,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                   let count = ctrls.file_list.get_selection_count();
                                   
                                   if count > 0 {
-                                      SetWindowTextW(ctrls.btn_compress, w!("Process Selected"));
+                                      SetWindowTextW(ctrls.action_panel.process_hwnd(), w!("Process Selected"));
                                   } else {
-                                      SetWindowTextW(ctrls.btn_compress, w!("Process All"));
+                                      SetWindowTextW(ctrls.action_panel.process_hwnd(), w!("Process All"));
                                   }
                               }
                          }
@@ -1056,17 +942,6 @@ unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
     crate::ui::theme::ThemeManager::is_system_dark_mode()
 }
 
-#[allow(non_snake_case)]
-unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {
-    unsafe {
-        if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
-            if let Some(func) = GetProcAddress(uxtheme, PCSTR(133 as *const u8)) {
-                let allow_dark_mode_for_window: extern "system" fn(HWND, bool) -> bool = std::mem::transmute(func);
-                allow_dark_mode_for_window(hwnd, allow);
-            }
-        }
-    }
-}
 
 fn update_theme(hwnd: HWND) {
     unsafe {
@@ -1074,18 +949,6 @@ fn update_theme(hwnd: HWND) {
         let attr = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
         let val = if dark { 1 } else { 0 };
         let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(attr), &val as *const _ as _, std::mem::size_of::<i32>() as u32);
-        
-        // Update progress bar with dark theme
-        if let Ok(progress) = GetDlgItem(Some(hwnd), IDC_PROGRESS_BAR as i32) {
-            if !progress.is_invalid() {
-                allow_dark_mode_for_window(progress, dark);
-                if dark {
-                    let _ = SetWindowTheme(progress, w!("DarkMode_Explorer"), None);
-                } else {
-                    let _ = SetWindowTheme(progress, w!("Explorer"), None);
-                }
-            }
-        }
         
         // Create modern font (Segoe UI Variable Display or Segoe UI)
         let font_height = -12; // ~9pt
@@ -1102,57 +965,41 @@ fn update_theme(hwnd: HWND) {
             w!("Segoe UI Variable Display"),
         );
         
-        // Helper to update button font and theme using shared function
-        let update_btn = |id: u16| {
-            if let Ok(btn) = GetDlgItem(Some(hwnd), id as i32) {
-                if !btn.is_invalid() {
-                    SendMessageW(btn, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-                    apply_button_theme(btn, dark);
+        // Helper to update font for control by ID
+        let update_font = |id: u16| {
+            if let Ok(ctrl) = GetDlgItem(Some(hwnd), id as i32) {
+                if !ctrl.is_invalid() {
+                    SendMessageW(ctrl, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
                 }
             }
         };
         
-        // Update all buttons using shared apply_button_theme
-        update_btn(IDC_BTN_ADD_FILES);
-        update_btn(IDC_BTN_ADD_FOLDER);
-        update_btn(IDC_BTN_REMOVE);
-        update_btn(IDC_BTN_PROCESS_ALL);
-        update_btn(IDC_BTN_CANCEL);
-        update_btn(IDC_BTN_SETTINGS);
-        update_btn(IDC_BTN_ABOUT);
-        update_btn(IDC_BTN_CONSOLE);
+        // Update fonts for all controls
+        update_font(IDC_BTN_ADD_FILES);
+        update_font(IDC_BTN_ADD_FOLDER);
+        update_font(IDC_BTN_REMOVE);
+        update_font(IDC_BTN_PROCESS_ALL);
+        update_font(IDC_BTN_CANCEL);
+        update_font(IDC_BTN_SETTINGS);
+        update_font(IDC_BTN_ABOUT);
+        update_font(IDC_BTN_CONSOLE);
+        update_font(IDC_COMBO_ALGO);
+        update_font(IDC_CHK_FORCE);
+        update_font(IDC_STATIC_TEXT);
         
-        // Update ComboBox using shared apply_combobox_theme
-        if let Ok(combo) = GetDlgItem(Some(hwnd), IDC_COMBO_ALGO as i32) {
-             if !combo.is_invalid() {
-                 SendMessageW(combo, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-                 apply_combobox_theme(combo, dark);
-             }
-        }
-        
-        // Update Force Checkbox using shared apply_button_theme (same theme as buttons)
-        if let Ok(chk) = GetDlgItem(Some(hwnd), IDC_CHK_FORCE as i32) {
-             if !chk.is_invalid() {
-                 SendMessageW(chk, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-                 apply_button_theme(chk, dark);
-             }
-        }
-        
-        // Update Static Text Font
-        if let Ok(static_text) = GetDlgItem(Some(hwnd), IDC_STATIC_TEXT as i32) {
-            SendMessageW(static_text, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-        }
-        
-        // Update ListView using FileListView facade
+        // Delegate theme updates to components
         if let Some(st) = get_window_state::<AppState>(hwnd) {
-            if let Some(ctrls) = &st.controls {
-                // Apply theme using facade (handles colors, window theme, header)
-                ctrls.file_list.set_theme(dark);
+            if let Some(ctrls) = &mut st.controls {
+                // Update each component's theme
+                ctrls.status_bar.on_theme_change(dark);
+                ctrls.action_panel.on_theme_change(dark);
+                ctrls.header_panel.on_theme_change(dark);
+                ctrls.file_list.on_theme_change(dark);
                 
                 // Apply subclass for header theming
                 ctrls.file_list.apply_subclass(hwnd);
                 
-                // Also update font
+                // Update ListView font
                 SendMessageW(ctrls.file_list.hwnd(), WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
             }
         }
