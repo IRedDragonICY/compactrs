@@ -64,6 +64,25 @@ impl StatusBar {
         self.hwnd_progress
     }
 
+    /// Sets the font for the label control.
+    ///
+    /// # Arguments
+    /// * `hfont` - The font handle to apply
+    ///
+    /// # Safety
+    /// Calls Win32 SendMessageW API.
+    pub unsafe fn set_font(&self, hfont: windows::Win32::Graphics::Gdi::HFONT) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+        
+        unsafe {
+            let wparam = WPARAM(hfont.0 as usize);
+            let lparam = LPARAM(1); // Redraw
+            
+            SendMessageW(self.hwnd_label, WM_SETFONT, Some(wparam), Some(lparam));
+        }
+    }
+
     /// Enables/disables dark mode for a window using undocumented uxtheme API.
     #[allow(non_snake_case)]
     unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {

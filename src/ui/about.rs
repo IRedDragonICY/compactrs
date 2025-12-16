@@ -125,7 +125,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
         match msg {
             WM_CTLCOLORSTATIC => {
                 if let Some(st) = get_state() {
-                    if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                    if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, st.is_dark) {
                         return result;
                     }
                 }
@@ -134,7 +134,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             WM_ERASEBKGND => {
                 if let Some(st) = get_state() {
                     let is_dark = st.is_dark;
-                    let (brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
+                    let (brush, _, _) = crate::ui::theme::get_theme_colors(is_dark);
                     
                     let hdc = HDC(wparam.0 as *mut _);
                     let mut rc = windows::Win32::Foundation::RECT::default();

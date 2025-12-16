@@ -568,11 +568,12 @@ fn is_app_dark_mode(hwnd: HWND) -> bool {
             match st.theme {
                 AppTheme::Dark => true,
                 AppTheme::Light => false,
-                AppTheme::System => crate::ui::theme::ThemeManager::is_system_dark_mode(),
+                AppTheme::System => crate::ui::theme::is_system_dark_mode(),
             }
         } else {
             // Fallback during initialization
-            crate::ui::theme::ThemeManager::is_system_dark_mode()
+            crate::ui::theme::is_system_dark_mode()
         }
     }
 }
+

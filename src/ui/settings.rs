@@ -234,7 +234,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
     match msg {
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
             if let Some(st) = get_state() {
-                if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, st.is_dark) {
                     return result;
                 }
             }
@@ -243,7 +243,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
         WM_ERASEBKGND => {
             if let Some(st) = get_state() {
                 let is_dark = st.is_dark;
-                let (brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
+                let (brush, _, _) = crate::ui::theme::get_theme_colors(is_dark);
                 
                 let hdc = HDC(wparam.0 as *mut _);
                 let mut rc = windows::Win32::Foundation::RECT::default();
@@ -358,7 +358,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              AppTheme::Dark => true,
                              AppTheme::Light => false,
                              AppTheme::System => {
-                                 crate::ui::theme::ThemeManager::is_system_dark_mode()
+                                 crate::ui::theme::is_system_dark_mode()
                              }
                          };
                          
@@ -389,7 +389,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                             
                             for &ctrl_id in &controls {
                                 if let Ok(h_ctl) = GetDlgItem(Some(hwnd), ctrl_id.into()) {
-                                    crate::ui::theme::ThemeManager::apply_control_theme(h_ctl, new_is_dark);
+                                    crate::ui::theme::apply_control_theme(h_ctl, new_is_dark);
                                     InvalidateRect(Some(h_ctl), None, true);
                                 }
                             }

@@ -66,6 +66,27 @@ impl HeaderPanel {
         self.hwnd_console
     }
 
+    /// Sets the font for all child controls.
+    ///
+    /// # Arguments
+    /// * `hfont` - The font handle to apply
+    ///
+    /// # Safety
+    /// Calls Win32 SendMessageW API.
+    pub unsafe fn set_font(&self, hfont: windows::Win32::Graphics::Gdi::HFONT) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+        
+        unsafe {
+            let wparam = WPARAM(hfont.0 as usize);
+            let lparam = LPARAM(1); // Redraw
+            
+            SendMessageW(self.hwnd_settings, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_about, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_console, WM_SETFONT, Some(wparam), Some(lparam));
+        }
+    }
+
     /// Helper to create a button.
     unsafe fn create_button(
         parent: HWND,
@@ -106,7 +127,7 @@ impl Component for HeaderPanel {
             let module = GetModuleHandleW(None)?;
             let instance = HINSTANCE(module.0);
 
-            let is_dark = crate::ui::theme::ThemeManager::is_system_dark_mode();
+            let is_dark = crate::ui::theme::is_system_dark_mode();
 
             // Initial positions (will be updated in on_resize)
             // These are just placeholders - real positions set in on_resize

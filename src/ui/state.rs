@@ -3,7 +3,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicBool};
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
-use crate::ui::components::FileListView;
+use crate::ui::components::{FileListView, Component};
 
 /// App Theme Preference
 #[repr(u32)]
@@ -97,6 +97,48 @@ pub struct Controls {
     pub status_bar: crate::ui::components::StatusBar,
     pub action_panel: crate::ui::components::ActionPanel,
     pub header_panel: crate::ui::components::HeaderPanel,
+}
+
+impl Controls {
+    /// Updates theme for all child components.
+    ///
+    /// This method coordinates theme updates across all UI components,
+    /// including setting fonts and applying dark/light mode styles.
+    ///
+    /// # Arguments
+    /// * `is_dark` - Whether dark mode is active
+    /// * `main_hwnd` - Main window handle for ListView subclass
+    ///
+    /// # Safety
+    /// Calls Win32 APIs for theme updates.
+    pub unsafe fn update_theme(&mut self, is_dark: bool, main_hwnd: windows::Win32::Foundation::HWND) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+        
+        unsafe {
+            // Get the cached app font
+            let hfont = crate::ui::theme::get_app_font();
+            
+            // Update theme for each component
+            self.status_bar.on_theme_change(is_dark);
+            self.action_panel.on_theme_change(is_dark);
+            self.header_panel.on_theme_change(is_dark);
+            self.file_list.on_theme_change(is_dark);
+            
+            // Set fonts on all components
+            self.status_bar.set_font(hfont);
+            self.action_panel.set_font(hfont);
+            self.header_panel.set_font(hfont);
+            
+            // Set font on ListView
+            let wparam = WPARAM(hfont.0 as usize);
+            let lparam = LPARAM(1);
+            SendMessageW(self.file_list.hwnd(), WM_SETFONT, Some(wparam), Some(lparam));
+            
+            // Apply subclass for header theming
+            self.file_list.apply_subclass(main_hwnd);
+        }
+    }
 }
 
 /// Application state

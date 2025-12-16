@@ -103,6 +103,31 @@ impl ActionPanel {
         self.hwnd_cancel
     }
 
+    /// Sets the font for all child controls.
+    ///
+    /// # Arguments
+    /// * `hfont` - The font handle to apply
+    ///
+    /// # Safety
+    /// Calls Win32 SendMessageW API.
+    pub unsafe fn set_font(&self, hfont: windows::Win32::Graphics::Gdi::HFONT) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+        
+        unsafe {
+            let wparam = WPARAM(hfont.0 as usize);
+            let lparam = LPARAM(1); // Redraw
+            
+            SendMessageW(self.hwnd_files, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_folder, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_remove, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_combo, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_force, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_process, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_cancel, WM_SETFONT, Some(wparam), Some(lparam));
+        }
+    }
+
     /// Helper to create a button with the builder pattern logic.
     unsafe fn create_button(
         parent: HWND,
@@ -148,7 +173,7 @@ impl Component for ActionPanel {
             let btn_y = 460;
 
             // Check system dark mode for initial theme
-            let is_dark = crate::ui::theme::ThemeManager::is_system_dark_mode();
+            let is_dark = crate::ui::theme::is_system_dark_mode();
 
             // Create Files button
             self.hwnd_files =

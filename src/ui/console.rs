@@ -243,7 +243,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         },
         WM_CTLCOLORBTN => {
-            if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
+            if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
                 return result;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -260,7 +260,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         },
         WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => {
-            if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
+            if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
                 return result;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)

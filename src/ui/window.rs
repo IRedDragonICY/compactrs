@@ -1,29 +1,27 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use windows::core::{Result, w, PCWSTR};
+use windows::core::{w, Result, PCWSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    HBRUSH, InvalidateRect, CreateSolidBrush, FillRect, HDC, CreateFontW, 
-    DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
-    FW_NORMAL, DEFAULT_CHARSET,
-};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
+use windows::Win32::Graphics::Gdi::{FillRect, InvalidateRect, HDC};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND,
-    GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, GetDlgItem, WM_DROPFILES, MessageBoxW, MB_OK,
+    GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY, WM_SETFONT, BM_GETCHECK, WM_ERASEBKGND, GetClientRect, GetWindowRect,
+    MB_ICONINFORMATION, WM_NOTIFY, BM_GETCHECK, WM_ERASEBKGND, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
 };
-use windows::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog, FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles};
+use windows::Win32::UI::Shell::{
+    DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog,
+    FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles,
+};
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 
 use crate::ui::controls::{
-    IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST, IDC_BTN_ADD_FOLDER,
-    IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES, IDC_BTN_SETTINGS, IDC_BTN_ABOUT,
-    IDC_BTN_CONSOLE, IDC_CHK_FORCE,
+    IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST,
+    IDC_BTN_ADD_FOLDER, IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES,
+    IDC_BTN_SETTINGS, IDC_BTN_ABOUT, IDC_BTN_CONSOLE, IDC_CHK_FORCE,
 };
 use crate::ui::components::{
     Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
@@ -34,19 +32,19 @@ use crate::ui::about::show_about_modal;
 use crate::ui::console::{show_console_window, append_log_msg};
 use crate::ui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
 use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
+use crate::ui::theme; // New theme module import
 use std::thread;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use windows::Win32::UI::Controls::{
-    PBM_SETRANGE32, PBM_SETPOS,
-    NM_DBLCLK, NMITEMACTIVATE,
+    PBM_SETRANGE32, PBM_SETPOS, NM_DBLCLK, NMITEMACTIVATE,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
     LVN_ITEMCHANGED, BST_CHECKED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::engine::worker::{
-    batch_process_worker, single_item_worker, 
-    calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm
+    batch_process_worker, single_item_worker,
+    calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm,
 };
 use humansize::{format_size, BINARY};
 use crate::config::AppConfig;
@@ -62,8 +60,9 @@ const WINDOW_TITLE: PCWSTR = w!("CompactRS");
 
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
     unsafe {
-        crate::ui::theme::ThemeManager::allow_dark_mode();
-        
+        // Enable dark mode for the application
+        theme::allow_dark_mode();
+
         // Initialize Common Controls to ensure Visual Styles are applied
         let iccex = INITCOMMONCONTROLSEX {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
@@ -71,20 +70,21 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
         };
         InitCommonControlsEx(&iccex);
 
-
         // Check dark mode for window class background
-        let is_dark = crate::ui::theme::ThemeManager::is_system_dark_mode();
-        let (bg_brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
+        let is_dark = theme::is_system_dark_mode();
+        let (bg_brush, _, _) = theme::get_theme_colors(is_dark);
 
         // Load icon (ID 1)
         let icon_handle = windows::Win32::UI::WindowsAndMessaging::LoadImageW(
             Some(instance),
             PCWSTR(1 as *const u16),
             windows::Win32::UI::WindowsAndMessaging::IMAGE_ICON,
-            0, 0, // Default size
-            windows::Win32::UI::WindowsAndMessaging::LR_DEFAULTSIZE | windows::Win32::UI::WindowsAndMessaging::LR_SHARED
-        ).unwrap_or_default();
-        
+            0, 0,
+            windows::Win32::UI::WindowsAndMessaging::LR_DEFAULTSIZE
+                | windows::Win32::UI::WindowsAndMessaging::LR_SHARED,
+        )
+        .unwrap_or_default();
+
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wnd_proc),
@@ -125,10 +125,12 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND> {
             Some(instance),
             None,
         )?;
-        
-        apply_backdrop(hwnd);
+
+        // Apply initial theme
+        let is_dark = theme::resolve_mode(config.theme);
+        theme::set_window_frame_theme(hwnd, is_dark);
+
         ShowWindow(hwnd, SW_SHOW);
-        update_theme(hwnd);
 
         Ok(hwnd)
     }
@@ -218,9 +220,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let _ = ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, None);
                 let _ = ChangeWindowMessageFilterEx(hwnd, 0x0049, MSGFLT_ALLOW, None); // WM_COPYGLOBALDATA
                 
-                // Apply saved theme (dark mode support for ListView)
+                // Apply saved theme using new Controls::update_theme
                 if let Some(st) = get_state() {
-                    apply_theme(hwnd, st.theme);
+                    let is_dark = theme::resolve_mode(st.theme);
+                    theme::set_window_frame_theme(hwnd, is_dark);
+                    if let Some(ctrls) = &mut st.controls {
+                        ctrls.update_theme(is_dark, hwnd);
+                    }
+                    InvalidateRect(Some(hwnd), None, true);
                 }
 
                 LRESULT(0)
@@ -231,8 +238,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let hdc = HDC(wparam.0 as *mut _);
                 let mut rect = windows::Win32::Foundation::RECT::default();
                 if GetClientRect(hwnd, &mut rect).is_ok() {
-                    let is_dark = is_app_dark_mode(hwnd);
-                    let (brush, _, _) = crate::ui::theme::ThemeManager::get_theme_colors(is_dark);
+                    let is_dark = if let Some(st) = get_state() {
+                        theme::resolve_mode(st.theme)
+                    } else {
+                        theme::is_system_dark_mode()
+                    };
+                    let (brush, _, _) = theme::get_theme_colors(is_dark);
                     FillRect(hdc, &rect, brush);
                     return LRESULT(1);
                 }
@@ -260,7 +271,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         // Show Dialog
                         let name_ptr = wparam.0 as *const u16;
                         let name = windows::core::PCWSTR(name_ptr).to_string().unwrap_or_default();
-                        let is_dark = is_app_dark_mode(hwnd);
+                        let is_dark = theme::resolve_mode(st.theme);
                         should_kill = crate::ui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark);
                     }
                 }
@@ -278,7 +289,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         _ => st.theme,
                     };
                     st.theme = new_theme;
-                    update_theme(hwnd);
+                    
+                    // Use new theme API
+                    let is_dark = theme::resolve_mode(st.theme);
+                    theme::set_window_frame_theme(hwnd, is_dark);
+                    if let Some(ctrls) = &mut st.controls {
+                        ctrls.update_theme(is_dark, hwnd);
+                    }
+                    InvalidateRect(Some(hwnd), None, true);
                 }
                 LRESULT(0)
             }
@@ -449,27 +467,34 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     
                     IDC_BTN_SETTINGS => {
                         if let Some(st) = get_state() {
-                            let theme = st.theme;
-                            let is_dark = is_app_dark_mode(hwnd);
+                            let current_theme = st.theme;
+                            let is_dark = theme::resolve_mode(st.theme);
                             // Modal will block until closed
-                            let (new_theme, new_force) = show_settings_modal(hwnd, theme, is_dark, st.enable_force_stop);
+                            let (new_theme, new_force) = show_settings_modal(hwnd, current_theme, is_dark, st.enable_force_stop);
                             if let Some(t) = new_theme {
                                 st.theme = t;
-                                apply_theme(hwnd, st.theme);
+                                let new_is_dark = theme::resolve_mode(st.theme);
+                                theme::set_window_frame_theme(hwnd, new_is_dark);
+                                if let Some(ctrls) = &mut st.controls {
+                                    ctrls.update_theme(new_is_dark, hwnd);
+                                }
+                                InvalidateRect(Some(hwnd), None, true);
                             }
                             st.enable_force_stop = new_force;
                         }
                     },
                     
                     IDC_BTN_ABOUT => {
-                        let is_dark = is_app_dark_mode(hwnd);
-                        show_about_modal(hwnd, is_dark);
+                        if let Some(st) = get_state() {
+                            let is_dark = theme::resolve_mode(st.theme);
+                            show_about_modal(hwnd, is_dark);
+                        }
                     },
 
                     IDC_BTN_CONSOLE => {
-                        if let Some(app_state) = get_window_state::<AppState>(hwnd) {
-                             let is_dark = is_app_dark_mode(hwnd);
-                             show_console_window(hwnd, &app_state.logs, is_dark);
+                        if let Some(st) = get_state() {
+                             let is_dark = theme::resolve_mode(st.theme);
+                             show_console_window(hwnd, &st.logs, is_dark);
                         }
                     },
 
@@ -757,7 +782,17 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
 
             0x001A => { // WM_SETTINGCHANGE
-                update_theme(hwnd);
+                // System theme may have changed - update if using System theme
+                if let Some(st) = get_state() {
+                    if st.theme == AppTheme::System {
+                        let is_dark = theme::resolve_mode(st.theme);
+                        theme::set_window_frame_theme(hwnd, is_dark);
+                        if let Some(ctrls) = &mut st.controls {
+                            ctrls.update_theme(is_dark, hwnd);
+                        }
+                        InvalidateRect(Some(hwnd), None, true);
+                    }
+                }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             
@@ -878,8 +913,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             
             // WM_CTLCOLORSTATIC - handle static text colors
             0x0138 => { // WM_CTLCOLORSTATIC
-                let is_dark = is_app_dark_mode(hwnd);
-                if let Some(result) = crate::ui::theme::ThemeManager::handle_ctl_color(hwnd, wparam, is_dark) {
+                let is_dark = if let Some(st) = get_state() {
+                    theme::resolve_mode(st.theme)
+                } else {
+                    theme::is_system_dark_mode()
+                };
+                if let Some(result) = theme::handle_ctl_color(hwnd, wparam, is_dark) {
                     return result;
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -933,129 +972,4 @@ unsafe fn pick_folder() -> Result<String> {
         CoTaskMemFree(Some(path_ptr.as_ptr() as *mut _));
         Ok(path)
     }
-}
-
-fn apply_backdrop(hwnd: HWND) {
-    unsafe {
-        // 1. Monitor System Dark Mode
-        let is_dark = is_app_dark_mode(hwnd);
-        crate::ui::theme::ThemeManager::apply_window_theme(hwnd, is_dark);
-    }
-}
-
-
-
-// Check effective dark mode state (System or Override)
-unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
-    // Try to get AppState to check override
-    if let Some(st) = get_window_state::<AppState>(hwnd) {
-        match st.theme {
-            AppTheme::Dark => return true,
-            AppTheme::Light => return false,
-            AppTheme::System => return crate::ui::theme::ThemeManager::is_system_dark_mode(),
-        }
-    }
-    // Fallback if no state yet (e.g. during creation)
-    crate::ui::theme::ThemeManager::is_system_dark_mode()
-}
-
-
-fn update_theme(hwnd: HWND) {
-    unsafe {
-        let dark = is_app_dark_mode(hwnd);
-        let attr = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
-        let val = if dark { 1 } else { 0 };
-        let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(attr), &val as *const _ as _, std::mem::size_of::<i32>() as u32);
-        
-        // Create modern font (Segoe UI Variable Display or Segoe UI)
-        let font_height = -12; // ~9pt
-        let hfont = CreateFontW(
-            font_height,
-            0, 0, 0,
-            FW_NORMAL.0 as i32,
-            0, 0, 0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY,
-            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
-            w!("Segoe UI Variable Display"),
-        );
-        
-        // Helper to update font for control by ID
-        let update_font = |id: u16| {
-            if let Ok(ctrl) = GetDlgItem(Some(hwnd), id as i32) {
-                if !ctrl.is_invalid() {
-                    SendMessageW(ctrl, WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-                }
-            }
-        };
-        
-        // Update fonts for all controls
-        update_font(IDC_BTN_ADD_FILES);
-        update_font(IDC_BTN_ADD_FOLDER);
-        update_font(IDC_BTN_REMOVE);
-        update_font(IDC_BTN_PROCESS_ALL);
-        update_font(IDC_BTN_CANCEL);
-        update_font(IDC_BTN_SETTINGS);
-        update_font(IDC_BTN_ABOUT);
-        update_font(IDC_BTN_CONSOLE);
-        update_font(IDC_COMBO_ALGO);
-        update_font(IDC_CHK_FORCE);
-        update_font(IDC_STATIC_TEXT);
-        
-        // Delegate theme updates to components
-        if let Some(st) = get_window_state::<AppState>(hwnd) {
-            if let Some(ctrls) = &mut st.controls {
-                // Update each component's theme
-                ctrls.status_bar.on_theme_change(dark);
-                ctrls.action_panel.on_theme_change(dark);
-                ctrls.header_panel.on_theme_change(dark);
-                ctrls.file_list.on_theme_change(dark);
-                
-                // Apply subclass for header theming
-                ctrls.file_list.apply_subclass(hwnd);
-                
-                // Update ListView font
-                SendMessageW(ctrls.file_list.hwnd(), WM_SETFONT, Some(WPARAM(hfont.0 as usize)), Some(LPARAM(1)));
-            }
-        }
-        
-        // Force main window redraw
-        let _ = InvalidateRect(Some(hwnd), None, true);
-    }
-}
-
-// Store dark brush handle as isize for thread safety (HBRUSH is not Sync)
-use std::sync::OnceLock;
-
-static DARK_BRUSH_HANDLE: OnceLock<isize> = OnceLock::new();
-
-fn get_dark_brush() -> HBRUSH {
-    let handle = *DARK_BRUSH_HANDLE.get_or_init(|| {
-        unsafe { 
-            let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00202020));
-            brush.0 as isize
-        }
-    });
-    HBRUSH(handle as *mut _)
-}
-
-unsafe fn apply_theme(hwnd: HWND, theme: AppTheme) {
-    let is_dark = match theme {
-        AppTheme::System => crate::ui::theme::ThemeManager::is_system_dark_mode(),
-        AppTheme::Dark => true,
-        AppTheme::Light => false,
-    };
-    
-    let dark_mode: u32 = if is_dark { 1 } else { 0 };
-    let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
-        hwnd,
-        windows::Win32::Graphics::Dwm::DWMWA_USE_IMMERSIVE_DARK_MODE,
-        &dark_mode as *const u32 as *const _,
-        4
-    );
-    
-    // Force redraw
-    windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, true);
 }

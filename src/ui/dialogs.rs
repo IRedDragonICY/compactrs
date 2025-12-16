@@ -16,7 +16,7 @@ use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, FillRect, HDC};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
 
 use crate::ui::builder::ButtonBuilder;
-use crate::ui::theme::ThemeManager;
+use crate::ui::theme;
 use crate::ui::utils::{ToWide, get_window_state};
 
 const DIALOG_CLASS_NAME: PCWSTR = w!("CompactRS_ForceStopDialog");
@@ -149,7 +149,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
         
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
             if let Some(st) = get_state() {
-                if let Some(result) = ThemeManager::handle_ctl_color(hwnd, wparam, st.is_dark) {
+                if let Some(result) = theme::handle_ctl_color(hwnd, wparam, st.is_dark) {
                     return result;
                 }
             }
@@ -159,7 +159,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
         WM_ERASEBKGND => {
             if let Some(st) = get_state() {
                 let is_dark = st.is_dark;
-                let (brush, _, _) = ThemeManager::get_theme_colors(is_dark);
+                let (brush, _, _) = theme::get_theme_colors(is_dark);
                 
                 let hdc = HDC(wparam.0 as *mut _);
                 let mut rc = windows::Win32::Foundation::RECT::default();
