@@ -11,7 +11,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, SetWindowPos, SWP_NOZORDER,
     WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL,
     SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW, GetClientRect,
-    LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, HICON,
 };
 use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -48,19 +47,13 @@ pub unsafe fn show_console_window(_parent: HWND, initial_logs: &[String], is_dar
 
     let instance = GetModuleHandleW(None).unwrap();
 
-    // Load App Icon (ID 1)
-    let icon_handle = LoadImageW(
-        Some(instance.into()),
-        PCWSTR(1 as *const u16),
-        IMAGE_ICON,
-        0, 0,
-        LR_DEFAULTSIZE | LR_SHARED
-    ).unwrap_or_default();
+    // Load App Icon using centralized helper
+    let icon = crate::ui::utils::load_app_icon(instance.into());
 
     let wc = WNDCLASSW {
         hCursor: LoadCursorW(None, IDC_ARROW).unwrap(),
         hInstance: instance.into(),
-        hIcon: HICON(icon_handle.0),
+        hIcon: icon,
         lpszClassName: CONSOLE_CLASS_NAME,
         style: CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: Some(wnd_proc),

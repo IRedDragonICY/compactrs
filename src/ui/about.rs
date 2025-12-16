@@ -61,16 +61,7 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             lpszClassName: ABOUT_CLASS_NAME,
-            hIcon: {
-                let h = LoadImageW(
-                    Some(instance.into()), 
-                    PCWSTR(1 as *const u16), 
-                    IMAGE_ICON, 
-                    0, 0, 
-                    windows::Win32::UI::WindowsAndMessaging::LR_DEFAULTSIZE | windows::Win32::UI::WindowsAndMessaging::LR_SHARED
-                ).unwrap_or_default();
-                windows::Win32::UI::WindowsAndMessaging::HICON(h.0)
-            },
+            hIcon: crate::ui::utils::load_app_icon(instance.into()),
             hbrBackground: HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _),
             ..Default::default()
         };
@@ -222,13 +213,14 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 let icon_size = 128;
                 let icon_x = (450 - icon_size) / 2;
                 
-                // Load icon from resources (ID 1)
-                // Instance is HMODULE, need HINSTANCE
+                // Load icon from resources using centralized helper
                 let hinstance = HINSTANCE(instance.0);
                 
+                // Note: For the about dialog we want a larger icon display
+                // so we load at specific size using LR_DEFAULTCOLOR
                 let hicon = LoadImageW(
                     Some(hinstance),
-                    PCWSTR(1 as *const u16), // Resource ID 1
+                    PCWSTR(1 as *const u16),
                     IMAGE_ICON,
                     icon_size, icon_size,
                     LR_DEFAULTCOLOR

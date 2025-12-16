@@ -8,9 +8,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BS_AUTORADIOBUTTON, BM_SETCHECK,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
-    FindWindowW, LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, HICON,
+    FindWindowW,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::SetWindowTheme;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, HDC, DeleteObject, HGDIOBJ, InvalidateRect, FillRect};
@@ -50,117 +49,20 @@ impl Drop for SettingsState {
     }
 }
 
-pub unsafe fn show_settings(parent: HWND, current_theme: AppTheme) -> Option<AppTheme> {
-    unsafe {
-        let instance = GetModuleHandleW(None).unwrap_or_default();
-        
-        let wc = WNDCLASSW {
-            style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(settings_wnd_proc),
-            hInstance: instance.into(),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            lpszClassName: SETTINGS_CLASS_NAME,
-            hbrBackground: windows::Win32::Graphics::Gdi::HBRUSH(windows::Win32::Graphics::Gdi::COLOR_WINDOW.0 as isize as *mut _),
-            ..Default::default()
-        };
-
-        RegisterClassW(&wc);
-
-        // Center relative to parent
-        let mut rect = windows::Win32::Foundation::RECT::default();
-        windows::Win32::UI::WindowsAndMessaging::GetWindowRect(parent, &mut rect).unwrap_or_default();
-        let p_width = rect.right - rect.left;
-        let p_height = rect.bottom - rect.top;
-        
-        let width = 300;
-        let height = 250;
-        let x = rect.left + (p_width - width) / 2;
-        let y = rect.top + (p_height - height) / 2;
-
-        // Use Box to store state
-        let state = Box::new(SettingsState {
-            theme: current_theme,
-            result: None,
-            is_dark: false, // Default for this unused path
-            dark_brush: None,
-            enable_force_stop: false,
-        });
-
-        let _hwnd = CreateWindowExW(
-            Default::default(),
-            SETTINGS_CLASS_NAME,
-            SETTINGS_TITLE,
-            WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-            x, y, width, height,
-            Some(parent),
-            None,
-            Some(instance.into()),
-            Some(Box::into_raw(state) as *mut _),
-        ).unwrap_or_default();
-
-        // Modal loop
-        EnableWindow(parent, false);
-        
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        
-        EnableWindow(parent, true);
-        
-        // Retrieve result
-        // Note: The state pointer was dropped inside WM_DESTROY, so we can't access it here easily 
-        // unless we kept a shared reference or static. 
-        // FIX: We need a way to get the result back.
-        // Option 1: Store result in a static or shared Arc<Mutex>.
-        // Option 2: Use pointer trickery (keep raw pointer until function end).
-        // Let's use a simpler approach: 
-        // The message loop ends when PostQuitMessage is called.
-        // We can't access 'state' after window destroy if we owned it in window.
-        // Better pattern for modal dialog result:
-        // Use a Cell or similar on the stack, pass pointer to it? 
-        // Or actually, retrieving GWLP_USERDATA after loop is risky if WM_DESTROY freed it.
-        // 
-        // Let's modify logic: destroy window frees memory.
-        // We will panic if we try to read freed memory.
-        // Let's use a shared struct on the stack!
-        
-        // Re-do creation with stack-allocated state
-        // We can't pass pointer to stack variable easily to WndProc because lifetimes? 
-        // Actually raw pointers don't care about lifetimes.
-        // But WndProc is extern "system" so it shouldn't access stack of this function strictly unless we are sure it lives long enough.
-        // It does live long enough because we block on GetMessageW.
-    }
-    
-    // Fallback for now: implementation below uses Heap alloc and cleans up.
-    // To return value, we need to extract it before cleanup or use shared memory.
-    // Let's use a static for simplicity in this constrained environment or just return None if complex.
-    // Actually, I'll rewrite `show_settings` to use a mutable reference passed via `LPARAM` in creation,
-    // and store it in GWLP_USERDATA.
-    None // Placeholder, the real implementation is in the next step
-}
-
-// Redefining proper function with data passing
+// Main settings modal function with proper data passing
 pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool) -> (Option<AppTheme>, bool) {
     unsafe {
         let instance = GetModuleHandleW(None).unwrap_or_default();
         
-        // Load App Icon (ID 1)
-        let icon_handle = LoadImageW(
-            Some(instance.into()),
-            PCWSTR(1 as *const u16),
-            IMAGE_ICON,
-            0, 0,
-            LR_DEFAULTSIZE | LR_SHARED
-        ).unwrap_or_default();
+        // Load App Icon using centralized helper
+        let icon = crate::ui::utils::load_app_icon(instance.into());
         
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(settings_wnd_proc),
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hIcon: HICON(icon_handle.0),
+            hIcon: icon,
             lpszClassName: SETTINGS_CLASS_NAME,
             hbrBackground: HBRUSH(if is_dark {
                 // Use a dark brush initially if possible, but standard is COLOR_WINDOW

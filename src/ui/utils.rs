@@ -3,9 +3,13 @@
 //! Provides abstractions to reduce boilerplate code:
 //! - `ToWide` trait for UTF-16 null-terminated string conversion
 //! - `get_window_state` for safe window state retrieval
+//! - `load_app_icon` for centralized icon loading
 
-use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWLP_USERDATA};
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{HINSTANCE, HWND};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindowLongPtrW, GWLP_USERDATA, LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, HICON,
+};
 
 /// Extension trait for converting Rust strings to null-terminated UTF-16 vectors.
 /// 
@@ -56,6 +60,33 @@ pub unsafe fn get_window_state<'a, T>(hwnd: HWND) -> Option<&'a mut T> { unsafe 
     if ptr == 0 {
         None
     } else {
-        Some(&mut *(ptr as *mut T))
+    Some(&mut *(ptr as *mut T))
     }
 }}
+
+/// Loads the application icon from resources.
+///
+/// This centralizes the icon loading logic that was previously duplicated
+/// across multiple window creation sites.
+///
+/// # Safety
+/// Caller must ensure `instance` is a valid module handle.
+///
+/// # Arguments
+/// * `instance` - The HINSTANCE of the module containing the icon resource
+///
+/// # Returns
+/// The loaded HICON, or a default empty icon if loading fails.
+#[inline]
+pub unsafe fn load_app_icon(instance: HINSTANCE) -> HICON {
+    unsafe {
+        let handle = LoadImageW(
+            Some(instance),
+            PCWSTR(1 as *const u16),
+            IMAGE_ICON,
+            0, 0,
+            LR_DEFAULTSIZE | LR_SHARED,
+        ).unwrap_or_default();
+        HICON(handle.0)
+    }
+}

@@ -3,19 +3,19 @@
 //! This component manages the action bar at the bottom of the main window,
 //! containing buttons for file operations, algorithm selection, and process control.
 
-use windows::core::{w, Result, PCWSTR};
-use windows::Win32::Foundation::{HWND, HINSTANCE, RECT};
+use windows::core::{w, Result};
+use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::SetWindowTheme;
 use windows::Win32::UI::WindowsAndMessaging::{
-    BS_AUTOCHECKBOX, BS_PUSHBUTTON, CBS_DROPDOWNLIST, CBS_HASSTRINGS, CreateWindowExW,
+    BS_AUTOCHECKBOX, CBS_DROPDOWNLIST, CBS_HASSTRINGS, CreateWindowExW,
     SetWindowPos, HMENU, SWP_NOZORDER, WINDOW_STYLE, WS_CHILD, WS_TABSTOP,
     WS_VISIBLE, WS_VSCROLL,
 };
 
 use super::base::Component;
+use crate::ui::builder::ButtonBuilder;
 use crate::ui::controls::{apply_button_theme, apply_combobox_theme};
-use crate::ui::utils::ToWide;
 
 /// Configuration for ActionPanel control IDs.
 pub struct ActionPanelIds {
@@ -128,45 +128,13 @@ impl ActionPanel {
         }
     }
 
-    /// Helper to create a button with the builder pattern logic.
-    unsafe fn create_button(
-        parent: HWND,
-        instance: HINSTANCE,
-        text: &str,
-        x: i32,
-        y: i32,
-        w: i32,
-        h: i32,
-        id: u16,
-        is_dark: bool,
-    ) -> Result<HWND> {
-        unsafe {
-            let text_wide = text.to_wide();
-            let hwnd = CreateWindowExW(
-                Default::default(),
-                w!("BUTTON"),
-                PCWSTR::from_raw(text_wide.as_ptr()),
-                WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | BS_PUSHBUTTON as u32),
-                x,
-                y,
-                w,
-                h,
-                Some(parent),
-                Some(HMENU(id as isize as *mut _)),
-                Some(instance),
-                None,
-            )?;
-            apply_button_theme(hwnd, is_dark);
-            Ok(hwnd)
-        }
-    }
 }
 
 impl Component for ActionPanel {
     unsafe fn create(&mut self, parent: HWND) -> Result<()> {
         unsafe {
             let module = GetModuleHandleW(None)?;
-            let instance = HINSTANCE(module.0);
+            let instance = windows::Win32::Foundation::HINSTANCE(module.0);
 
             // Initial positions (will be updated in on_resize)
             let btn_h = 32;
@@ -175,17 +143,17 @@ impl Component for ActionPanel {
             // Check system dark mode for initial theme
             let is_dark = crate::ui::theme::is_system_dark_mode();
 
-            // Create Files button
-            self.hwnd_files =
-                Self::create_button(parent, instance, "Files", 10, btn_y, 65, btn_h, self.ids.btn_files, is_dark)?;
+            // Create Files button using ButtonBuilder
+            self.hwnd_files = ButtonBuilder::new(parent, self.ids.btn_files)
+                .text("Files").pos(10, btn_y).size(65, btn_h).dark_mode(is_dark).build();
 
             // Create Folder button
-            self.hwnd_folder =
-                Self::create_button(parent, instance, "Folder", 85, btn_y, 65, btn_h, self.ids.btn_folder, is_dark)?;
+            self.hwnd_folder = ButtonBuilder::new(parent, self.ids.btn_folder)
+                .text("Folder").pos(85, btn_y).size(65, btn_h).dark_mode(is_dark).build();
 
             // Create Remove button
-            self.hwnd_remove =
-                Self::create_button(parent, instance, "Remove", 160, btn_y, 70, btn_h, self.ids.btn_remove, is_dark)?;
+            self.hwnd_remove = ButtonBuilder::new(parent, self.ids.btn_remove)
+                .text("Remove").pos(160, btn_y).size(70, btn_h).dark_mode(is_dark).build();
 
             // Create Algorithm ComboBox
             self.hwnd_combo = CreateWindowExW(
@@ -227,21 +195,12 @@ impl Component for ActionPanel {
             )?;
 
             // Create Process All button
-            self.hwnd_process = Self::create_button(
-                parent,
-                instance,
-                "Process All",
-                430,
-                btn_y,
-                100,
-                btn_h,
-                self.ids.btn_process,
-                is_dark,
-            )?;
+            self.hwnd_process = ButtonBuilder::new(parent, self.ids.btn_process)
+                .text("Process All").pos(430, btn_y).size(100, btn_h).dark_mode(is_dark).build();
 
             // Create Cancel button
-            self.hwnd_cancel =
-                Self::create_button(parent, instance, "Cancel", 540, btn_y, 80, btn_h, self.ids.btn_cancel, is_dark)?;
+            self.hwnd_cancel = ButtonBuilder::new(parent, self.ids.btn_cancel)
+                .text("Cancel").pos(540, btn_y).size(80, btn_h).dark_mode(is_dark).build();
 
             // Apply initial theme to ComboBox and Checkbox
             if is_dark {
