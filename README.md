@@ -5,126 +5,123 @@
   <br />
   <br />
   
-  [![Build Status](https://img.shields.io/github/actions/workflow/status/IRedDragonICY/compactrs/release.yml?branch=main&style=flat-square)](https://github.com/IRedDragonICY/compactrs/actions)
-  [![Platform](https://img.shields.io/badge/platform-Windows_10_%7C_11-0078D6?style=flat-square)](https://www.microsoft.com/windows)
-  [![Language](https://img.shields.io/badge/language-Rust-DEA584?style=flat-square)](https://www.rust-lang.org/)
-  [![License](https://img.shields.io/github/license/IRedDragonICY/compactrs?style=flat-square)](LICENSE)
-  [![Download](https://img.shields.io/github/downloads/IRedDragonICY/compactrs/total?style=flat-square)](https://github.com/IRedDragonICY/compactrs/releases)
+  [![Build Status](https://img.shields.io/github/actions/workflow/status/IRedDragonICY/compactrs/release.yml?branch=main&style=flat-square&logo=github&label=Build)](https://github.com/IRedDragonICY/compactrs/actions)
+  [![Platform](https://img.shields.io/badge/Platform-Windows_10_%7C_11-0078D6?style=flat-square&logo=windows)](https://www.microsoft.com/windows)
+  [![Language](https://img.shields.io/badge/Language-Rust-DEA584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+  [![Architecture](https://img.shields.io/badge/Architecture-x64-lightgrey?style=flat-square)](https://en.wikipedia.org/wiki/X86-64)
+  [![Dependencies](https://img.shields.io/badge/Dependencies-None-success?style=flat-square)](https://github.com/IRedDragonICY/compactrs)
+  [![License](https://img.shields.io/github/license/IRedDragonICY/compactrs?style=flat-square&label=License)](LICENSE)
+  [![Download](https://img.shields.io/github/downloads/IRedDragonICY/compactrs/total?style=flat-square&label=Downloads&color=blue)](https://github.com/IRedDragonICY/compactrs/releases)
 
 </div>
 
-## Overview
+---
 
-**CompactRS** is a high-performance, native Windows file compression utility engineered in Rust. It leverages the **Windows Overlay Filter (WOF)** API—the same technology powering the Windows "CompactOS" feature—to achieve transparent filesystem compression superior to standard NTFS (LZNT1) compression.
+## 1. Project Overview
 
-Unlike traditional archivers (e.g., Zip, 7z), files compressed with CompactRS remain fully readable and writable by the operating system and applications without explicit decompression. The primary objective of this project is to provide a modern, multithreaded GUI for the command-line `compact.exe` utility, offering advanced algorithms (XPRESS, LZX) to significantly reduce disk usage with negligible performance impact.
+**CompactRS** is a specialized, high-performance file compression utility built natively for the Windows NT kernel. It serves as a modern, graphical interface for the Windows Overlay Filter (WOF) API, utilizing the same compression technology found in Windows "CompactOS".
 
-Built directly on the Win32 API using the `windows` crate, CompactRS results in an extremely lightweight binary (<1MB) with zero runtime dependencies.
+Unlike traditional archivers (Zip, 7z, Rar), CompactRS performs **Transparent Compression**. Files processed by this utility remain fully readable and writable by the operating system, Games, and Explorer without requiring explicit decompression. The decompression happens on-the-fly in the kernel driver level with negligible CPU overhead.
 
-## Key Features
+### Zero Dependency Philosophy
+This application is engineered in pure **Rust** utilizing the `windows` crate for direct Win32 API calls.
+*   **No Runtime Requirements:** Does not require .NET Framework, Java, Python, or Visual C++ Redistributables.
+*   **Standalone Binary:** The output is a single, static executable file (<1MB) that runs out-of-the-box on any Windows 10/11 system.
+*   **Native UI:** Draws standard Windows controls via `user32.dll` and `uxtheme.dll` for a native look and feel that respects system DPI settings.
 
-*   **Transparent Compression:** Files remain accessible to Explorer and all applications. Decompression occurs on-the-fly via the WOF filesystem filter driver.
-*   **Advanced WOF Algorithms:**
-    *   **XPRESS4K:** Lowest CPU overhead, suitable for frequently accessed files.
-    *   **XPRESS8K / 16K:** Balanced compression ratios.
-    *   **LZX:** Maximum compression ratio (often 40-60%), ideal for cold storage, games, and large applications.
-*   **High-Performance Multithreading:** utilizes a work-stealing thread pool to process batch operations efficiently, saturating modern multi-core CPUs during analysis and compression.
-*   **Native Win32 Interface:** A bloat-free GUI written in pure Rust, adhering to the Windows visual style guide. Supports High DPI scaling and Per-Monitor V2 awareness.
-*   **Adaptive Dark Mode:** Automatically detects system theme preferences and applies an immersive dark theme to all controls, including legacy Win32 components (ListViews, Headers, Common Controls) via undocumented UxTheme hooks.
-*   **Smart Lock Handling:** Integrates with the Windows Restart Manager API to detect processes locking files, offering a built-in mechanism to terminate blockers and force compression.
-*   **Safety & Filtering:** Automatically filters incompressible file types (media, existing archives) and performs intelligent "compressibility" heuristics to prevent wasted CPU cycles.
+---
 
-## Technical Architecture
+## 2. Technical Capabilities
 
-CompactRS interfaces directly with the Windows kernel via `DeviceIoControl` ioctls.
+### Compression Algorithms (WOF)
+CompactRS exposes the internal compression formats provided by `Wof.sys`.
 
-### The WOF Mechanism
-The application creates a reparse point using `FSCTL_SET_EXTERNAL_BACKING`. This instructs the filesystem to delegate read operations to the `Wof.sys` driver. The data is stored physically on the disk in a compressed format (using the selected algorithm), while the logical view remains unchanged.
-
-### Compression Algorithms
-CompactRS exposes the specific compression formats supported by the Windows ADK:
-
-| Algorithm | CPU Cost | Compression Ratio | Use Case |
+| Algorithm | Compression Ratio | CPU Overhead | Ideal Use Case |
 | :--- | :--- | :--- | :--- |
-| **XPRESS4K** | Low | Low | System files, frequently read data. |
-| **XPRESS8K** | Medium | Medium | General purpose. |
-| **XPRESS16K** | Medium | High | Larger binaries. |
-| **LZX** | High | Very High | Static data, games, archival storage. |
+| **XPRESS4K** | Low | Very Low | Frequently accessed system files, logs. |
+| **XPRESS8K** | Medium | Low | General documents, non-media assets. |
+| **XPRESS16K** | High | Medium | Applications, larger binaries. |
+| **LZX** | Very High | High | Games, archival data, static software (Read-heavy). |
 
-### Process Management
-The application employs a custom `BatchProcess` state machine. It separates file discovery (directory walking via `ignore` crate) from processing. The worker threads utilize atomic counters for lock-free progress tracking, communicating with the main UI thread via a thread-safe message channel (`std::sync::mpsc`) to ensure the GUI remains responsive under heavy load.
+> **Note:** LZX compression typically achieves ratios comparable to Zip/Deflate but allows the program to run directly from the compressed state.
 
-## Installation
+### Core Features
 
-### Prerequisites
+#### **Native Win32 Architecture**
+Built directly on top of the Windows Message Loop (`GetMessage`, `DispatchMessage`). It uses a Facade pattern to wrap raw `CreateWindowExW` calls into safe Rust components, ensuring high performance and low memory footprint (~4MB RAM usage).
+
+#### **Intelligent Batch Processing**
+*   **Multithreading:** Implements a work-stealing thread pool to saturate modern multi-core CPUs during the analysis and compression phases.
+*   **Safety Heuristics:** Automatically detects and skips incompressible file types (e.g., `.mp4`, `.zip`, `.jpg`) to prevent wasted CPU cycles.
+*   **Lock Handling:** Integrates with the **Windows Restart Manager** API. If a file is locked by another process (e.g., a running game), CompactRS identifies the blocker and offers a prompt to terminate it cleanly before proceeding.
+
+#### **Adaptive Visuals**
+*   **Per-Monitor V2 DPI Awareness:** Crisp text and UI rendering on 4K monitors and mixed-scale setups.
+*   **Immersive Dark Mode:** Uses undocumented Windows APIs (Ordinal 133/135 in `uxtheme.dll`) to apply system-consistent dark theming to legacy Win32 controls, menus, and window frames.
+
+---
+
+## 3. Comparison: CompactRS vs. Others
+
+| Feature | CompactRS (WOF) | NTFS Compression (LZNT1) | 7-Zip / WinRAR |
+| :--- | :--- | :--- | :--- |
+| **Access Method** | Instant / Transparent | Instant / Transparent | Must Extract First |
+| **Algorithm** | LZX / XPRESS (Modern) | LZNT1 (Legacy) | LZMA / LZMA2 |
+| **Ratio** | High (30-60%) | Low (15-25%) | Ultra (40-70%) |
+| **Performance** | Multi-threaded | Single-threaded | Multi-threaded |
+| **Write Speed** | Slow (Re-compression) | Fast | N/A (Archive update) |
+| **Dependencies** | None (Native) | None (Native) | Runtime / DLLs |
+
+---
+
+## 4. Installation
+
+### Requirements
 *   **OS:** Windows 10 (Build 17763+) or Windows 11.
-*   **Permissions:** Administrator privileges are required to interact with the WOF driver.
+*   **Privileges:** **Administrator** rights are strictly required. The WOF driver (`fsctl`) operations are privileged kernel commands.
 
-### Download Binary
-Download the latest pre-compiled binary from the [Releases Page](https://github.com/IRedDragonICY/compactrs/releases).
+### Download
+1.  Navigate to the [Releases Page](https://github.com/IRedDragonICY/compactrs/releases).
+2.  Download `compactrs.exe`.
+3.  Right-click the file and select **Run as Administrator**.
 
-1.  Download `compactrs.exe`.
-2.  Right-click the file and select **Run as Administrator**.
+---
 
-## Building from Source
+## 5. Usage Guide
 
-To build CompactRS, ensure you have the latest Rust toolchain installed.
+### Batch Compression
+1.  **Add Target:** Drag and drop folders or files onto the application window, or use the **Files** / **Folder** buttons in the bottom action bar.
+2.  **Configuration:**
+    *   **Action Mode:** Select "Compress All" or "Decompress All".
+    *   **Algorithm:** Select desired strength (Default: `XPRESS8K`).
+        *   *Tip:* Use **LZX** for game folders to save maximum space.
+    *   **Force:** Check this to force compression on files that the OS deems "not beneficial" or locked files (triggers Lock Handler).
+3.  **Execute:** Click **Process All**.
+4.  **Monitor:** The list view updates in real-time, showing:
+    *   *Logical Size:* The actual size of the data.
+    *   *Physical Size:* The size on disk after compression.
+    *   *Status:* Success, Skipped, or Error details.
+
+### Troubleshooting Locked Files
+If a file is in use, a dialog will appear showing the Process Name and PID holding the lock.
+*   **Force Stop:** Terminates the blocking process and retries compression immediately.
+*   **Cancel:** Skips the current file.
+
+### Settings & Console
+*   **Settings (Gear Icon):** Toggle between System, Dark, or Light themes manually. Enable/Disable "Force Stop" auto-kill features.
+*   **Console (>_ Icon):** Opens a debug log window to view detailed internal operations, error codes, and thread status.
+
+---
+
+## 6. Build from Source
+
+To compile CompactRS, you must have the **Rust Toolchain** (MSVC ABI) installed.
 
 ```powershell
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/IRedDragonICY/compactrs.git
 cd compactrs
 
-# Build release binary
+# 2. Build for Release
+# The profile is configured for maximum size optimization (lto, strip, opt-level="z")
 cargo build --release
-```
-
-The resulting binary will be located at `target/release/compactrs.exe`.
-
-### Build Profile
-The `Cargo.toml` is configured for maximum size optimization:
-*   `opt-level = "z"`
-*   `lto = true`
-*   `codegen-units = 1`
-*   `panic = "abort"`
-*   `strip = "symbols"`
-
-## Usage Guide
-
-### Batch Compression
-1.  Launch CompactRS.
-2.  **Add Input:** Drag and drop folders onto the window, or use the **Files** / **Folder** buttons.
-3.  **Select Algorithm:** Choose the desired compression strength from the dropdown (default: XPRESS8K).
-    *   *Recommendation:* Use **LZX** for game folders or software directories to save the most space.
-4.  **Process:** Click **Process All**.
-5.  **Monitor:** The list view provides real-time statistics on logical size vs. physical size.
-
-### Handling Locked Files
-If a file is in use (e.g., a running executable or log file), CompactRS will identify the blocking process using the Windows Restart Manager. A dialog will appear offering to terminate the process to proceed with compression.
-
-### Force Mode
-By default, CompactRS skips files that do not benefit from compression. Toggle the **Force** checkbox to apply WOF compression regardless of the heuristic outcome.
-
-## Benchmarks
-
-Typical space savings observed on a mixed dataset (Software/Games):
-
-*   **Uncompressed:** 45.2 GB
-*   **XPRESS8K:** 28.4 GB (37% reduction)
-*   **LZX:** 22.1 GB (51% reduction)
-
-*Note: Performance impact on read speeds is negligible on modern NVMe SSDs due to reduced I/O throughput requirements offsetting the decompression CPU cost.*
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Disclaimer
-
-This software modifies filesystem attributes at a low level. While WOF is a stable Windows feature used by the OS itself, always ensure you have backups of critical data before performing batch operations on system directories.
-
-***
-
-<div align="center">
-  <p>Created by IRedDragonICY (Mohammad Farid Hendianto)</p>
-</div>
