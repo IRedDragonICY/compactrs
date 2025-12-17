@@ -10,6 +10,7 @@ use windows::Win32::Foundation::{HINSTANCE, HWND};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GWLP_USERDATA, LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, HICON,
 };
+use windows::Win32::UI::Shell::StrFormatByteSizeW;
 
 /// Extension trait for converting Rust strings to null-terminated UTF-16 vectors.
 /// 
@@ -88,5 +89,42 @@ pub unsafe fn load_app_icon(instance: HINSTANCE) -> HICON {
             LR_DEFAULTSIZE | LR_SHARED,
         ).unwrap_or_default();
         HICON(handle.0)
+    }
+}
+
+/// Formats a byte size into a human-readable string using the Windows Shell API.
+///
+/// This is a pure Win32 implementation that uses `StrFormatByteSizeW` from shlwapi.dll
+/// to format file sizes according to the user's locale settings (e.g., "1.5 GB").
+///
+/// # Arguments
+/// * `bytes` - The size in bytes to format
+///
+/// # Returns
+/// A human-readable string representation of the size (e.g., "1.5 GB", "256 KB")
+///
+/// # Example
+/// ```
+/// let size_str = format_size(1073741824); // "1.00 GB"
+/// ```
+#[inline]
+pub fn format_size(bytes: u64) -> String {
+    // Stack buffer for the result (32 chars is plenty for size strings)
+    let mut buffer: [u16; 32] = [0; 32];
+    
+    unsafe {
+        // StrFormatByteSizeW takes an i64 (LONGLONG) for the size
+        // For values > i64::MAX, we clamp to i64::MAX (unlikely in practice)
+        let size_i64 = if bytes > i64::MAX as u64 {
+            i64::MAX
+        } else {
+            bytes as i64
+        };
+        
+        let result = StrFormatByteSizeW(size_i64, &mut buffer);
+        
+        // Find the null terminator and convert to String
+        let len = result.as_wide().len();
+        String::from_utf16_lossy(&buffer[..len])
     }
 }

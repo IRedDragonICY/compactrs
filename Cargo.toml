@@ -8,8 +8,6 @@ license = "MIT"
 repository = "https://github.com/IRedDragonICY/compactrs"
 
 [dependencies]
-humansize = "2.1"
-
 
 [dependencies.windows]
 version = "0.62"

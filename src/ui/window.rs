@@ -46,7 +46,7 @@ use crate::engine::worker::{
     batch_process_worker, single_item_worker,
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm,
 };
-use humansize::{format_size, BINARY};
+use crate::ui::utils::format_size;
 use crate::config::AppConfig;
 use crate::ui::utils::get_window_state;
 
@@ -299,8 +299,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         let logical_size = calculate_path_logical_size(&file_path);
                                         let disk_size = calculate_path_disk_size(&file_path);
                                         let detected_algo = detect_path_algorithm(&file_path);
-                                        let logical_str = format_size(logical_size, BINARY);
-                                        let disk_str = format_size(disk_size, BINARY);
+                                        let logical_str = format_size(logical_size);
+                                        let disk_str = format_size(disk_size);
                                         if let Some(ctrls) = &st.controls {
                                             // Get the batch item we just added
                                             if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
@@ -323,8 +323,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     let logical_size = calculate_path_logical_size(&folder);
                                     let disk_size = calculate_path_disk_size(&folder);
                                     let detected_algo = detect_path_algorithm(&folder);
-                                    let logical_str = format_size(logical_size, BINARY);
-                                    let disk_str = format_size(disk_size, BINARY);
+                                    let logical_str = format_size(logical_size);
+                                    let disk_str = format_size(disk_size);
                                     if let Some(ctrls) = &st.controls {
                                         if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
                                             ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, detected_algo);
@@ -596,8 +596,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         }
                                     },
                                     UiMessage::BatchItemAnalyzed(id, logical_size, disk_size, state) => {
-                                        let logical_str = format_size(logical_size, BINARY);
-                                        let disk_str = format_size(disk_size, BINARY);
+                                        let logical_str = format_size(logical_size);
+                                        let disk_str = format_size(disk_size);
                                         
                                         // Find row index by ID
                                         if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {

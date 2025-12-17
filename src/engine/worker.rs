@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::sync::mpsc::{Sender, sync_channel, Receiver};
-use humansize::{format_size, BINARY};
+use crate::ui::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
 use crate::ui::utils::ToWide;
@@ -760,7 +760,7 @@ pub fn batch_process_worker(
         } else {
             calculate_folder_disk_size(&path)
         };
-        let size_str = format_size(size_after, BINARY);
+        let size_str = format_size(size_after);
         
         let end_state = detect_path_algorithm(&path);
         let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, "Done".to_string(), size_str, end_state));
@@ -829,7 +829,7 @@ pub fn single_item_worker(
             ProcessResult::Success => {
                 success += 1;
                 let compressed_size = get_real_file_size(&path);
-                let disk_str = format_size(compressed_size, BINARY);
+                let disk_str = format_size(compressed_size);
                 let final_state = detect_path_algorithm(&path);
                 let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str, final_state));
             }
@@ -947,7 +947,7 @@ pub fn single_item_worker(
     
     // Calculate size after
     let size_after = calculate_folder_disk_size(&path);
-    let size_after_str = format_size(size_after, BINARY);
+    let size_after_str = format_size(size_after);
     
     // Send final status with disk size for On Disk column
     let status = if failed > 0 { format!("Done+{} err", failed) } else { "Done".to_string() };
