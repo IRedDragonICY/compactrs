@@ -1,12 +1,18 @@
-use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering}};
-use std::sync::mpsc::Sender;
-use ignore::WalkBuilder;
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use humansize::{format_size, BINARY};
 use crate::ui::state::{UiMessage, BatchAction};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
 use crate::ui::utils::ToWide;
 use windows::Win32::Foundation::{HWND, WPARAM, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
+use windows::Win32::Storage::FileSystem::{
+    FindFirstFileExW, FindNextFileW, FindClose,
+    FindExInfoBasic, FindExSearchNameMatch,
+    FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
+    FILE_ATTRIBUTE_DIRECTORY,
+};
+use windows::core::PCWSTR;
 
 // ===== RESULT TYPE FOR CORE PROCESSING =====
 
@@ -43,43 +49,348 @@ fn should_skip_extension(path: &str) -> bool {
     }
 }
 
-// ===== HELPER FUNCTIONS (Moved from window.rs) =====
+// ===== WIN32 NATIVE DIRECTORY TRAVERSAL =====
 
-fn create_walk_builder(path: &str) -> WalkBuilder {
-    let mut builder = WalkBuilder::new(path);
-    builder
-        .hidden(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .ignore(false);
-    builder
+/// Recursively walks a directory using Win32 FindFirstFileExW/FindNextFileW APIs.
+/// Collects file paths into a vector.
+/// 
+/// # Arguments
+/// * `path` - Directory path to traverse
+/// * `files` - Vector to collect file paths
+/// * `cancel` - Cancellation flag
+/// 
+/// # Performance
+/// Uses `FindExInfoBasic` (faster, skips short name) and `FIND_FIRST_EX_LARGE_FETCH` for batch prefetching.
+fn walk_directory_win32_collect(
+    path: &str,
+    files: &mut Vec<String>,
+    cancel: &Arc<AtomicBool>,
+) {
+    if cancel.load(Ordering::Relaxed) {
+        return;
+    }
+
+    // Prepare search pattern: "path\*"
+    let pattern = if path.ends_with('\\') || path.ends_with('/') {
+        format!("{}*", path)
+    } else {
+        format!("{}\\*", path)
+    };
+    let pattern_wide = pattern.to_wide();
+
+    let mut find_data = WIN32_FIND_DATAW::default();
+
+    unsafe {
+        let handle = FindFirstFileExW(
+            PCWSTR(pattern_wide.as_ptr()),
+            FindExInfoBasic,
+            &mut find_data as *mut _ as *mut _,
+            FindExSearchNameMatch,
+            None,
+            FIND_FIRST_EX_LARGE_FETCH,
+        );
+
+        // Check for invalid handle
+        if handle.is_err() {
+            return;
+        }
+        let handle = handle.unwrap();
+
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = FindClose(handle);
+                return;
+            }
+
+            // Parse filename from null-terminated UTF-16
+            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
+            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
+
+            // Skip . and ..
+            if filename != "." && filename != ".." {
+                let full_path = if path.ends_with('\\') || path.ends_with('/') {
+                    format!("{}{}", path, filename)
+                } else {
+                    format!("{}\\{}", path, filename)
+                };
+
+                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
+                    // It's a directory - recurse
+                    walk_directory_win32_collect(&full_path, files, cancel);
+                } else {
+                    // It's a file - add to vector
+                    files.push(full_path);
+                }
+            }
+
+            // Get next entry
+            if FindNextFileW(handle, &mut find_data).is_err() {
+                break;
+            }
+        }
+
+        let _ = FindClose(handle);
+    }
 }
+
+/// Counts files in a directory using Win32 traversal (for size calculations)
+fn walk_directory_win32_count(
+    path: &str,
+    counter: &mut u64,
+) {
+    let pattern = if path.ends_with('\\') || path.ends_with('/') {
+        format!("{}*", path)
+    } else {
+        format!("{}\\*", path)
+    };
+    let pattern_wide = pattern.to_wide();
+
+    let mut find_data = WIN32_FIND_DATAW::default();
+
+    unsafe {
+        let handle = FindFirstFileExW(
+            PCWSTR(pattern_wide.as_ptr()),
+            FindExInfoBasic,
+            &mut find_data as *mut _ as *mut _,
+            FindExSearchNameMatch,
+            None,
+            FIND_FIRST_EX_LARGE_FETCH,
+        );
+
+        if handle.is_err() {
+            return;
+        }
+        let handle = handle.unwrap();
+
+        loop {
+            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
+            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
+
+            if filename != "." && filename != ".." {
+                let full_path = if path.ends_with('\\') || path.ends_with('/') {
+                    format!("{}{}", path, filename)
+                } else {
+                    format!("{}\\{}", path, filename)
+                };
+
+                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
+                    walk_directory_win32_count(&full_path, counter);
+                } else {
+                    *counter += 1;
+                }
+            }
+
+            if FindNextFileW(handle, &mut find_data).is_err() {
+                break;
+            }
+        }
+
+        let _ = FindClose(handle);
+    }
+}
+
+/// Accumulates logical size of all files using Win32 traversal
+fn walk_directory_win32_logical_size(
+    path: &str,
+    total: &mut u64,
+) {
+    let pattern = if path.ends_with('\\') || path.ends_with('/') {
+        format!("{}*", path)
+    } else {
+        format!("{}\\*", path)
+    };
+    let pattern_wide = pattern.to_wide();
+
+    let mut find_data = WIN32_FIND_DATAW::default();
+
+    unsafe {
+        let handle = FindFirstFileExW(
+            PCWSTR(pattern_wide.as_ptr()),
+            FindExInfoBasic,
+            &mut find_data as *mut _ as *mut _,
+            FindExSearchNameMatch,
+            None,
+            FIND_FIRST_EX_LARGE_FETCH,
+        );
+
+        if handle.is_err() {
+            return;
+        }
+        let handle = handle.unwrap();
+
+        loop {
+            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
+            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
+
+            if filename != "." && filename != ".." {
+                let full_path = if path.ends_with('\\') || path.ends_with('/') {
+                    format!("{}{}", path, filename)
+                } else {
+                    format!("{}\\{}", path, filename)
+                };
+
+                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
+                    walk_directory_win32_logical_size(&full_path, total);
+                } else {
+                    // Get logical size from high/low parts in find_data
+                    let size = ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
+                    *total += size;
+                }
+            }
+
+            if FindNextFileW(handle, &mut find_data).is_err() {
+                break;
+            }
+        }
+
+        let _ = FindClose(handle);
+    }
+}
+
+/// Accumulates disk size of all files using Win32 traversal
+fn walk_directory_win32_disk_size(
+    path: &str,
+    total: &mut u64,
+) {
+    let pattern = if path.ends_with('\\') || path.ends_with('/') {
+        format!("{}*", path)
+    } else {
+        format!("{}\\*", path)
+    };
+    let pattern_wide = pattern.to_wide();
+
+    let mut find_data = WIN32_FIND_DATAW::default();
+
+    unsafe {
+        let handle = FindFirstFileExW(
+            PCWSTR(pattern_wide.as_ptr()),
+            FindExInfoBasic,
+            &mut find_data as *mut _ as *mut _,
+            FindExSearchNameMatch,
+            None,
+            FIND_FIRST_EX_LARGE_FETCH,
+        );
+
+        if handle.is_err() {
+            return;
+        }
+        let handle = handle.unwrap();
+
+        loop {
+            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
+            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
+
+            if filename != "." && filename != ".." {
+                let full_path = if path.ends_with('\\') || path.ends_with('/') {
+                    format!("{}{}", path, filename)
+                } else {
+                    format!("{}\\{}", path, filename)
+                };
+
+                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
+                    walk_directory_win32_disk_size(&full_path, total);
+                } else {
+                    // Use GetCompressedFileSizeW for actual disk usage
+                    *total += get_real_file_size(&full_path);
+                }
+            }
+
+            if FindNextFileW(handle, &mut find_data).is_err() {
+                break;
+            }
+        }
+
+        let _ = FindClose(handle);
+    }
+}
+
+/// Samples files to detect WOF algorithm using Win32 traversal
+fn walk_directory_win32_detect_algo(
+    path: &str,
+    found_algos: &mut std::collections::HashSet<u32>,
+    scanned: &mut usize,
+    max_scan: usize,
+) {
+    if *scanned >= max_scan {
+        return;
+    }
+
+    let pattern = if path.ends_with('\\') || path.ends_with('/') {
+        format!("{}*", path)
+    } else {
+        format!("{}\\*", path)
+    };
+    let pattern_wide = pattern.to_wide();
+
+    let mut find_data = WIN32_FIND_DATAW::default();
+
+    unsafe {
+        let handle = FindFirstFileExW(
+            PCWSTR(pattern_wide.as_ptr()),
+            FindExInfoBasic,
+            &mut find_data as *mut _ as *mut _,
+            FindExSearchNameMatch,
+            None,
+            FIND_FIRST_EX_LARGE_FETCH,
+        );
+
+        if handle.is_err() {
+            return;
+        }
+        let handle = handle.unwrap();
+
+        loop {
+            if *scanned >= max_scan {
+                let _ = FindClose(handle);
+                return;
+            }
+
+            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
+            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
+
+            if filename != "." && filename != ".." {
+                let full_path = if path.ends_with('\\') || path.ends_with('/') {
+                    format!("{}{}", path, filename)
+                } else {
+                    format!("{}\\{}", path, filename)
+                };
+
+                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
+                    walk_directory_win32_detect_algo(&full_path, found_algos, scanned, max_scan);
+                } else {
+                    if let Some(algo) = get_wof_algorithm(&full_path) {
+                        found_algos.insert(algo as u32);
+                    }
+                    *scanned += 1;
+                }
+            }
+
+            if FindNextFileW(handle, &mut find_data).is_err() {
+                break;
+            }
+        }
+
+        let _ = FindClose(handle);
+    }
+}
+
+// ===== HELPER FUNCTIONS =====
 
 /// Calculate total LOGICAL size of all files in a folder (uncompressed content size)
 /// This counts ALL files including hidden and .gitignored files
 pub fn calculate_folder_logical_size(path: &str) -> u64 {
-    create_walk_builder(path)
-        .build()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-        .filter_map(|e| std::fs::metadata(e.path()).ok())
-        .map(|m| m.len())
-        .sum()
+    let mut total = 0u64;
+    walk_directory_win32_logical_size(path, &mut total);
+    total
 }
 
 /// Calculate total DISK size of all files in a folder (actual space used, respects compression)
 /// Uses GetCompressedFileSizeW to get real disk usage for WOF-compressed files
 pub fn calculate_folder_disk_size(path: &str) -> u64 {
-    create_walk_builder(path)
-        .build()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-        .map(|e| get_real_file_size(&e.path().to_string_lossy()))
-        .sum()
+    let mut total = 0u64;
+    walk_directory_win32_disk_size(path, &mut total);
+    total
 }
-
-
 
 /// Detect the predominant WOF algorithm used in a folder
 /// Returns Mixed if multiple algorithms are found
@@ -87,23 +398,9 @@ pub fn detect_folder_algorithm(path: &str) -> crate::engine::wof::CompressionSta
     use crate::engine::wof::CompressionState;
     
     let mut found_algos = std::collections::HashSet::new();
-    let mut scanned_files = 0;
+    let mut scanned = 0usize;
     
-    for result in create_walk_builder(path)
-        .build()
-    {
-        if scanned_files >= 50 { break; } // Sample limit
-        
-        if let Ok(entry) = result {
-            if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                let file_path = entry.path().to_string_lossy().to_string();
-                if let Some(algo) = get_wof_algorithm(&file_path) {
-                    found_algos.insert(algo as u32);
-                }
-                scanned_files += 1;
-            }
-        }
-    }
+    walk_directory_win32_detect_algo(path, &mut found_algos, &mut scanned, 50);
     
     if found_algos.is_empty() {
         return CompressionState::None;
@@ -269,52 +566,59 @@ pub fn process_file_core(
     }
 }
 
+/// Task passed from producer to consumer threads
+struct FileTask {
+    path: String,
+    action: BatchAction,
+    row_idx: usize,
+}
+
+/// Wrapper for Receiver to enable sharing between threads via Mutex
+struct SharedReceiver<T> {
+    rx: Mutex<Receiver<T>>,
+}
+
+impl<T> SharedReceiver<T> {
+    fn new(rx: Receiver<T>) -> Self {
+        Self { rx: Mutex::new(rx) }
+    }
+    
+    fn recv(&self) -> Option<T> {
+        self.rx.lock().ok()?.recv().ok()
+    }
+}
+
 pub fn batch_process_worker(
     items: Vec<(String, BatchAction, usize)>, 
     algo: WofAlgorithm, 
     tx: Sender<UiMessage>, 
     cancel: Arc<AtomicBool>,
     force: bool,
-    main_hwnd: usize // Passed as usize to avoid Send/Sync issues if any (HWND is usually fine though)
+    main_hwnd: usize
 ) {
-    // 1. Discovery Phase
     let _ = tx.send(UiMessage::Status("Discovering files...".to_string()));
     
-    // Store tasks as (path, action, row_index)
-    let mut tasks: Vec<(String, BatchAction, usize)> = Vec::new();
     // Track total files per row (row_index -> count)
     let mut row_totals: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
     
-    for (path, action, row) in &items {
-        if cancel.load(Ordering::Relaxed) { break; }
+    // First pass: count files for progress tracking
+    let mut total_files = 0u64;
+    for (path, _, row) in &items {
+        let mut row_count = 0u64;
         
-        let mut row_count = 0;
-        
-        // If it's a file, just add it
         if std::path::Path::new(path).is_file() {
-            tasks.push((path.clone(), *action, *row));
             row_count = 1;
         } else {
-            // If it's a directory, walk it
-            // FIX: Ensure we do NOT ignore any files (hidden, gitignore, etc.)
-            for result in create_walk_builder(path)
-                .build() 
-            {
-                if let Ok(entry) = result {
-                    if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                        tasks.push((entry.path().to_string_lossy().to_string(), *action, *row));
-                        row_count += 1;
-                    }
-                }
-            }
+            walk_directory_win32_count(path, &mut row_count);
         }
         
         row_totals.insert(*row, row_count);
+        total_files += row_count;
+        
         // Initialize row progress
         let _ = tx.send(UiMessage::RowUpdate(*row as i32, format!("0/{}", row_count), "Running".to_string(), "".to_string()));
     }
     
-    let total_files = tasks.len() as u64;
     let _ = tx.send(UiMessage::Progress(0, total_files));
     let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let _ = tx.send(UiMessage::Status(format!("Processing {} files with {} threads...", total_files, num_threads)));
@@ -325,54 +629,81 @@ pub fn batch_process_worker(
         return;
     }
 
-    // 2. Parallel Processing Phase
-    let processed = AtomicU64::new(0);
-    let success = AtomicU64::new(0);
-    let failed = AtomicU64::new(0);
+    // Create bounded channel for streaming (backpressure at 1024 items)
+    let (file_tx, file_rx) = sync_channel::<FileTask>(1024);
+    let shared_rx = Arc::new(SharedReceiver::new(file_rx));
     
-    // Per-row processed counters.
+    // Counters
+    let processed = Arc::new(AtomicU64::new(0));
+    let success = Arc::new(AtomicU64::new(0));
+    let failed = Arc::new(AtomicU64::new(0));
+    
+    // Per-row processed counters
     let max_row = items.iter().map(|(_, _, r)| *r).max().unwrap_or(0);
-    let row_processed_counts: Vec<AtomicU64> = (0..=max_row).map(|_| AtomicU64::new(0)).collect();
+    let row_processed_counts: Arc<Vec<AtomicU64>> = Arc::new((0..=max_row).map(|_| AtomicU64::new(0)).collect());
+    let row_totals = Arc::new(row_totals);
     
-    // Process in parallel using std::thread::scope with Dynamic Load Balancing (Atomic Cursor)
-    let next_idx = AtomicUsize::new(0);
-    let tasks_len = tasks.len();
-
+    // Producer thread: walks directories and sends tasks
+    let cancel_producer = Arc::clone(&cancel);
+    let items_for_producer = items.clone();
+    let producer_handle = std::thread::spawn(move || {
+        for (path, action, row) in items_for_producer {
+            if cancel_producer.load(Ordering::Relaxed) {
+                break;
+            }
+            
+            if std::path::Path::new(&path).is_file() {
+                // Single file
+                let _ = file_tx.send(FileTask { path, action, row_idx: row });
+            } else {
+                // Directory - collect files then send
+                let mut files = Vec::new();
+                walk_directory_win32_collect(&path, &mut files, &cancel_producer);
+                
+                for file_path in files {
+                    if cancel_producer.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let _ = file_tx.send(FileTask { 
+                        path: file_path, 
+                        action, 
+                        row_idx: row 
+                    });
+                }
+            }
+        }
+        // Drop sender to signal end of stream
+        drop(file_tx);
+    });
+    
+    // Consumer threads: process tasks from channel
     std::thread::scope(|s| {
         for _ in 0..num_threads {
-            let processed_ref = &processed;
-            let success_ref = &success;
-            let failed_ref = &failed;
-            let row_counts_ref = &row_processed_counts;
-            let row_totals_ref = &row_totals;
+            let shared_rx_clone = Arc::clone(&shared_rx);
+            let processed_ref = Arc::clone(&processed);
+            let success_ref = Arc::clone(&success);
+            let failed_ref = Arc::clone(&failed);
+            let row_counts_ref = Arc::clone(&row_processed_counts);
+            let row_totals_ref = Arc::clone(&row_totals);
             let tx_clone = tx.clone();
-            let cancel_ref = &cancel;
+            let cancel_ref = Arc::clone(&cancel);
             let algo_copy = algo;
-            let next_idx_ref = &next_idx;
-            let tasks_ref = &tasks; // Reference to the full vector
-            let force_copy = force; // Pass force to the thread
-            let hwnd_val = main_hwnd; // Capture HWND value
+            let force_copy = force;
+            let hwnd_val = main_hwnd;
+            let total_files_copy = total_files;
 
             s.spawn(move || {
-                // let hwnd = HWND(hwnd_val as *mut _); // HWND handled in helper
-                loop {
-                    // Claim the next task index
-                    let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
-                    if i >= tasks_len {
-                        break; // No more tasks
-                    }
-                    
+                // Consume tasks from channel
+                while let Some(task) = shared_rx_clone.recv() {
                     if cancel_ref.load(Ordering::Relaxed) {
-                         break; 
+                        break;
                     }
 
-                    let (file_path, action, row_idx) = &tasks_ref[i];
-                    
                     // Use the core processing function
                     let result = process_file_core(
-                        file_path, 
+                        &task.path, 
                         algo_copy, 
-                        *action, 
+                        task.action, 
                         force_copy, 
                         hwnd_val, 
                         &tx_clone
@@ -392,25 +723,28 @@ pub fn batch_process_worker(
                     let current_global = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
                     
                     // Row progress
-                    if let Some(counter) = row_counts_ref.get(*row_idx) {
+                    if let Some(counter) = row_counts_ref.get(task.row_idx) {
                         let current_row = counter.fetch_add(1, Ordering::Relaxed) + 1;
-                        let total_row = *row_totals_ref.get(row_idx).unwrap_or(&1);
+                        let total_row = *row_totals_ref.get(&task.row_idx).unwrap_or(&1);
                         
                         // Update row UI (throttled)
                         if current_row % 5 == 0 || current_row == total_row {
-                             let _ = tx_clone.send(UiMessage::RowUpdate(*row_idx as i32, format!("{}/{}", current_row, total_row), "Running".to_string(), "".to_string()));
+                             let _ = tx_clone.send(UiMessage::RowUpdate(task.row_idx as i32, format!("{}/{}", current_row, total_row), "Running".to_string(), "".to_string()));
                         }
                     }
                     
                     // Throttled Global updates
-                    if current_global % 20 == 0 || current_global == tasks_len as u64 {
-                         let _ = tx_clone.send(UiMessage::Progress(current_global, tasks_len as u64));
-                         let _ = tx_clone.send(UiMessage::Status(format!("Processed {}/{} files...", current_global, tasks_len)));
+                    if current_global % 20 == 0 || current_global == total_files_copy {
+                         let _ = tx_clone.send(UiMessage::Progress(current_global, total_files_copy));
+                         let _ = tx_clone.send(UiMessage::Status(format!("Processed {}/{} files...", current_global, total_files_copy)));
                     }
                 }
             });
         }
     });
+    
+    // Wait for producer to finish
+    let _ = producer_handle.join();
     
     if cancel.load(Ordering::Relaxed) {
         let _ = tx.send(UiMessage::Status("Batch processing cancelled.".to_string()));
@@ -418,7 +752,7 @@ pub fn batch_process_worker(
         return;
     }
 
-    // 3. Final Report & Cleanup
+    // Final Report & Cleanup
     // Update all rows to "Done" and calculate sizes
     for (path, _, row_idx) in items {
         let size_after = if std::path::Path::new(&path).is_file() {
@@ -428,9 +762,6 @@ pub fn batch_process_worker(
         };
         let size_str = format_size(size_after, BINARY);
         
-        // Check if there were failed items for this row?
-        // We tracked global failures, but not per-row failures. 
-        // For now just mark as Done.
         let end_state = detect_path_algorithm(&path);
         let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, "Done".to_string(), size_str, end_state));
     }
@@ -459,7 +790,6 @@ pub fn single_item_worker(
     main_hwnd: usize
 ) {
     let mut total_files = 0u64;
-    let mut processed = 0u64;
     let mut success = 0u64;
     let mut failed = 0u64;
     
@@ -469,16 +799,7 @@ pub fn single_item_worker(
     if is_single_file {
         total_files = 1;
     } else {
-        // FIX: Ensure we do NOT ignore any files (hidden, gitignore, etc.)
-        for result in create_walk_builder(&path)
-            .build()
-        {
-            if let Ok(entry) = result {
-                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                    total_files += 1;
-                }
-            }
-        }
+        walk_directory_win32_count(&path, &mut total_files);
     }
     
     let _ = tx.send(UiMessage::Progress(0, total_files));
@@ -523,66 +844,62 @@ pub fn single_item_worker(
             }
         }
 
-        processed += 1;
         let _ = tx.send(UiMessage::RowUpdate(row, "1/1".to_string(), "Running".to_string(), "".to_string()));
         let _ = tx.send(UiMessage::Progress(1, 1));
     } else {
-        // Process folder in PARALLEL
-        let mut tasks: Vec<String> = Vec::new();
-        // FIX: Ensure we do NOT ignore any files (hidden, gitignore, etc.)
-        for result in create_walk_builder(&path)
-            .build() 
-        {
-            if let Ok(entry) = result {
-                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-                     tasks.push(entry.path().to_string_lossy().to_string());
-                }
-            }
-        }
-        
-        total_files = tasks.len() as u64;
-        
-        let processed_atomic = AtomicU64::new(0);
-        let success_atomic = AtomicU64::new(0);
-        let failed_atomic = AtomicU64::new(0);
-        
-        // Process folder in PARALLEL with Dynamic Load Balancing
-        let next_idx = AtomicUsize::new(0);
-        let tasks_len = tasks.len();
+        // Process folder using streaming producer-consumer model
         let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-
+        
+        // Create bounded channel for streaming
+        let (file_tx, file_rx) = sync_channel::<String>(1024);
+        let shared_rx = Arc::new(SharedReceiver::new(file_rx));
+        
+        let processed = Arc::new(AtomicU64::new(0));
+        let success_atomic = Arc::new(AtomicU64::new(0));
+        let failed_atomic = Arc::new(AtomicU64::new(0));
+        
+        // Collect files first (required because we need to count them)
+        let mut files = Vec::new();
+        walk_directory_win32_collect(&path, &mut files, &cancel);
+        total_files = files.len() as u64;
+        
+        // Producer thread
+        let cancel_producer = Arc::clone(&cancel);
+        let producer_handle = std::thread::spawn(move || {
+            for file_path in files {
+                if cancel_producer.load(Ordering::Relaxed) {
+                    break;
+                }
+                let _ = file_tx.send(file_path);
+            }
+            drop(file_tx);
+        });
+        
+        // Consumer threads
         std::thread::scope(|s| {
             for _ in 0..num_threads {
-                 let processed_ref = &processed_atomic;
-                 let success_ref = &success_atomic;
-                 let failed_ref = &failed_atomic;
-                 let cancel_ref = &cancel;
-                 let algo_copy = algo;
-                 let action_copy = action;
-                 let tx_clone = tx.clone();
-                 let next_idx_ref = &next_idx;
-                 let tasks_ref = &tasks;
-                 let row_copy = row; // Capture row for use in closure
-                 let force_copy = force;
-                 let hwnd_val = main_hwnd; 
+                let shared_rx_clone = Arc::clone(&shared_rx);
+                let processed_ref = Arc::clone(&processed);
+                let success_ref = Arc::clone(&success_atomic);
+                let failed_ref = Arc::clone(&failed_atomic);
+                let cancel_ref = Arc::clone(&cancel);
+                let algo_copy = algo;
+                let action_copy = action;
+                let tx_clone = tx.clone();
+                let row_copy = row;
+                let force_copy = force;
+                let hwnd_val = main_hwnd;
+                let total_files_copy = total_files;
 
-                 s.spawn(move || {
-                     // let hwnd = HWND(hwnd_val as *mut _); // HWND handled in helper
-                     loop {
-                        let i = next_idx_ref.fetch_add(1, Ordering::Relaxed);
-                        if i >= tasks_len {
+                s.spawn(move || {
+                    while let Some(file_path) = shared_rx_clone.recv() {
+                        if cancel_ref.load(Ordering::Relaxed) {
                             break;
                         }
                         
-                        if cancel_ref.load(Ordering::Relaxed) {
-                             break;
-                        }
-                        
-                        let file_path = &tasks_ref[i];
-                        
                         // Use the core processing function
                         let result = process_file_core(
-                            file_path, 
+                            &file_path, 
                             algo_copy, 
                             action_copy, 
                             force_copy, 
@@ -602,20 +919,19 @@ pub fn single_item_worker(
                          
                         let current = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
                         
-                        // Check cancel every N items
-                        if i % 100 == 0 {
-                             if cancel_ref.load(Ordering::Relaxed) {
-                                 break;
-                             }
-                             // Send status update
-                             let progress_str = format!("{}/{}", i, tasks_len);
+                        // Throttled updates
+                        if current % 100 == 0 || current == total_files_copy {
+                             let progress_str = format!("{}/{}", current, total_files_copy);
                              let _ = tx_clone.send(UiMessage::RowUpdate(row_copy, progress_str, "Running".to_string(), "".to_string())); 
                         }
-                        let _ = tx_clone.send(UiMessage::Progress(current, tasks_len as u64));
-                     }
-                 });
+                        let _ = tx_clone.send(UiMessage::Progress(current, total_files_copy));
+                    }
+                });
             }
         });
+        
+        // Wait for producer
+        let _ = producer_handle.join();
         
         if cancel.load(Ordering::Relaxed) {
             let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
@@ -625,7 +941,6 @@ pub fn single_item_worker(
         }
         
         // Sync back to local variables for the final report
-        processed += processed_atomic.load(Ordering::Relaxed);
         success = success_atomic.load(Ordering::Relaxed);
         failed = failed_atomic.load(Ordering::Relaxed);
     }
@@ -640,7 +955,7 @@ pub fn single_item_worker(
     let _ = tx.send(UiMessage::ItemFinished(row, status, size_after_str, final_state));
     
     let report = format!("Done! {} files | Success: {} | Failed: {}", 
-        processed, success, failed);
+        total_files, success, failed);
     
     let _ = tx.send(UiMessage::Status(report));
     let _ = tx.send(UiMessage::Progress(total_files, total_files));
