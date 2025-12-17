@@ -110,26 +110,11 @@ jobs:
           $size = [math]::Round((Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length / 1KB, 2)
           
           $vtLink = "${{ steps.virustotal.outputs.VT_LINK }}"
-          $vtStatus = "${{ steps.virustotal.outputs.VT_STATUS }}"
-          $vtMalicious = "${{ steps.virustotal.outputs.VT_MALICIOUS }}"
-          $vtTotal = "${{ steps.virustotal.outputs.VT_TOTAL }}"
-          
-          if ($vtStatus -eq "completed") {
-            if ($vtMalicious -eq "0") {
-              $vtBadge = "Clean - No threats detected ($vtTotal engines scanned)"
-            } else {
-              $vtBadge = "$vtMalicious/$vtTotal detections - May be false positive (UPX compression)"
-            }
-          } else {
-            $vtBadge = "Pending - Analysis in progress"
-          }
           
           $sb = [System.Text.StringBuilder]::new()
           [void]$sb.AppendLine("## Security Verification")
           [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("**VirusTotal Scan:** $vtBadge")
-          [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("[View Full VirusTotal Report]($vtLink)")
+          [void]$sb.AppendLine("[View VirusTotal Scan Report]($vtLink)")
           [void]$sb.AppendLine("")
           [void]$sb.AppendLine("> **Note**: UPX-compressed binaries may trigger false positives in some antivirus engines.")
           [void]$sb.AppendLine("")
