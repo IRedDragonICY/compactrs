@@ -27,7 +27,6 @@ use windows_sys::Win32::UI::Controls::{
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows_sys::Win32::Graphics::Gdi::{
-    HBRUSH, COLOR_WINDOW, DeleteObject,
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect,
 };
@@ -38,18 +37,11 @@ const LICENSE_URL: &str = "https://github.com/IRedDragonICY/compactrs/blob/main/
 
 struct AboutState {
     is_dark: bool,
-    dark_brush: Option<HBRUSH>,
+    // dark_brush removed
 }
 
-impl Drop for AboutState {
-    fn drop(&mut self) {
-        if let Some(brush) = self.dark_brush {
-            unsafe {
-                DeleteObject(brush);
-            }
-        }
-    }
-}
+// Drop trait removed - resources managed globally
+
 
 pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
     let instance = GetModuleHandleW(std::ptr::null());
@@ -66,7 +58,7 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
         hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
         lpszClassName: class_name.as_ptr(),
         hIcon: icon,
-        hbrBackground: (COLOR_WINDOW + 1) as HBRUSH,
+        hbrBackground: crate::ui::theme::get_background_brush(is_dark),
         cbClsExtra: 0,
         cbWndExtra: 0,
         lpszMenuName: std::ptr::null(),
@@ -85,7 +77,6 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
 
     let mut state = AboutState {
         is_dark,
-        dark_brush: None,
     };
 
     let _hwnd = CreateWindowExW(
@@ -126,10 +117,8 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 let new_is_dark = wparam == 1;
                 st.is_dark = new_is_dark;
                 
-                // Delete old brush if switching themes
-                if let Some(brush) = st.dark_brush.take() {
-                    DeleteObject(brush);
-                }
+                // Brush management handled globally
+
                 
                 // Update DWM title bar using centralized helper
                 crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
@@ -217,8 +206,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             SendMessageW(icon_static, STM_SETICON, hicon as WPARAM, 0);
             
             if is_dark_mode {
-                let empty = to_wstring("");
-                SetWindowTheme(icon_static, empty.as_ptr(), empty.as_ptr());
+                crate::ui::theme::apply_theme(icon_static, crate::ui::theme::ControlType::Window, true);
             }
 
             // App Name - Large bold title
@@ -236,8 +224,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             );
             SendMessageW(app_name, WM_SETFONT, title_font as WPARAM, 1);
             if is_dark_mode {
-                let empty = to_wstring("");
-                SetWindowTheme(app_name, empty.as_ptr(), empty.as_ptr());
+                crate::ui::theme::apply_theme(app_name, crate::ui::theme::ControlType::Window, true);
             }
 
             // Version - Lighter font
@@ -255,8 +242,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             );
             SendMessageW(version, WM_SETFONT, version_font as WPARAM, 1);
             if is_dark_mode {
-                let empty = to_wstring("");
-                SetWindowTheme(version, empty.as_ptr(), empty.as_ptr());
+                crate::ui::theme::apply_theme(version, crate::ui::theme::ControlType::Window, true);
             }
 
             // Description - Regular body text
@@ -274,8 +260,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             );
             SendMessageW(desc, WM_SETFONT, body_font as WPARAM, 1);
             if is_dark_mode {
-                let empty = to_wstring("");
-                SetWindowTheme(desc, empty.as_ptr(), empty.as_ptr());
+                crate::ui::theme::apply_theme(desc, crate::ui::theme::ControlType::Window, true);
             }
 
             // Created by - Italic style
@@ -293,8 +278,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             );
             SendMessageW(creator, WM_SETFONT, creator_font as WPARAM, 1);
             if is_dark_mode {
-                let empty = to_wstring("");
-                SetWindowTheme(creator, empty.as_ptr(), empty.as_ptr());
+                crate::ui::theme::apply_theme(creator, crate::ui::theme::ControlType::Window, true);
             }
 
             // GitHub Link (SysLink) - Centered
@@ -313,8 +297,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             );
             SendMessageW(link, WM_SETFONT, body_font as WPARAM, 1);
             if is_dark_mode {
-                let empty = to_wstring("");
-                SetWindowTheme(link, empty.as_ptr(), empty.as_ptr());
+                crate::ui::theme::apply_theme(link, crate::ui::theme::ControlType::Window, true);
             }
 
             0

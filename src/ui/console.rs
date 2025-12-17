@@ -238,7 +238,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         },
         WM_CTLCOLOREDIT => {
             // Special handling for edit control colors (not covered by handle_standard_colors)
-            if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
+            if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, IS_DARK_MODE) {
                 return result;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)

@@ -5,9 +5,9 @@ use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     HMENU, BS_AUTOCHECKBOX, WS_CHILD, WS_VISIBLE, CreateWindowExW, WS_TABSTOP
 };
-use windows_sys::Win32::UI::Controls::SetWindowTheme;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use crate::utils::to_wstring;
+use crate::ui::theme::{self, ControlType};
 
 // Control IDs
 pub const IDC_COMBO_ALGO: u16 = 105;
@@ -31,14 +31,12 @@ pub const IDC_COMBO_ACTION_MODE: u16 = 120;
 
 /// Apply button theme dynamically (for theme changes after creation)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
-    let theme_name = if is_dark { "DarkMode_Explorer" } else { "Explorer" };
-    SetWindowTheme(hwnd, to_wstring(theme_name).as_ptr(), std::ptr::null());
+    theme::apply_theme(hwnd, ControlType::Button, is_dark);
 }
 
 /// Apply ComboBox theme dynamically
 pub unsafe fn apply_combobox_theme(hwnd: HWND, is_dark: bool) {
-    let theme_name = if is_dark { "DarkMode_CFD" } else { "Explorer" };
-    SetWindowTheme(hwnd, to_wstring(theme_name).as_ptr(), std::ptr::null());
+    theme::apply_theme(hwnd, ControlType::ComboBox, is_dark);
 }
 
 /// Helper to create a checkbox.
@@ -72,8 +70,8 @@ pub unsafe fn create_checkbox(parent: HWND, text: &str, x: i32, y: i32, w: i32, 
     );
     
     // Apply basic theme
-    let is_dark = crate::ui::theme::is_system_dark_mode();
-    apply_button_theme(hwnd, is_dark);
+    let is_dark = theme::is_system_dark_mode();
+    theme::apply_theme(hwnd, ControlType::CheckBox, is_dark);
 
     hwnd
 }

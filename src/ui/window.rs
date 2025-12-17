@@ -57,7 +57,8 @@ const WINDOW_TITLE: &str = "CompactRS";
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
     unsafe {
         // Enable dark mode for the application
-        theme::allow_dark_mode();
+        // Enable dark mode for the application
+        theme::set_preferred_app_mode(true);
 
         // Initialize Common Controls
         let iccex = INITCOMMONCONTROLSEX {
@@ -68,7 +69,7 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
 
         // Check dark mode
         let is_dark = theme::is_system_dark_mode();
-        let (bg_brush, _, _) = theme::get_theme_colors(is_dark);
+        let bg_brush = theme::get_background_brush(is_dark);
 
         // Load icon
         let icon = load_app_icon(instance);

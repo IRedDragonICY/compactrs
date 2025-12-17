@@ -6,8 +6,8 @@
 //! containing a static text label for status messages and a progress bar.
 
 use windows_sys::Win32::Foundation::{HWND, RECT};
-use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
-use windows_sys::Win32::UI::Controls::{PBS_SMOOTH, PROGRESS_CLASSW, SetWindowTheme};
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Controls::{PBS_SMOOTH, PROGRESS_CLASSW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, SetWindowPos, SWP_NOZORDER, WS_CHILD, WS_VISIBLE,
     SendMessageW, WM_SETFONT, HMENU,
@@ -81,20 +81,9 @@ impl StatusBar {
         SendMessageW(self.hwnd_label, WM_SETFONT, wparam, lparam);
     }
 
-    /// Enables/disables dark mode for a window using undocumented uxtheme API.
-    #[allow(non_snake_case)]
-    unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {
-        let lib_name = to_wstring("uxtheme.dll");
-        let uxtheme = LoadLibraryW(lib_name.as_ptr());
-        if uxtheme != std::ptr::null_mut() {
-            // Ordinal 133: AllowDarkModeForWindow
-            if let Some(func) = GetProcAddress(uxtheme, 133 as *const u8) {
-                 let allow_dark: extern "system" fn(HWND, bool) -> bool =
-                     std::mem::transmute(func);
-                 allow_dark(hwnd, allow);
-            }
-        }
-    }
+    // Local allow_dark_mode_for_window removed
+
+
 }
 
 impl Component for StatusBar {
@@ -204,9 +193,8 @@ impl Component for StatusBar {
         unsafe {
             // Apply theme to progress bar
             if self.hwnd_progress != std::ptr::null_mut() {
-                Self::allow_dark_mode_for_window(self.hwnd_progress, is_dark);
-                let theme = if is_dark { to_wstring("DarkMode_Explorer") } else { to_wstring("Explorer") };
-                let _ = SetWindowTheme(self.hwnd_progress, theme.as_ptr(), std::ptr::null());
+                crate::ui::theme::allow_dark_mode_for_window(self.hwnd_progress, is_dark);
+                crate::ui::theme::apply_theme(self.hwnd_progress, crate::ui::theme::ControlType::Window, is_dark);
             }
         }
     }

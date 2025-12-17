@@ -18,7 +18,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Controls::SetWindowTheme;
-use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, DeleteObject, InvalidateRect};
+use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, InvalidateRect};
 
 const SETTINGS_TITLE: &str = "Settings";
 
@@ -36,20 +36,13 @@ struct SettingsState {
     theme: AppTheme,
     result: Option<AppTheme>,
     is_dark: bool,
-    dark_brush: Option<HBRUSH>,
+    // dark_brush removed
     enable_force_stop: bool, // Track checkbox state
     enable_context_menu: bool, // Track context menu checkbox state
 }
 
-impl Drop for SettingsState {
-    fn drop(&mut self) {
-        if let Some(brush) = self.dark_brush {
-            unsafe {
-                DeleteObject(brush);
-            }
-        }
-    }
-}
+// Drop trait removed - resources managed globally
+
 
 // Main settings modal function with proper data passing
 pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool) -> (Option<AppTheme>, bool, bool) {
@@ -68,13 +61,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
         hIcon: icon,
         lpszClassName: class_name.as_ptr(),
-        hbrBackground: if is_dark {
-            // Use a dark brush initially if possible, but standard is COLOR_WINDOW
-            // We'll rely on WM_CTLCOLORSTATIC to paint background
-            (COLOR_WINDOW + 1) as HBRUSH 
-        } else {
-             (COLOR_WINDOW + 1) as HBRUSH
-        },
+        hbrBackground: crate::ui::theme::get_background_brush(is_dark),
         cbClsExtra: 0,
         cbWndExtra: 0,
         lpszMenuName: std::ptr::null(),
@@ -94,7 +81,6 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         theme: current_theme,
         result: None,
         is_dark,
-        dark_brush: None,
         enable_force_stop,
         enable_context_menu,
     };
@@ -162,7 +148,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             
             // Apply theme to group box
             if let Some(st) = state_ptr.as_ref() {
-                crate::ui::theme::apply_control_theme(grp, st.is_dark);
+                crate::ui::theme::apply_theme(grp, crate::ui::theme::ControlType::GroupBox, st.is_dark);
             }
 
             // Radio Buttons
@@ -187,7 +173,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                     SendMessageW(h, BM_SETCHECK, 1, 0);
                 }
                 // Apply theme to radio button
-                crate::ui::theme::apply_control_theme(h, is_dark_mode);
+                crate::ui::theme::apply_theme(h, crate::ui::theme::ControlType::Button, is_dark_mode);
             };
             
             // Determine initial check
@@ -204,7 +190,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                  SendMessageW(chk, BM_SETCHECK, 1, 0);
             }
             if let Some(st) = state_ptr.as_ref() {
-                crate::ui::theme::apply_control_theme(chk, st.is_dark);
+                crate::ui::theme::apply_theme(chk, crate::ui::theme::ControlType::CheckBox, st.is_dark);
             }
 
             // Checkbox: Enable Explorer Context Menu
@@ -214,7 +200,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                  SendMessageW(chk_ctx, BM_SETCHECK, 1, 0);
             }
             if let Some(st) = state_ptr.as_ref() {
-                crate::ui::theme::apply_control_theme(chk_ctx, st.is_dark);
+                crate::ui::theme::apply_theme(chk_ctx, crate::ui::theme::ControlType::CheckBox, st.is_dark);
             }
 
             // Buttons
@@ -253,10 +239,8 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              st.result = Some(theme);
                              st.is_dark = new_is_dark;
                              
-                             // Delete old brush if theme changed
-                             if let Some(brush) = st.dark_brush.take() {
-                                 DeleteObject(brush);
-                             }
+                             // Brush management handled globally
+
                          }
                          
                          // Update Settings window title bar using centralized helper
@@ -269,7 +253,14 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                             for &ctrl_id in &controls {
                                 let h_ctl = GetDlgItem(hwnd, ctrl_id as i32);
                                 if h_ctl != std::ptr::null_mut() {
-                                    crate::ui::theme::apply_control_theme(h_ctl, new_is_dark);
+                                    // Map ID to ControlType roughly
+                                    let ctl_type = match ctrl_id {
+                                        IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
+                                        IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU => crate::ui::theme::ControlType::CheckBox,
+                                        IDC_BTN_CANCEL => crate::ui::theme::ControlType::Button,
+                                        _ => crate::ui::theme::ControlType::Button, // Radio buttons
+                                    };
+                                    crate::ui::theme::apply_theme(h_ctl, ctl_type, new_is_dark);
                                     InvalidateRect(h_ctl, std::ptr::null(), 1);
                                 }
                             }

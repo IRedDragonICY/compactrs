@@ -10,15 +10,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SWP_NOZORDER, HMENU,
 };
 use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, SetBkMode, SetTextColor, TRANSPARENT};
-use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Controls::{
     LVM_DELETEITEM, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMNW,
     LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMW,
     LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, LVCFMT_LEFT, LVCF_FMT, LVCF_TEXT, LVCF_WIDTH,
     LVCOLUMNW, LVIF_PARAM, LVIF_TEXT, LVITEMW, LVNI_SELECTED, LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, NM_CUSTOMDRAW, NMCUSTOMDRAW,
-    NMHDR, SetWindowTheme, CDDS_ITEMPREPAINT, CDDS_PREPAINT,
-    CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW,
+    CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
 };
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 
@@ -321,17 +320,20 @@ impl FileListView {
     /// * `is_dark` - Whether to apply dark mode theme
     pub fn set_theme(&self, is_dark: bool) {
         unsafe {
-            Self::allow_dark_mode_for_window(self.hwnd, is_dark);
+            crate::ui::theme::allow_dark_mode_for_window(self.hwnd, is_dark);
 
-            // Apply dark mode explorer theme (affects header, scrollbars, etc.)
-            let theme = if is_dark { to_wstring("DarkMode_ItemsView") } else { to_wstring("Explorer") };
-            let _ = SetWindowTheme(self.hwnd, theme.as_ptr(), std::ptr::null());
+            // Apply theme (ItemsView/Explorer)
+            if is_dark {
+                crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::ItemsView, true);
+            } else {
+                crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::List, false);
+            }
 
             // Set colors
             let (bg_color, text_color) = if is_dark {
-                (0x00202020u32, 0x00FFFFFFu32) // Dark gray bg, white text
+                (crate::ui::theme::COLOR_LIST_BG_DARK, crate::ui::theme::COLOR_LIST_TEXT_DARK)
             } else {
-                (0x00FFFFFFu32, 0x00000000u32) // White bg, black text
+                (crate::ui::theme::COLOR_LIST_BG_LIGHT, crate::ui::theme::COLOR_LIST_TEXT_LIGHT)
             };
 
             SendMessageW(self.hwnd, LVM_SETBKCOLOR, 0, bg_color as isize);
@@ -342,8 +344,8 @@ impl FileListView {
             let header = SendMessageW(self.hwnd, LVM_GETHEADER, 0, 0) as HWND;
 
             if header != std::ptr::null_mut() {
-                Self::allow_dark_mode_for_window(header, is_dark);
-                let _ = SetWindowTheme(header, theme.as_ptr(), std::ptr::null());
+                crate::ui::theme::allow_dark_mode_for_window(header, is_dark);
+                crate::ui::theme::apply_theme(header, crate::ui::theme::ControlType::Header, is_dark);
             }
 
             // Force redraw
@@ -381,23 +383,8 @@ impl FileListView {
         }
     }
 
-    /// Enables/disables dark mode for a window using undocumented uxtheme API.
-    #[allow(non_snake_case)]
-    unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) { unsafe {
-        let lib_name = to_wstring("uxtheme.dll");
-        let uxtheme = LoadLibraryW(lib_name.as_ptr());
-        if uxtheme != std::ptr::null_mut() {
-            // Ordinal 133: AllowDarkModeForWindow
-            if let Some(func) = GetProcAddress(uxtheme, 133 as *const u8) {
-                 let allow_dark: extern "system" fn(HWND, bool) -> bool =
-                     std::mem::transmute(func);
-                 allow_dark(hwnd, allow);
-            }
-            // Note: We intentionally leak the library handle as we might need it later/throughout app life
-            // or we could FreeLibrary(uxtheme) if we cache the function pointer? 
-            // For themes, keeping uxtheme loaded is standard.
-        }
-    }}
+    // Local allow_dark_mode_for_window removed in favor of theme::allow_dark_mode_for_window
+
 }
 
 impl Component for FileListView {
@@ -477,7 +464,7 @@ unsafe extern "system" fn listview_subclass_proc(
 
             if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
                 // Set text color to white for header items in dark mode
-                SetTextColor(nmcd.hdc, 0x00FFFFFF);
+                SetTextColor(nmcd.hdc, crate::ui::theme::COLOR_HEADER_TEXT_DARK);
                 SetBkMode(nmcd.hdc, TRANSPARENT as i32);
                 return CDRF_NEWFONT as LRESULT;
             }
