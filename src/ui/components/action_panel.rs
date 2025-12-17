@@ -3,18 +3,12 @@
 //! This component manages the action bar at the bottom of the main window,
 //! containing buttons for file operations, algorithm selection, and process control.
 
-use windows::core::{w, Result};
+use windows::core::Result;
 use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::SetWindowTheme;
-use windows::Win32::UI::WindowsAndMessaging::{
-    BS_AUTOCHECKBOX, CBS_DROPDOWNLIST, CBS_HASSTRINGS, CreateWindowExW,
-    SetWindowPos, HMENU, SWP_NOZORDER, WINDOW_STYLE, WS_CHILD, WS_TABSTOP,
-    WS_VISIBLE, WS_VSCROLL,
-};
+use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER};
 
 use super::base::Component;
-use crate::ui::builder::ButtonBuilder;
+use crate::ui::builder::ControlBuilder;
 use crate::ui::controls::{apply_button_theme, apply_combobox_theme};
 
 /// Configuration for ActionPanel control IDs.
@@ -142,108 +136,84 @@ impl ActionPanel {
 
 impl Component for ActionPanel {
     unsafe fn create(&mut self, parent: HWND) -> Result<()> {
-        unsafe {
-            let module = GetModuleHandleW(None)?;
-            let instance = windows::Win32::Foundation::HINSTANCE(module.0);
+        // Initial positions (will be updated in on_resize)
+        let btn_h = 32;
+        let btn_y = 460;
 
-            // Initial positions (will be updated in on_resize)
-            let btn_h = 32;
-            let btn_y = 460;
+        // Check system dark mode for initial theme
+        let is_dark = crate::ui::theme::is_system_dark_mode();
 
-            // Check system dark mode for initial theme
-            let is_dark = crate::ui::theme::is_system_dark_mode();
+        // Create Files button
+        self.hwnd_files = ControlBuilder::new(parent, self.ids.btn_files)
+            .button()
+            .text("Files")
+            .pos(10, btn_y)
+            .size(65, btn_h)
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Files button using ButtonBuilder
-            self.hwnd_files = ButtonBuilder::new(parent, self.ids.btn_files)
-                .text("Files").pos(10, btn_y).size(65, btn_h).dark_mode(is_dark).build();
+        // Create Folder button
+        self.hwnd_folder = ControlBuilder::new(parent, self.ids.btn_folder)
+            .button()
+            .text("Folder")
+            .pos(85, btn_y)
+            .size(65, btn_h)
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Folder button
-            self.hwnd_folder = ButtonBuilder::new(parent, self.ids.btn_folder)
-                .text("Folder").pos(85, btn_y).size(65, btn_h).dark_mode(is_dark).build();
+        // Create Remove button
+        self.hwnd_remove = ControlBuilder::new(parent, self.ids.btn_remove)
+            .button()
+            .text("Remove")
+            .pos(160, btn_y)
+            .size(70, btn_h)
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Remove button
-            self.hwnd_remove = ButtonBuilder::new(parent, self.ids.btn_remove)
-                .text("Remove").pos(160, btn_y).size(70, btn_h).dark_mode(is_dark).build();
+        // Create Action Mode ComboBox
+        self.hwnd_action_mode = ControlBuilder::new(parent, self.ids.combo_action_mode)
+            .combobox()
+            .pos(240, btn_y)
+            .size(100, 200) // Height is dropdown height
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Action Mode ComboBox
-            self.hwnd_action_mode = CreateWindowExW(
-                Default::default(),
-                w!("COMBOBOX"),
-                None,
-                WINDOW_STYLE(
-                    WS_VISIBLE.0
-                        | WS_CHILD.0
-                        | WS_TABSTOP.0
-                        | WS_VSCROLL.0
-                        | CBS_DROPDOWNLIST as u32
-                        | CBS_HASSTRINGS as u32,
-                ),
-                240,
-                btn_y,
-                100,
-                200, // Drop-down height
-                Some(parent),
-                Some(HMENU(self.ids.combo_action_mode as isize as *mut _)),
-                Some(instance),
-                None,
-            )?;
+        // Create Algorithm ComboBox
+        self.hwnd_combo = ControlBuilder::new(parent, self.ids.combo_algo)
+            .combobox()
+            .pos(350, btn_y)
+            .size(110, 200) // Height is dropdown height
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Algorithm ComboBox
-            self.hwnd_combo = CreateWindowExW(
-                Default::default(),
-                w!("COMBOBOX"),
-                None,
-                WINDOW_STYLE(
-                    WS_VISIBLE.0
-                        | WS_CHILD.0
-                        | WS_TABSTOP.0
-                        | WS_VSCROLL.0
-                        | CBS_DROPDOWNLIST as u32
-                        | CBS_HASSTRINGS as u32,
-                ),
-                350,
-                btn_y,
-                110,
-                200, // Drop-down height
-                Some(parent),
-                Some(HMENU(self.ids.combo_algo as isize as *mut _)),
-                Some(instance),
-                None,
-            )?;
+        // Create Force checkbox
+        self.hwnd_force = ControlBuilder::new(parent, self.ids.chk_force)
+            .checkbox()
+            .text("Force")
+            .pos(360, btn_y)
+            .size(60, btn_h)
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Force checkbox
-            self.hwnd_force = CreateWindowExW(
-                Default::default(),
-                w!("BUTTON"),
-                w!("Force"),
-                WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | WS_TABSTOP.0 | BS_AUTOCHECKBOX as u32),
-                360,
-                btn_y,
-                60,
-                btn_h,
-                Some(parent),
-                Some(HMENU(self.ids.chk_force as isize as *mut _)),
-                Some(instance),
-                None,
-            )?;
+        // Create Process All button
+        self.hwnd_process = ControlBuilder::new(parent, self.ids.btn_process)
+            .button()
+            .text("Process All")
+            .pos(430, btn_y)
+            .size(100, btn_h)
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Process All button
-            self.hwnd_process = ButtonBuilder::new(parent, self.ids.btn_process)
-                .text("Process All").pos(430, btn_y).size(100, btn_h).dark_mode(is_dark).build();
+        // Create Cancel button
+        self.hwnd_cancel = ControlBuilder::new(parent, self.ids.btn_cancel)
+            .button()
+            .text("Cancel")
+            .pos(540, btn_y)
+            .size(80, btn_h)
+            .dark_mode(is_dark)
+            .build();
 
-            // Create Cancel button
-            self.hwnd_cancel = ButtonBuilder::new(parent, self.ids.btn_cancel)
-                .text("Cancel").pos(540, btn_y).size(80, btn_h).dark_mode(is_dark).build();
-
-            // Apply initial theme to ComboBoxes and Checkbox
-            if is_dark {
-                let _ = SetWindowTheme(self.hwnd_action_mode, w!("DarkMode_CFD"), None);
-                let _ = SetWindowTheme(self.hwnd_combo, w!("DarkMode_CFD"), None);
-                let _ = SetWindowTheme(self.hwnd_force, w!("DarkMode_Explorer"), None);
-            }
-
-            Ok(())
-        }
+        Ok(())
     }
 
     fn hwnd(&self) -> Option<HWND> {
