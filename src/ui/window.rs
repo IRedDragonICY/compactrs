@@ -17,7 +17,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::Win32::UI::Shell::{
     DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog,
     FOS_PICKFOLDERS, FOS_FORCEFILESYSTEM, SIGDN_FILESYSPATH, DragAcceptFiles,
+    ShellExecuteW,
 };
+use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 
 use crate::ui::controls::{
@@ -48,7 +50,7 @@ use crate::engine::worker::{
     batch_process_worker, single_item_worker,
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm,
 };
-use crate::ui::utils::format_size;
+use crate::ui::utils::{format_size, ToWide};
 use crate::config::AppConfig;
 use crate::ui::utils::get_window_state;
 
@@ -904,6 +906,24 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                             if let Some(st) = get_state() {
                                 let row_idx = row as usize;
                                 
+                                // Column 0 = Path - Open file location in Explorer
+                                if col == 0 {
+                                    if let Some(item) = st.batch_items.get(row_idx) {
+                                        let path = &item.path;
+                                        // Format: /select,"C:\Path With Spaces\File.txt"
+                                        let args = format!("/select,\"{}\"", path);
+                                        let args_wide = args.to_wide();
+                                        
+                                        ShellExecuteW(
+                                            None,
+                                            w!("open"),
+                                            w!("explorer.exe"),
+                                            PCWSTR(args_wide.as_ptr()),
+                                            None,
+                                            SW_SHOWNORMAL,
+                                        );
+                                    }
+                                } else 
                                 // Column 2 = Algorithm, Column 3 = Action, Column 8 = Start
                                 if col == 2 {
                                     // Cycle Algorithm
