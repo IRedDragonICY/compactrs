@@ -14,6 +14,21 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
 
+// ===== SYSTEM CRITICAL PATH GUARD =====
+
+fn is_critical_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    // Normalize path separators to backslashes for reliable checking if needed, 
+    // or just check loose containment as specific heuristics.
+    
+    // Basic heuristics for Windows critical paths
+    lower.contains("windows\\system32") || 
+    lower.contains("windows\\syswow64") ||
+    lower.contains("windows\\winsxs") ||
+    lower.contains("boot") ||
+    lower.ends_with("bootmgr")
+}
+
 // ===== EXECUTION STATE GUARD (RAII for Prevent Sleep) =====
 
 /// RAII guard that prevents the system from sleeping during long-running operations.
@@ -404,9 +419,16 @@ pub fn process_file_core(
     force: bool,
     main_hwnd: usize,
     tx: &Sender<UiMessage>,
+    guard_enabled: bool,
 ) -> ProcessResult {
     match action {
         BatchAction::Compress => {
+            // Check System Critical Path Guard
+            if guard_enabled && !force && is_critical_path(path) {
+                let _ = tx.send(UiMessage::Log(format!("Skipped (Critical System Path): {}", path)));
+                return ProcessResult::Skipped("System Path".to_string());
+            }
+
             // Check extension filter (unless force is enabled)
             if !force && should_skip_extension(path) {
                 let _ = tx.send(UiMessage::Log(format!("Skipped (filtered): {}", path)));
@@ -468,7 +490,8 @@ pub fn batch_process_worker(
     tx: Sender<UiMessage>, 
     state: Arc<AtomicU8>,
     force: bool,
-    main_hwnd: usize
+    main_hwnd: usize,
+    guard_enabled: bool,
 ) {
     // RAII guard: Prevent system sleep for the duration of batch processing.
     // Automatically resets on drop (panic-safe).
@@ -567,6 +590,7 @@ pub fn batch_process_worker(
             let algo_copy = algo;
             let force_copy = force;
             let hwnd_val = main_hwnd;
+            let guard_enabled_copy = guard_enabled;
             let total_files_copy = total_files;
 
             s.spawn(move || {
@@ -589,7 +613,8 @@ pub fn batch_process_worker(
                         task.action, 
                         force_copy, 
                         hwnd_val, 
-                        &tx_clone
+                        &tx_clone,
+                        guard_enabled_copy
                     );
                     
                     // Update counters based on result
@@ -670,7 +695,8 @@ pub fn single_item_worker(
     tx: Sender<UiMessage>, 
     state: Arc<AtomicU8>,
     force: bool,
-    main_hwnd: usize
+    main_hwnd: usize,
+    guard_enabled: bool,
 ) {
 
     let mut success = 0u64;
@@ -710,7 +736,7 @@ pub fn single_item_worker(
         }
 
         // Use the core processing function for single file
-        let result = process_file_core(&path, algo, action, force, main_hwnd, &tx);
+        let result = process_file_core(&path, algo, action, force, main_hwnd, &tx, guard_enabled);
         
         // Handle result and update UI accordingly
         match result {
@@ -778,6 +804,7 @@ pub fn single_item_worker(
                 let row_copy = row;
                 let force_copy = force;
                 let hwnd_val = main_hwnd;
+                let guard_enabled_copy = guard_enabled;
                 let total_files_copy = total_files;
 
                 s.spawn(move || {
@@ -798,8 +825,9 @@ pub fn single_item_worker(
                             algo_copy, 
                             action_copy, 
                             force_copy, 
-                            hwnd_val, 
-                            &tx_clone
+                            hwnd_val,
+                            &tx_clone,
+                            guard_enabled_copy,
                         );
                         
                         // Update counters based on result

@@ -279,6 +279,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
             0
         },
+
+        // WM_APP + 6: Set System Guard
+        0x8006 => {
+            if let Some(st) = get_state() {
+                st.config.enable_system_guard = wparam != 0;
+            }
+            0
+        },
         
         // WM_APP + 4: Query Force Stop
         0x8004 => {
@@ -429,10 +437,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                        })
                                    }).collect();
                                    
+                                   
                                    let force = st.force_compress;
+                                   let guard = st.config.enable_system_guard;
                                    let main_hwnd_usize = hwnd as usize;
                                    thread::spawn(move || {
-                                       batch_process_worker(items, algo, tx, state_global, force, main_hwnd_usize);
+                                       batch_process_worker(items, algo, tx, state_global, force, main_hwnd_usize, guard);
                                    });
                                }
                            }
@@ -453,21 +463,23 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                      }
                  },
                  IDC_BTN_SETTINGS => {
-                     if let Some(st) = get_state() {
-                         let current_theme = st.theme;
-                         let is_dark = theme::resolve_mode(st.theme);
-                         let enable_ctx = st.config.enable_context_menu;
-                         let (new_theme, new_force, new_ctx) = show_settings_modal(hwnd, current_theme, is_dark, st.enable_force_stop, enable_ctx);
-                         if let Some(t) = new_theme {
-                             st.theme = t;
-                             let new_is_dark = theme::resolve_mode(st.theme);
-                             theme::set_window_frame_theme(hwnd, new_is_dark);
-                             if let Some(ctrls) = &mut st.controls { ctrls.update_theme(new_is_dark, hwnd); }
-                             InvalidateRect(hwnd, std::ptr::null(), 1);
-                         }
-                         st.enable_force_stop = new_force;
-                         st.config.enable_context_menu = new_ctx;
-                     }
+                      if let Some(st) = get_state() {
+                          let current_theme = st.theme;
+                          let is_dark = theme::resolve_mode(st.theme);
+                          let enable_ctx = st.config.enable_context_menu;
+                          let enable_guard = st.config.enable_system_guard;
+                          let (new_theme, new_force, new_ctx, new_guard) = show_settings_modal(hwnd, current_theme, is_dark, st.enable_force_stop, enable_ctx, enable_guard);
+                          if let Some(t) = new_theme {
+                              st.theme = t;
+                              let new_is_dark = theme::resolve_mode(st.theme);
+                              theme::set_window_frame_theme(hwnd, new_is_dark);
+                              if let Some(ctrls) = &mut st.controls { ctrls.update_theme(new_is_dark, hwnd); }
+                              InvalidateRect(hwnd, std::ptr::null(), 1);
+                          }
+                          st.enable_force_stop = new_force;
+                          st.config.enable_context_menu = new_ctx;
+                          st.config.enable_system_guard = new_guard;
+                      }
                  },
                  IDC_BTN_ABOUT => {
                      if let Some(st) = get_state() {
@@ -625,6 +637,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 }
                 state.config.theme = state.theme;
                 state.config.enable_force_stop = state.enable_force_stop;
+                // state.config.enable_system_guard is already updated via WM_APP+6 or loop above
                 state.config.save();
             }
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);

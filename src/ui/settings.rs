@@ -30,6 +30,7 @@ const IDC_BTN_OK: u16 = 2005;
 const IDC_BTN_CANCEL: u16 = 2006;
 const IDC_CHK_FORCE_STOP: u16 = 2007;
 const IDC_CHK_CONTEXT_MENU: u16 = 2008;
+const IDC_CHK_SYSTEM_GUARD: u16 = 2009;
 
 struct SettingsState {
     theme: AppTheme,
@@ -38,13 +39,14 @@ struct SettingsState {
     // dark_brush removed
     enable_force_stop: bool, // Track checkbox state
     enable_context_menu: bool, // Track context menu checkbox state
+    enable_system_guard: bool, // Track system guard checkbox state
 }
 
 // Drop trait removed - resources managed globally
 
 
 // Main settings modal function with proper data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool) -> (Option<AppTheme>, bool, bool) {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool) -> (Option<AppTheme>, bool, bool, bool) {
     let instance = GetModuleHandleW(std::ptr::null());
     
     // Load App Icon using centralized helper
@@ -82,6 +84,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         is_dark,
         enable_force_stop,
         enable_context_menu,
+        enable_system_guard,
     };
 
     let _hwnd = CreateWindowExW(
@@ -99,7 +102,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     // Message loop
     crate::ui::utils::run_message_loop();
     
-    (state.result, state.enable_force_stop, state.enable_context_menu)
+    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard)
 }
 
 
@@ -198,9 +201,19 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 crate::ui::theme::apply_theme(chk_ctx, crate::ui::theme::ControlType::CheckBox, st.is_dark);
             }
 
+            // Checkbox: Enable System Critical Guard
+            let enable_guard = if let Some(st) = state_ptr.as_ref() { st.enable_system_guard } else { true };
+            let chk_guard = crate::ui::controls::create_checkbox(hwnd, "Enable System Critical Path Guard", 30, 220, 240, 25, IDC_CHK_SYSTEM_GUARD);
+            if enable_guard {
+                 SendMessageW(chk_guard, BM_SETCHECK, 1, 0);
+            }
+            if let Some(st) = state_ptr.as_ref() {
+                crate::ui::theme::apply_theme(chk_guard, crate::ui::theme::ControlType::CheckBox, st.is_dark);
+            }
+
             // Buttons
             let _close_btn = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
-                .text("Close").pos(110, 235).size(80, 25).dark_mode(is_dark_mode).build();
+                .text("Close").pos(110, 260).size(80, 25).dark_mode(is_dark_mode).build();
 
             0
         },
@@ -243,7 +256,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                             
                             // 5. Update controls theme
                             use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
-                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_BTN_CANCEL];
+                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_BTN_CANCEL];
                             
                             for &ctrl_id in &controls {
                                 let h_ctl = GetDlgItem(hwnd, ctrl_id as i32);
@@ -251,7 +264,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                     // Map ID to ControlType roughly
                                     let ctl_type = match ctrl_id {
                                         IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
-                                        IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU => crate::ui::theme::ControlType::CheckBox,
+                                        IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD => crate::ui::theme::ControlType::CheckBox,
                                         IDC_BTN_CANCEL => crate::ui::theme::ControlType::Button,
                                         _ => crate::ui::theme::ControlType::Button, // Radio buttons
                                     };
@@ -352,6 +365,25 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                if parent != std::ptr::null_mut() {
                                    let val = if st.enable_context_menu { 1 } else { 0 };
                                    SendMessageW(parent, 0x8000 + 5, val as WPARAM, 0);
+                               }
+                          }
+                      }
+                  },
+                  IDC_CHK_SYSTEM_GUARD => {
+                      if (code as u32) == BN_CLICKED {
+                          if let Some(st) = get_state() {
+                               let mut checked = false;
+                               let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_SYSTEM_GUARD as i32);
+                               if h_ctl != std::ptr::null_mut() {
+                                   checked = SendMessageW(h_ctl, BM_GETCHECK, 0, 0) == 1;
+                                   st.enable_system_guard = checked;
+                               }
+                               
+                               // Notify Parent immediately (WM_APP + 6)
+                               let parent = GetParent(hwnd);
+                               if parent != std::ptr::null_mut() {
+                                   let val = if checked { 1 } else { 0 };
+                                   SendMessageW(parent, 0x8000 + 6, val as WPARAM, 0);
                                }
                           }
                       }

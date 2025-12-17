@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub window_x: i32,
     pub window_y: i32,
     pub enable_context_menu: bool,
+    pub enable_system_guard: bool,
 }
 
 impl Default for AppConfig {
@@ -32,6 +33,7 @@ impl Default for AppConfig {
             window_x: -1, // -1 indicates let Windows decide (CW_USEDEFAULT)
             window_y: -1,
             enable_context_menu: false,
+            enable_system_guard: true,
         }
     }
 }
