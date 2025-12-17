@@ -11,6 +11,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: compactrs
+  UPX_VERSION: "4.2.4"
 
 jobs:
   build:
@@ -26,30 +27,29 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo dependencies
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Cache UPX
+        id: cache-upx
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          path: upx.exe
+          key: upx-${{ env.UPX_VERSION }}-windows
+
+      - name: Download UPX
+        if: steps.cache-upx.outputs.cache-hit != 'true'
+        run: |
+          $upxUrl = "https://github.com/upx/upx/releases/download/v${{ env.UPX_VERSION }}/upx-${{ env.UPX_VERSION }}-win64.zip"
+          Invoke-WebRequest -Uri $upxUrl -OutFile upx.zip
+          Expand-Archive -Path upx.zip -DestinationPath .
+          Move-Item "upx-${{ env.UPX_VERSION }}-win64/upx.exe" .
+        shell: pwsh
 
       - name: Build release binary
         run: cargo build --release
-
-      - name: Install UPX
-        run: |
-          $upxVersion = "4.2.4"
-          $upxUrl = "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip"
-          Invoke-WebRequest -Uri $upxUrl -OutFile upx.zip
-          Expand-Archive -Path upx.zip -DestinationPath .
-          Move-Item "upx-$upxVersion-win64/upx.exe" .
-        shell: pwsh
 
       - name: Compress binary with UPX
         run: |
@@ -62,107 +62,53 @@ jobs:
           Write-Host "Compression ratio: $ratio%"
         shell: pwsh
 
-      - name: VirusTotal Security Scan
+      - name: VirusTotal Upload
         id: virustotal
         run: |
           $filePath = "target/release/${{ env.BINARY_NAME }}.exe"
           $vtApiKey = "${{ secrets.VIRUSTOTAL_API_KEY }}"
           
-          # Calculate SHA256 hash for VirusTotal permalink
+          # SHA256 hash for VirusTotal permalink
           $fileHash = (Get-FileHash $filePath -Algorithm SHA256).Hash.ToLower()
-          Write-Host "File SHA256: $fileHash"
-          
-          # VirusTotal permalink (always accessible, even before scan completes)
           $vtPermalink = "https://www.virustotal.com/gui/file/$fileHash"
+          
+          Write-Host "SHA256: $fileHash"
+          Write-Host "VirusTotal: $vtPermalink"
+          
           echo "VT_LINK=$vtPermalink" >> $env:GITHUB_OUTPUT
           echo "VT_HASH=$fileHash" >> $env:GITHUB_OUTPUT
           
           if ([string]::IsNullOrEmpty($vtApiKey)) {
-            Write-Host "::warning::VIRUSTOTAL_API_KEY not set. Skipping upload, but permalink is still valid."
-            echo "VT_STATUS=pending" >> $env:GITHUB_OUTPUT
+            Write-Host "::notice::VIRUSTOTAL_API_KEY not set. Link is still valid once file is scanned."
             exit 0
           }
           
-          Write-Host "Uploading to VirusTotal..."
-          
-          # Upload file to VirusTotal
-          $boundary = [System.Guid]::NewGuid().ToString()
-          $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
-          $fileName = [System.IO.Path]::GetFileName($filePath)
-          
-          $bodyLines = @(
-            "--$boundary",
-            "Content-Disposition: form-data; name=`"file`"; filename=`"$fileName`"",
-            "Content-Type: application/octet-stream",
-            "",
-            [System.Text.Encoding]::GetEncoding("ISO-8859-1").GetString($fileBytes),
-            "--$boundary--"
-          )
-          $body = $bodyLines -join "`r`n"
-          
+          # Upload to VirusTotal (fire-and-forget, no waiting)
           try {
+            $boundary = [System.Guid]::NewGuid().ToString()
+            $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
+            $fileName = [System.IO.Path]::GetFileName($filePath)
+            
+            $bodyLines = @(
+              "--$boundary",
+              "Content-Disposition: form-data; name=`"file`"; filename=`"$fileName`"",
+              "Content-Type: application/octet-stream",
+              "",
+              [System.Text.Encoding]::GetEncoding("ISO-8859-1").GetString($fileBytes),
+              "--$boundary--"
+            )
+            $body = $bodyLines -join "`r`n"
+            
             $response = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/files" `
               -Method POST `
               -Headers @{ "x-apikey" = $vtApiKey } `
               -ContentType "multipart/form-data; boundary=$boundary" `
               -Body $body
             
-            $analysisId = $response.data.id
-            Write-Host "Analysis ID: $analysisId"
-            echo "VT_ANALYSIS_ID=$analysisId" >> $env:GITHUB_OUTPUT
-            
-            # Wait for analysis to complete (max 5 minutes)
-            $maxAttempts = 30
-            $attempt = 0
-            $analysisComplete = $false
-            
-            while ($attempt -lt $maxAttempts -and -not $analysisComplete) {
-              Start-Sleep -Seconds 10
-              $attempt++
-              Write-Host "Checking analysis status (attempt $attempt/$maxAttempts)..."
-              
-              $analysisResponse = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/analyses/$analysisId" `
-                -Method GET `
-                -Headers @{ "x-apikey" = $vtApiKey }
-              
-              $status = $analysisResponse.data.attributes.status
-              Write-Host "Status: $status"
-              
-              if ($status -eq "completed") {
-                $analysisComplete = $true
-                $stats = $analysisResponse.data.attributes.stats
-                $malicious = $stats.malicious
-                $suspicious = $stats.suspicious
-                $harmless = $stats.harmless
-                $undetected = $stats.undetected
-                
-                Write-Host "=== VirusTotal Scan Results ==="
-                Write-Host "Malicious: $malicious"
-                Write-Host "Suspicious: $suspicious"  
-                Write-Host "Harmless: $harmless"
-                Write-Host "Undetected: $undetected"
-                
-                $totalEngines = $malicious + $suspicious + $harmless + $undetected
-                echo "VT_MALICIOUS=$malicious" >> $env:GITHUB_OUTPUT
-                echo "VT_TOTAL=$totalEngines" >> $env:GITHUB_OUTPUT
-                echo "VT_STATUS=completed" >> $env:GITHUB_OUTPUT
-                
-                if ($malicious -gt 0) {
-                  Write-Host "::warning::VirusTotal detected $malicious malicious flags. This may be a false positive due to UPX compression."
-                } else {
-                  Write-Host "✅ No malicious detections found!"
-                }
-              }
-            }
-            
-            if (-not $analysisComplete) {
-              Write-Host "::warning::Analysis did not complete within timeout. Check VirusTotal link for results."
-              echo "VT_STATUS=pending" >> $env:GITHUB_OUTPUT
-            }
-            
+            Write-Host "Uploaded to VirusTotal. Analysis ID: $($response.data.id)"
+            Write-Host "Results will be available at: $vtPermalink"
           } catch {
-            Write-Host "::warning::VirusTotal upload failed: $_"
-            echo "VT_STATUS=error" >> $env:GITHUB_OUTPUT
+            Write-Host "::warning::VirusTotal upload failed: $_ - Link is still valid for manual upload."
           }
         shell: pwsh
 
