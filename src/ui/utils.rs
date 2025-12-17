@@ -59,3 +59,23 @@ pub fn format_size(bytes: u64) -> String {
         String::from_utf16_lossy(&buffer[..len])
     }
 }
+
+/// Runs the standard Windows message loop.
+/// 
+/// Application modal windows often restart a message loop to block the caller
+/// until the window is closed. This helper consolidates that logic.
+/// 
+/// # Safety
+/// This function calls unsafe Win32 APIs.
+pub unsafe fn run_message_loop() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetMessageW, TranslateMessage, DispatchMessageW, MSG
+    };
+    
+    let mut msg: MSG = std::mem::zeroed();
+    // Crucial: Check strictly > 0. GetMessage returns -1 on error!
+    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}

@@ -8,7 +8,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
     WS_VISIBLE, WM_CREATE, WM_COMMAND, SetWindowLongPtrW, GWLP_USERDATA,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, WM_TIMER, SetTimer, KillTimer,
     DestroyWindow, SetWindowTextW, GetDlgItem,
     GetWindowRect, HMENU, CREATESTRUCTW,
@@ -82,11 +81,7 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
     EnableWindow(parent, 0);
     
     // Message Loop
-    let mut msg: MSG = std::mem::zeroed();
-    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) != 0 {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
+    crate::ui::utils::run_message_loop();
     
     EnableWindow(parent, 1);
     

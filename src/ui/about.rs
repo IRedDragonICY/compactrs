@@ -7,7 +7,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW, WM_SETFONT,
     WS_VISIBLE, WM_CREATE,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, DestroyWindow, 
     WM_NOTIFY, SetWindowLongPtrW, GWLP_USERDATA,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
@@ -92,11 +91,7 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
     );
 
     // Message loop
-    let mut msg: MSG = std::mem::zeroed();
-    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
+    crate::ui::utils::run_message_loop();
 }
 
 unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

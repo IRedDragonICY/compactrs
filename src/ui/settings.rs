@@ -9,7 +9,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE, WM_CREATE, WM_COMMAND, SetWindowLongPtrW, GWLP_USERDATA,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
     BS_AUTORADIOBUTTON, BM_SETCHECK,
-    GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
     FindWindowW, HMENU, CREATESTRUCTW,
     BM_GETCHECK, MessageBoxW, MB_ICONERROR, MB_OK,
@@ -98,11 +97,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     );
 
     // Message loop
-    let mut msg: MSG = std::mem::zeroed();
-    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
+    crate::ui::utils::run_message_loop();
     
     (state.result, state.enable_force_stop, state.enable_context_menu)
 }
