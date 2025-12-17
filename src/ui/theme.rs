@@ -5,13 +5,13 @@
 //! with `uxtheme.dll` for advanced styling.
 
 use std::sync::OnceLock;
-use windows_sys::Win32::Foundation::{HWND, LRESULT, WPARAM, COLORREF};
+use windows_sys::Win32::Foundation::{HWND, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, CreateSolidBrush, FillRect, GetStockObject, HBRUSH, HDC, HFONT, 
     SetBkMode, SetTextColor, TRANSPARENT, WHITE_BRUSH, DEFAULT_CHARSET, 
     DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, 
-    CLEARTYPE_QUALITY, FW_NORMAL, DeleteObject,
+    CLEARTYPE_QUALITY, FW_NORMAL,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_ERASEBKGND, WM_CTLCOLORDLG, WM_SETFONT, 
