@@ -12,7 +12,37 @@ use windows::Win32::Storage::FileSystem::{
     FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
     FILE_ATTRIBUTE_DIRECTORY,
 };
+use windows::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
 use windows::core::PCWSTR;
+
+// ===== EXECUTION STATE GUARD (RAII for Prevent Sleep) =====
+
+/// RAII guard that prevents the system from sleeping during long-running operations.
+/// Uses Win32 SetThreadExecutionState to keep the system awake.
+/// Automatically resets to normal state when dropped (panic-safe).
+struct ExecutionStateGuard {
+    _private: (), // Zero-sized marker to prevent external construction
+}
+
+impl ExecutionStateGuard {
+    /// Creates a new guard that prevents system sleep.
+    /// Sets ES_CONTINUOUS | ES_SYSTEM_REQUIRED to keep the system awake.
+    fn new() -> Self {
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+        }
+        Self { _private: () }
+    }
+}
+
+impl Drop for ExecutionStateGuard {
+    /// Resets the execution state to ES_CONTINUOUS, allowing normal sleep behavior.
+    fn drop(&mut self) {
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS);
+        }
+    }
+}
 
 // ===== RESULT TYPE FOR CORE PROCESSING =====
 
@@ -437,6 +467,10 @@ pub fn batch_process_worker(
     force: bool,
     main_hwnd: usize
 ) {
+    // RAII guard: Prevent system sleep for the duration of batch processing.
+    // Automatically resets on drop (panic-safe).
+    let _sleep_guard = ExecutionStateGuard::new();
+    
     let _ = tx.send(UiMessage::Status("Discovering files...".to_string()));
     
     // Track total files per row (row_index -> count)
@@ -635,18 +669,18 @@ pub fn single_item_worker(
     force: bool,
     main_hwnd: usize
 ) {
-    let mut total_files = 0u64;
+
     let mut success = 0u64;
     let mut failed = 0u64;
     
     let is_single_file = std::path::Path::new(&path).is_file();
     
     // Count files first using single-pass scanner
-    if is_single_file {
-        total_files = 1;
+    let mut total_files = if is_single_file {
+        1
     } else {
-        total_files = scan_directory_optimized(&path, false, None).file_count;
-    }
+        scan_directory_optimized(&path, false, None).file_count
+    };
     
     let _ = tx.send(UiMessage::Progress(0, total_files));
     let action_str = match action {

@@ -32,6 +32,7 @@ features = [
     "Win32_System_Memory",
     "Win32_System_DataExchange",
     "Win32_System_RestartManager",
+    "Win32_System_Power",
 ]
 
 [build-dependencies]
