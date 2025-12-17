@@ -22,6 +22,7 @@ pub struct ActionPanelIds {
     pub btn_files: u16,
     pub btn_folder: u16,
     pub btn_remove: u16,
+    pub combo_action_mode: u16,
     pub combo_algo: u16,
     pub chk_force: u16,
     pub btn_process: u16,
@@ -32,11 +33,12 @@ pub struct ActionPanelIds {
 ///
 /// # Layout
 /// Positioned at the very bottom of the window with horizontal button arrangement:
-/// [Files] [Folder] [Remove] [Algorithm ▼] [☐ Force] [Process All] [Cancel]
+/// [Files] [Folder] [Remove] [Action Mode ▼] [Algorithm ▼] [☐ Force] [Process All] [Cancel]
 pub struct ActionPanel {
     hwnd_files: HWND,
     hwnd_folder: HWND,
     hwnd_remove: HWND,
+    hwnd_action_mode: HWND,
     hwnd_combo: HWND,
     hwnd_force: HWND,
     hwnd_process: HWND,
@@ -53,6 +55,7 @@ impl ActionPanel {
             hwnd_files: HWND::default(),
             hwnd_folder: HWND::default(),
             hwnd_remove: HWND::default(),
+            hwnd_action_mode: HWND::default(),
             hwnd_combo: HWND::default(),
             hwnd_force: HWND::default(),
             hwnd_process: HWND::default(),
@@ -77,6 +80,12 @@ impl ActionPanel {
     #[inline]
     pub fn remove_hwnd(&self) -> HWND {
         self.hwnd_remove
+    }
+
+    /// Returns the Action Mode ComboBox HWND.
+    #[inline]
+    pub fn action_mode_hwnd(&self) -> HWND {
+        self.hwnd_action_mode
     }
 
     /// Returns the Algorithm ComboBox HWND.
@@ -121,6 +130,7 @@ impl ActionPanel {
             SendMessageW(self.hwnd_files, WM_SETFONT, Some(wparam), Some(lparam));
             SendMessageW(self.hwnd_folder, WM_SETFONT, Some(wparam), Some(lparam));
             SendMessageW(self.hwnd_remove, WM_SETFONT, Some(wparam), Some(lparam));
+            SendMessageW(self.hwnd_action_mode, WM_SETFONT, Some(wparam), Some(lparam));
             SendMessageW(self.hwnd_combo, WM_SETFONT, Some(wparam), Some(lparam));
             SendMessageW(self.hwnd_force, WM_SETFONT, Some(wparam), Some(lparam));
             SendMessageW(self.hwnd_process, WM_SETFONT, Some(wparam), Some(lparam));
@@ -155,6 +165,29 @@ impl Component for ActionPanel {
             self.hwnd_remove = ButtonBuilder::new(parent, self.ids.btn_remove)
                 .text("Remove").pos(160, btn_y).size(70, btn_h).dark_mode(is_dark).build();
 
+            // Create Action Mode ComboBox
+            self.hwnd_action_mode = CreateWindowExW(
+                Default::default(),
+                w!("COMBOBOX"),
+                None,
+                WINDOW_STYLE(
+                    WS_VISIBLE.0
+                        | WS_CHILD.0
+                        | WS_TABSTOP.0
+                        | WS_VSCROLL.0
+                        | CBS_DROPDOWNLIST as u32
+                        | CBS_HASSTRINGS as u32,
+                ),
+                240,
+                btn_y,
+                100,
+                200, // Drop-down height
+                Some(parent),
+                Some(HMENU(self.ids.combo_action_mode as isize as *mut _)),
+                Some(instance),
+                None,
+            )?;
+
             // Create Algorithm ComboBox
             self.hwnd_combo = CreateWindowExW(
                 Default::default(),
@@ -168,7 +201,7 @@ impl Component for ActionPanel {
                         | CBS_DROPDOWNLIST as u32
                         | CBS_HASSTRINGS as u32,
                 ),
-                240,
+                350,
                 btn_y,
                 110,
                 200, // Drop-down height
@@ -202,8 +235,9 @@ impl Component for ActionPanel {
             self.hwnd_cancel = ButtonBuilder::new(parent, self.ids.btn_cancel)
                 .text("Cancel").pos(540, btn_y).size(80, btn_h).dark_mode(is_dark).build();
 
-            // Apply initial theme to ComboBox and Checkbox
+            // Apply initial theme to ComboBoxes and Checkbox
             if is_dark {
+                let _ = SetWindowTheme(self.hwnd_action_mode, w!("DarkMode_CFD"), None);
                 let _ = SetWindowTheme(self.hwnd_combo, w!("DarkMode_CFD"), None);
                 let _ = SetWindowTheme(self.hwnd_force, w!("DarkMode_Explorer"), None);
             }
@@ -260,13 +294,24 @@ impl Component for ActionPanel {
                 SWP_NOZORDER,
             );
 
+            // Action Mode combo
+            SetWindowPos(
+                self.hwnd_action_mode,
+                None,
+                padding + 190,
+                btn_y,
+                100,
+                btn_height,
+                SWP_NOZORDER,
+            );
+
             // Algorithm combo
             SetWindowPos(
                 self.hwnd_combo,
                 None,
-                padding + 190,
+                padding + 295,
                 btn_y,
-                110,
+                100,
                 btn_height,
                 SWP_NOZORDER,
             );
@@ -275,7 +320,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_force,
                 None,
-                padding + 310,
+                padding + 400,
                 btn_y,
                 60,
                 btn_height,
@@ -286,7 +331,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_process,
                 None,
-                padding + 380,
+                padding + 465,
                 btn_y,
                 90,
                 btn_height,
@@ -297,7 +342,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_cancel,
                 None,
-                padding + 480,
+                padding + 560,
                 btn_y,
                 70,
                 btn_height,
@@ -316,7 +361,8 @@ impl Component for ActionPanel {
             apply_button_theme(self.hwnd_cancel, is_dark);
             apply_button_theme(self.hwnd_force, is_dark); // Checkbox uses button theme
 
-            // Apply theme to ComboBox
+            // Apply theme to ComboBoxes
+            apply_combobox_theme(self.hwnd_action_mode, is_dark);
             apply_combobox_theme(self.hwnd_combo, is_dark);
         }
     }

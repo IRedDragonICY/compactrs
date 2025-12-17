@@ -27,6 +27,7 @@ pub const IDC_BTN_ABOUT: u16 = 116;
 pub const IDC_BTN_OK: u16 = 117;
 pub const IDC_BTN_CONSOLE: u16 = 118;
 pub const IDC_CHK_FORCE: u16 = 119;
+pub const IDC_COMBO_ACTION_MODE: u16 = 120;
 
 
 

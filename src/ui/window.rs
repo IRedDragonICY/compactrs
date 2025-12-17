@@ -21,7 +21,7 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, CoTaskMemFree};
 use crate::ui::controls::{
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST,
     IDC_BTN_ADD_FOLDER, IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES,
-    IDC_BTN_SETTINGS, IDC_BTN_ABOUT, IDC_BTN_CONSOLE, IDC_CHK_FORCE,
+    IDC_BTN_SETTINGS, IDC_BTN_ABOUT, IDC_BTN_CONSOLE, IDC_CHK_FORCE, IDC_COMBO_ACTION_MODE,
 };
 use crate::ui::components::{
     Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
@@ -163,6 +163,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     btn_files: IDC_BTN_ADD_FILES,
                     btn_folder: IDC_BTN_ADD_FOLDER,
                     btn_remove: IDC_BTN_REMOVE,
+                    combo_action_mode: IDC_COMBO_ACTION_MODE,
                     combo_algo: IDC_COMBO_ALGO,
                     chk_force: IDC_CHK_FORCE,
                     btn_process: IDC_BTN_PROCESS_ALL,
@@ -195,6 +196,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     WofAlgorithm::Lzx => 3,
                 };
                 SendMessageW(h_combo, CB_SETCURSEL, Some(WPARAM(algo_index)), Some(LPARAM(0)));
+                
+                // Populate action mode combo
+                let h_action_mode = action_panel.action_mode_hwnd();
+                let action_modes = [w!("As Listed"), w!("Compress All"), w!("Decompress All")];
+                for mode in action_modes {
+                    SendMessageW(h_action_mode, CB_ADDSTRING, Some(WPARAM(0)), Some(LPARAM(mode.as_ptr() as isize)));
+                }
+                // Set "As Listed" as default selection
+                SendMessageW(h_action_mode, CB_SETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
                 
                 // Set initial force checkbox state
                 if state.force_compress {
@@ -419,9 +429,20 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     let cancel = st.cancel_flag.clone();
                                     cancel.store(false, Ordering::Relaxed);
                                     
-                                    // Clone items for worker thread
+                                    // Get action mode
+                                    let action_mode_idx = SendMessageW(ctrls.action_panel.action_mode_hwnd(), CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
+                                    
+                                    // Clone items for worker thread, applying action mode override
                                     let items: Vec<_> = indices_to_process.into_iter().filter_map(|idx| {
-                                        st.batch_items.get(idx).map(|item| (item.path.clone(), item.action, idx))
+                                        st.batch_items.get(idx).map(|item| {
+                                            let effective_action = match action_mode_idx.0 {
+                                                0 => item.action, // As Listed - use individual action
+                                                1 => BatchAction::Compress, // Compress All
+                                                2 => BatchAction::Decompress, // Decompress All
+                                                _ => item.action, // Fallback to individual
+                                            };
+                                            (item.path.clone(), effective_action, idx)
+                                        })
                                     }).collect();
                                     
                                     let force = st.force_compress; // Capture force flag
