@@ -51,27 +51,23 @@ fn should_skip_extension(path: &str) -> bool {
 
 // ===== WIN32 NATIVE DIRECTORY TRAVERSAL =====
 
-/// Recursively walks a directory using Win32 FindFirstFileExW/FindNextFileW APIs.
-/// Collects file paths into a vector.
-/// 
-/// # Arguments
-/// * `path` - Directory path to traverse
-/// * `files` - Vector to collect file paths
-/// * `state` - Processing state flag (stops if Stopped=3)
-/// 
-/// # Performance
-/// Uses `FindExInfoBasic` (faster, skips short name) and `FIND_FIRST_EX_LARGE_FETCH` for batch prefetching.
-fn walk_directory_win32_collect(
+/// Generic walker that handles recursion, stop signals, and basic filtering.
+/// The `visitor` closure receives: (Full Path, IsDirectory, Reference to FindData).
+fn walk_directory_generic<F>(
     path: &str,
-    files: &mut Vec<String>,
-    state: &Arc<AtomicU8>,
-) {
-    // Stop collection if state is Stopped (3)
-    if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-        return;
+    state: Option<&Arc<AtomicU8>>,
+    visitor: &mut F,
+)
+where
+    F: FnMut(&str, bool, &WIN32_FIND_DATAW),
+{
+    // Check stop signal immediately
+    if let Some(s) = state {
+        if s.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
+            return;
+        }
     }
 
-    // Prepare search pattern: "path\*"
     let pattern = if path.ends_with('\\') || path.ends_with('/') {
         format!("{}*", path)
     } else {
@@ -91,24 +87,27 @@ fn walk_directory_win32_collect(
             FIND_FIRST_EX_LARGE_FETCH,
         );
 
-        // Check for invalid handle
         if handle.is_err() {
             return;
         }
         let handle = handle.unwrap();
 
         loop {
-            // Check if stopped
-            if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-                let _ = FindClose(handle);
-                return;
+            // Check stop signal in loop
+            if let Some(s) = state {
+                if s.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
+                    let _ = FindClose(handle);
+                    return;
+                }
             }
 
-            // Parse filename from null-terminated UTF-16
-            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
+            let filename_len = find_data
+                .cFileName
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(find_data.cFileName.len());
             let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
 
-            // Skip . and ..
             if filename != "." && filename != ".." {
                 let full_path = if path.ends_with('\\') || path.ends_with('/') {
                     format!("{}{}", path, filename)
@@ -116,16 +115,17 @@ fn walk_directory_win32_collect(
                     format!("{}\\{}", path, filename)
                 };
 
-                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
-                    // It's a directory - recurse
-                    walk_directory_win32_collect(&full_path, files, state);
-                } else {
-                    // It's a file - add to vector
-                    files.push(full_path);
+                let is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+
+                // Invoke visitor
+                visitor(&full_path, is_dir, &find_data);
+
+                // Recurse into directories
+                if is_dir {
+                    walk_directory_generic(&full_path, state, visitor);
                 }
             }
 
-            // Get next entry
             if FindNextFileW(handle, &mut find_data).is_err() {
                 break;
             }
@@ -133,177 +133,44 @@ fn walk_directory_win32_collect(
 
         let _ = FindClose(handle);
     }
+}
+
+/// Recursively walks a directory using Win32 FindFirstFileExW/FindNextFileW APIs.
+/// Collects file paths into a vector.
+fn walk_directory_win32_collect(path: &str, files: &mut Vec<String>, state: &Arc<AtomicU8>) {
+    walk_directory_generic(path, Some(state), &mut |full_path, is_dir, _| {
+        if !is_dir {
+            files.push(full_path.to_string());
+        }
+    });
 }
 
 /// Counts files in a directory using Win32 traversal (for size calculations)
-fn walk_directory_win32_count(
-    path: &str,
-    counter: &mut u64,
-) {
-    let pattern = if path.ends_with('\\') || path.ends_with('/') {
-        format!("{}*", path)
-    } else {
-        format!("{}\\*", path)
-    };
-    let pattern_wide = pattern.to_wide();
-
-    let mut find_data = WIN32_FIND_DATAW::default();
-
-    unsafe {
-        let handle = FindFirstFileExW(
-            PCWSTR(pattern_wide.as_ptr()),
-            FindExInfoBasic,
-            &mut find_data as *mut _ as *mut _,
-            FindExSearchNameMatch,
-            None,
-            FIND_FIRST_EX_LARGE_FETCH,
-        );
-
-        if handle.is_err() {
-            return;
+fn walk_directory_win32_count(path: &str, counter: &mut u64) {
+    walk_directory_generic(path, None, &mut |_, is_dir, _| {
+        if !is_dir {
+            *counter += 1;
         }
-        let handle = handle.unwrap();
-
-        loop {
-            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
-            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
-
-            if filename != "." && filename != ".." {
-                let full_path = if path.ends_with('\\') || path.ends_with('/') {
-                    format!("{}{}", path, filename)
-                } else {
-                    format!("{}\\{}", path, filename)
-                };
-
-                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
-                    walk_directory_win32_count(&full_path, counter);
-                } else {
-                    *counter += 1;
-                }
-            }
-
-            if FindNextFileW(handle, &mut find_data).is_err() {
-                break;
-            }
-        }
-
-        let _ = FindClose(handle);
-    }
+    });
 }
 
 /// Accumulates logical size of all files using Win32 traversal
-fn walk_directory_win32_logical_size(
-    path: &str,
-    total: &mut u64,
-) {
-    let pattern = if path.ends_with('\\') || path.ends_with('/') {
-        format!("{}*", path)
-    } else {
-        format!("{}\\*", path)
-    };
-    let pattern_wide = pattern.to_wide();
-
-    let mut find_data = WIN32_FIND_DATAW::default();
-
-    unsafe {
-        let handle = FindFirstFileExW(
-            PCWSTR(pattern_wide.as_ptr()),
-            FindExInfoBasic,
-            &mut find_data as *mut _ as *mut _,
-            FindExSearchNameMatch,
-            None,
-            FIND_FIRST_EX_LARGE_FETCH,
-        );
-
-        if handle.is_err() {
-            return;
+fn walk_directory_win32_logical_size(path: &str, total: &mut u64) {
+    walk_directory_generic(path, None, &mut |_, is_dir, find_data| {
+        if !is_dir {
+            let size = ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
+            *total += size;
         }
-        let handle = handle.unwrap();
-
-        loop {
-            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
-            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
-
-            if filename != "." && filename != ".." {
-                let full_path = if path.ends_with('\\') || path.ends_with('/') {
-                    format!("{}{}", path, filename)
-                } else {
-                    format!("{}\\{}", path, filename)
-                };
-
-                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
-                    walk_directory_win32_logical_size(&full_path, total);
-                } else {
-                    // Get logical size from high/low parts in find_data
-                    let size = ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
-                    *total += size;
-                }
-            }
-
-            if FindNextFileW(handle, &mut find_data).is_err() {
-                break;
-            }
-        }
-
-        let _ = FindClose(handle);
-    }
+    });
 }
 
 /// Accumulates disk size of all files using Win32 traversal
-fn walk_directory_win32_disk_size(
-    path: &str,
-    total: &mut u64,
-) {
-    let pattern = if path.ends_with('\\') || path.ends_with('/') {
-        format!("{}*", path)
-    } else {
-        format!("{}\\*", path)
-    };
-    let pattern_wide = pattern.to_wide();
-
-    let mut find_data = WIN32_FIND_DATAW::default();
-
-    unsafe {
-        let handle = FindFirstFileExW(
-            PCWSTR(pattern_wide.as_ptr()),
-            FindExInfoBasic,
-            &mut find_data as *mut _ as *mut _,
-            FindExSearchNameMatch,
-            None,
-            FIND_FIRST_EX_LARGE_FETCH,
-        );
-
-        if handle.is_err() {
-            return;
+fn walk_directory_win32_disk_size(path: &str, total: &mut u64) {
+    walk_directory_generic(path, None, &mut |full_path, is_dir, _| {
+        if !is_dir {
+            *total += get_real_file_size(full_path);
         }
-        let handle = handle.unwrap();
-
-        loop {
-            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
-            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
-
-            if filename != "." && filename != ".." {
-                let full_path = if path.ends_with('\\') || path.ends_with('/') {
-                    format!("{}{}", path, filename)
-                } else {
-                    format!("{}\\{}", path, filename)
-                };
-
-                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
-                    walk_directory_win32_disk_size(&full_path, total);
-                } else {
-                    // Use GetCompressedFileSizeW for actual disk usage
-                    *total += get_real_file_size(&full_path);
-                }
-            }
-
-            if FindNextFileW(handle, &mut find_data).is_err() {
-                break;
-            }
-        }
-
-        let _ = FindClose(handle);
-    }
+    });
 }
 
 /// Samples files to detect WOF algorithm using Win32 traversal
@@ -313,67 +180,17 @@ fn walk_directory_win32_detect_algo(
     scanned: &mut usize,
     max_scan: usize,
 ) {
-    if *scanned >= max_scan {
-        return;
-    }
-
-    let pattern = if path.ends_with('\\') || path.ends_with('/') {
-        format!("{}*", path)
-    } else {
-        format!("{}\\*", path)
-    };
-    let pattern_wide = pattern.to_wide();
-
-    let mut find_data = WIN32_FIND_DATAW::default();
-
-    unsafe {
-        let handle = FindFirstFileExW(
-            PCWSTR(pattern_wide.as_ptr()),
-            FindExInfoBasic,
-            &mut find_data as *mut _ as *mut _,
-            FindExSearchNameMatch,
-            None,
-            FIND_FIRST_EX_LARGE_FETCH,
-        );
-
-        if handle.is_err() {
+    walk_directory_generic(path, None, &mut |full_path, is_dir, _| {
+        if *scanned >= max_scan {
             return;
         }
-        let handle = handle.unwrap();
-
-        loop {
-            if *scanned >= max_scan {
-                let _ = FindClose(handle);
-                return;
+        if !is_dir {
+            if let Some(algo) = get_wof_algorithm(full_path) {
+                found_algos.insert(algo as u32);
             }
-
-            let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
-            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
-
-            if filename != "." && filename != ".." {
-                let full_path = if path.ends_with('\\') || path.ends_with('/') {
-                    format!("{}{}", path, filename)
-                } else {
-                    format!("{}\\{}", path, filename)
-                };
-
-                if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
-                    walk_directory_win32_detect_algo(&full_path, found_algos, scanned, max_scan);
-                } else {
-                    if let Some(algo) = get_wof_algorithm(&full_path) {
-                        found_algos.insert(algo as u32);
-                    }
-                    *scanned += 1;
-                }
-            }
-
-            if FindNextFileW(handle, &mut find_data).is_err() {
-                break;
-            }
+            *scanned += 1;
         }
-
-        let _ = FindClose(handle);
-    }
+    });
 }
 
 // ===== HELPER FUNCTIONS =====
