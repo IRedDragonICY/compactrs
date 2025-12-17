@@ -159,11 +159,11 @@ impl FileListView {
         &self,
         id: u32,
         item: &BatchItem,
-        size_logical: &str,
-        size_disk: &str,
+        size_logical: Vec<u16>,
+        size_disk: Vec<u16>,
         state: CompressionState,
     ) -> i32 {
-        let path_wide = to_wstring(&item.path); // Use helper directly
+        let path_wide = to_wstring(&item.path);
         let algo_str = Self::algo_to_str(item.algorithm);
         let algo_wide = to_wstring(algo_str);
         let action_str = if item.action == crate::ui::state::BatchAction::Compress {
@@ -172,8 +172,9 @@ impl FileListView {
             "Decompress"
         };
         let action_wide = to_wstring(action_str);
-        let size_wide = to_wstring(size_logical);
-        let disk_wide = to_wstring(size_disk);
+        // size_logical and size_disk are already Vec<u16>
+        let size_wide = size_logical;
+        let disk_wide = size_disk;
 
         // Format current state string
         let current_text = match state {
@@ -258,8 +259,15 @@ impl FileListView {
     /// * `row` - Row index (0-based)
     /// * `col` - Column index (use `columns::*` constants)
     /// * `text` - New text value
-    pub fn update_item_text(&self, row: i32, col: i32, text: &str) {
-        let text_wide = to_wstring(text);
+    pub fn update_item_text(&self, row: i32, col: i32, text: Vec<u16>) {
+        // Ensure null-termination
+        let text_wide = if text.last() == Some(&0) {
+            text
+        } else {
+            let mut t = text;
+            t.push(0);
+            t
+        };
 
         let item = LVITEMW {
             mask: LVIF_TEXT,

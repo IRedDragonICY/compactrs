@@ -36,8 +36,10 @@ pub unsafe fn load_app_icon(instance: HINSTANCE) -> HICON { unsafe {
 }}
 
 /// Formats a byte size into a human-readable string using the Windows Shell API.
-#[inline]
-pub fn format_size(bytes: u64) -> String {
+
+/// Formats a byte size into a human-readable string using the Windows Shell API.
+
+pub fn format_size(bytes: u64) -> Vec<u16> {
     let mut buffer: [u16; 32] = [0; 32];
     
     unsafe {
@@ -50,13 +52,12 @@ pub fn format_size(bytes: u64) -> String {
         let ptr = StrFormatByteSizeW(size_i64, buffer.as_mut_ptr(), buffer.len() as u32);
         
         if ptr.is_null() {
-            return String::new();
+            return vec![0];
         }
 
         // Buffer is filled with null-terminated string
-        // Correctly iterate over the buffer to find the null terminator
         let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-        String::from_utf16_lossy(&buffer[..len])
+        buffer[..=len].to_vec() // Include null terminator
     }
 }
 
@@ -72,10 +73,13 @@ pub unsafe fn run_message_loop() {
         GetMessageW, TranslateMessage, DispatchMessageW, MSG
     };
     
-    let mut msg: MSG = std::mem::zeroed();
+    let mut msg: MSG = unsafe { std::mem::zeroed() };
     // Crucial: Check strictly > 0. GetMessage returns -1 on error!
-    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+    // We can filter for specific messages if we want, but usually 0,0 is all.
+    while unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) } > 0 {
+        unsafe {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
 }

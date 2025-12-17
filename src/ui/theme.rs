@@ -5,7 +5,7 @@
 //! with `uxtheme.dll` for advanced styling.
 
 use std::sync::OnceLock;
-use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LRESULT, WPARAM, COLORREF};
 use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE};
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, CreateSolidBrush, FillRect, GetStockObject, HBRUSH, HDC, HFONT, 
@@ -56,6 +56,7 @@ pub enum ControlType {
     ComboBox,
     Header,
     GroupBox,
+    RadioButton, // New type for distinct styling
     ItemsView, // For specialized ListView themes
 }
 
@@ -97,7 +98,10 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::CheckBox => ("DarkMode_Explorer", None),
             ControlType::ComboBox => ("DarkMode_CFD", None),
             ControlType::Header => ("DarkMode_ItemsView", None), 
-            ControlType::GroupBox => ("DarkMode_Explorer", None),
+            // GroupBox and RadioButton: use empty theme in dark mode to force GDI rendering
+            // This ensures WM_CTLCOLORSTATIC text color (white) is respected.
+            ControlType::GroupBox => ("", None),
+            ControlType::RadioButton => ("", None),
             ControlType::ItemsView => ("DarkMode_ItemsView", None),
         }
     } else {
@@ -109,17 +113,26 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::ComboBox => ("Explorer", None),
             ControlType::Header => ("Explorer", None),
             ControlType::GroupBox => ("Explorer", None),
+            ControlType::RadioButton => ("Explorer", None),
             ControlType::ItemsView => ("Explorer", None),
         }
     };
 
     let theme_w = to_wstring(theme);
-    let sub_theme_w = sub_theme.map(to_wstring); // Handle Option<String> if needed
+    let sub_theme_w = sub_theme.map(to_wstring); 
     
-    // Most SetWindowTheme calls don't use the second prop, usually null.
-    // For standard Explorer theme, we just pass the main theme name.
+    let psz_sub_app_name = if let Some(ref s) = sub_theme_w {
+        s.as_ptr()
+    } else {
+         // To disable visual styles, passing L"" as the second parameter is often required.
+         if theme.is_empty() {
+             theme_w.as_ptr()
+         } else {
+             std::ptr::null()
+         }
+    };
     
-    SetWindowTheme(hwnd, theme_w.as_ptr(), std::ptr::null());
+    SetWindowTheme(hwnd, theme_w.as_ptr(), psz_sub_app_name);
 }
 
 /// Applies the application font to the specified window.

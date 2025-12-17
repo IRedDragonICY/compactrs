@@ -34,7 +34,7 @@ unsafe fn create_key(parent: HKEY, subkey: &str) -> Result<HKEY, String> { unsaf
     );
     
     if result != ERROR_SUCCESS {
-        return Err(format!("RegCreateKeyExW failed: {}", result));
+        return Err("RegCreateKeyExW failed: ".to_string() + &result.to_string());
     }
     
     Ok(hkey)
@@ -60,7 +60,7 @@ unsafe fn set_value(hkey: HKEY, name: Option<&str>, value: &str) -> Result<(), S
             value_size,
         );
         if result != ERROR_SUCCESS {
-            return Err(format!("RegSetValueExW (named) failed: {}", result));
+            return Err("RegSetValueExW (named) failed: ".to_string() + &result.to_string());
         }
     } else {
         // Set default value (empty name)
@@ -73,7 +73,7 @@ unsafe fn set_value(hkey: HKEY, name: Option<&str>, value: &str) -> Result<(), S
             value_size,
         );
         if result != ERROR_SUCCESS {
-            return Err(format!("RegSetValueExW (default) failed: {}", result));
+            return Err("RegSetValueExW (default) failed: ".to_string() + &result.to_string());
         }
     }
     
@@ -88,7 +88,7 @@ unsafe fn close_key(hkey: HKEY) { unsafe {
 /// Create the context menu entries for a given root key path (e.g., "*" or "Directory")
 unsafe fn create_menu_for_root(root_path: &str, exe_path: &str) -> Result<(), String> { unsafe {
     // Create: HKCR\{root_path}\shell\CompactRS
-    let shell_key_path = format!("{}\\shell\\CompactRS", root_path);
+    let shell_key_path = root_path.to_string() + "\\shell\\CompactRS";
     let main_key = create_key(HKEY_CLASSES_ROOT, &shell_key_path)?;
     
     // Set MUIVerb for display name
@@ -103,7 +103,7 @@ unsafe fn create_menu_for_root(root_path: &str, exe_path: &str) -> Result<(), St
     close_key(main_key);
     
     // Create subcommands under: HKCR\{root_path}\shell\CompactRS\shell
-    let submenu_base = format!("{}\\shell\\CompactRS\\shell", root_path);
+    let submenu_base = root_path.to_string() + "\\shell\\CompactRS\\shell";
     
     // Define all menu items
     let menu_items = [
@@ -116,17 +116,17 @@ unsafe fn create_menu_for_root(root_path: &str, exe_path: &str) -> Result<(), St
     
     for (id, label, args) in menu_items {
         // Create the subcommand key
-        let item_path = format!("{}\\{}", submenu_base, id);
+        let item_path = submenu_base.clone() + "\\" + id;
         let item_key = create_key(HKEY_CLASSES_ROOT, &item_path)?;
         set_value(item_key, None, label)?;
         close_key(item_key);
         
         // Create the command key
-        let cmd_path = format!("{}\\{}\\command", submenu_base, id);
+        let cmd_path = submenu_base.clone() + "\\" + id + "\\command";
         let cmd_key = create_key(HKEY_CLASSES_ROOT, &cmd_path)?;
         
         // Command: "path\to\compactrs.exe" --path "%1" {args}
-        let command = format!("\"{}\" --path \"%1\" {}", exe_path, args);
+        let command = "\"".to_string() + exe_path + "\" --path \"%1\" " + args;
         set_value(cmd_key, None, &command)?;
         close_key(cmd_key);
     }
@@ -136,7 +136,7 @@ unsafe fn create_menu_for_root(root_path: &str, exe_path: &str) -> Result<(), St
 
 /// Delete the context menu entries for a given root key path
 unsafe fn delete_menu_for_root(root_path: &str) -> Result<(), String> { unsafe {
-    let key_path = format!("{}\\shell\\CompactRS", root_path);
+    let key_path = root_path.to_string() + "\\shell\\CompactRS";
     let wide_path = to_wstring(&key_path);
     
     // RegDeleteTreeW deletes a key and all its subkeys

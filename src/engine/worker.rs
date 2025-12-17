@@ -3,7 +3,7 @@ use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use crate::ui::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
-use crate::utils::to_wstring;
+use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
 use windows_sys::Win32::Foundation::{HWND, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
 use windows_sys::Win32::Storage::FileSystem::{
@@ -128,9 +128,13 @@ where
     }
 
     let pattern = if path.ends_with('\\') || path.ends_with('/') {
-        format!("{}*", path)
+        let mut p = path.to_string();
+        p.push('*');
+        p
     } else {
-        format!("{}\\*", path)
+        let mut p = path.to_string();
+        p.push_str("\\*");
+        p
     };
     let pattern_wide = to_wstring(&pattern);
 
@@ -172,9 +176,14 @@ where
 
             if filename != "." && filename != ".." {
                 let full_path = if path.ends_with('\\') || path.ends_with('/') {
-                    format!("{}{}", path, filename)
+                    let mut p = path.to_string();
+                    p.push_str(&filename);
+                    p
                 } else {
-                    format!("{}\\{}", path, filename)
+                    let mut p = path.to_string();
+                    p.push('\\');
+                    p.push_str(&filename);
+                    p
                 };
 
                 let is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
@@ -387,12 +396,24 @@ fn try_compress_with_lock_handling(
                              
                              // Retry Compression
                              return compress_file(path, algo, force)
-                                .map_err(|e2| format!("Failed retry {}: {:?}", path, e2));
+                                .map_err(|e2| {
+                                    // "Failed retry {}: {:?}"
+                                    // Manual simple error string
+                                    let mut s = "Failed retry ".to_string();
+                                    s.push_str(path);
+                                    s.push_str(": ");
+                                    s.push_str(&e2.to_string()); // minimal dependency on Display for errors
+                                    s
+                                });
                          }
                      }
                  }
              }
-             Err(format!("Failed {}: {:?}", path, e))
+             let mut s = "Failed ".to_string();
+             s.push_str(path);
+             s.push_str(": ");
+             s.push_str(&e.to_string());
+             Err(s)
         }
     }
 }
@@ -425,13 +446,17 @@ pub fn process_file_core(
         BatchAction::Compress => {
             // Check System Critical Path Guard
             if guard_enabled && !force && is_critical_path(path) {
-                let _ = tx.send(UiMessage::Log(format!("Skipped (Critical System Path): {}", path)));
+                let p = to_wstring(path);
+                let msg = concat_wstrings(&[&to_wstring("Skipped (Critical System Path): "), &p]);
+                let _ = tx.send(UiMessage::Log(msg));
                 return ProcessResult::Skipped("System Path".to_string());
             }
 
             // Check extension filter (unless force is enabled)
             if !force && should_skip_extension(path) {
-                let _ = tx.send(UiMessage::Log(format!("Skipped (filtered): {}", path)));
+                let p = to_wstring(path);
+                let msg = concat_wstrings(&[&to_wstring("Skipped (filtered): "), &p]);
+                let _ = tx.send(UiMessage::Log(msg));
                 return ProcessResult::Skipped("Filtered extension".to_string());
             }
             
@@ -440,11 +465,13 @@ pub fn process_file_core(
                 Ok(true) => ProcessResult::Success,
                 Ok(false) => {
                     // OS driver said compression not beneficial
-                    let _ = tx.send(UiMessage::Log(format!("Skipped (OS: Not Beneficial): {}", path)));
+                    let p = to_wstring(path);
+                    let msg = concat_wstrings(&[&to_wstring("Skipped (OS: Not Beneficial): "), &p]);
+                    let _ = tx.send(UiMessage::Log(msg));
                     ProcessResult::Skipped("Not beneficial".to_string())
                 }
                 Err(msg) => {
-                    let _ = tx.send(UiMessage::Error(msg.clone()));
+                    let _ = tx.send(UiMessage::Error(to_wstring(&msg)));
                     ProcessResult::Failed(msg)
                 }
             }
@@ -453,9 +480,13 @@ pub fn process_file_core(
             match uncompress_file(path) {
                 Ok(_) => ProcessResult::Success,
                 Err(e) => {
-                    let msg = format!("Failed {}: {:?}", path, e);
-                    let _ = tx.send(UiMessage::Error(msg.clone()));
-                    ProcessResult::Failed(msg)
+                    let mut s = "Failed ".to_string();
+                    s.push_str(path);
+                    s.push_str(": ");
+                    s.push_str(&e.to_string());
+                    let w = to_wstring(&s);
+                    let _ = tx.send(UiMessage::Error(w));
+                    ProcessResult::Failed(s)
                 }
             }
         }
@@ -497,7 +528,7 @@ pub fn batch_process_worker(
     // Automatically resets on drop (panic-safe).
     let _sleep_guard = ExecutionStateGuard::new();
     
-    let _ = tx.send(UiMessage::Status("Discovering files...".to_string()));
+    let _ = tx.send(UiMessage::Status(to_wstring("Discovering files...")));
     
     // Track total files per row (row_index -> count)
     let mut row_totals: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
@@ -516,15 +547,23 @@ pub fn batch_process_worker(
         total_files += row_count;
         
         // Initialize row progress
-        let _ = tx.send(UiMessage::RowUpdate(*row as i32, format!("0/{}", row_count), "Running".to_string(), "".to_string()));
+        let row_cnt_w = u64_to_wstring(row_count);
+        let prog_str = concat_wstrings(&[&to_wstring("0/"), &row_cnt_w]);
+        let _ = tx.send(UiMessage::RowUpdate(*row as i32, prog_str, to_wstring("Running"), vec![0;1])); // Empty vec for size
     }
     
     let _ = tx.send(UiMessage::Progress(0, total_files));
     let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let _ = tx.send(UiMessage::Status(format!("Processing {} files with {} threads...", total_files, num_threads)));
+    
+    let total_w = u64_to_wstring(total_files);
+    let threads_w = u64_to_wstring(num_threads as u64);
+    let msg = concat_wstrings(&[
+        &to_wstring("Processing "), &total_w, &to_wstring(" files with "), &threads_w, &to_wstring(" threads...")
+    ]);
+    let _ = tx.send(UiMessage::Status(msg));
     
     if total_files == 0 {
-        let _ = tx.send(UiMessage::Status("No files found to process.".to_string()));
+        let _ = tx.send(UiMessage::Status(to_wstring("No files found to process.")));
         let _ = tx.send(UiMessage::Finished);
         return;
     }
@@ -637,14 +676,20 @@ pub fn batch_process_worker(
                         
                         // Update row UI (throttled)
                         if current_row % 5 == 0 || current_row == total_row {
-                             let _ = tx_clone.send(UiMessage::RowUpdate(task.row_idx as i32, format!("{}/{}", current_row, total_row), "Running".to_string(), "".to_string()));
+                             let cur_w = u64_to_wstring(current_row);
+                             let tot_w = u64_to_wstring(total_row);
+                             let prog_w = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
+                             let _ = tx_clone.send(UiMessage::RowUpdate(task.row_idx as i32, prog_w, to_wstring("Running"), vec![0;1]));
                         }
                     }
                     
                     // Throttled Global updates
                     if current_global % 20 == 0 || current_global == total_files_copy {
                          let _ = tx_clone.send(UiMessage::Progress(current_global, total_files_copy));
-                         let _ = tx_clone.send(UiMessage::Status(format!("Processed {}/{} files...", current_global, total_files_copy)));
+                         let cur_w = u64_to_wstring(current_global);
+                         let tot_w = u64_to_wstring(total_files_copy);
+                         let stat_w = concat_wstrings(&[&to_wstring("Processed "), &cur_w, &to_wstring("/"), &tot_w, &to_wstring(" files...")]);
+                         let _ = tx_clone.send(UiMessage::Status(stat_w));
                     }
                 }
             });
@@ -655,7 +700,7 @@ pub fn batch_process_worker(
     let _ = producer_handle.join();
     
     if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-        let _ = tx.send(UiMessage::Status("Batch processing cancelled.".to_string()));
+        let _ = tx.send(UiMessage::Status(to_wstring("Batch processing cancelled.")));
          let _ = tx.send(UiMessage::Finished);
         return;
     }
@@ -668,20 +713,28 @@ pub fn batch_process_worker(
         } else {
             calculate_folder_disk_size(&path)
         };
-        let size_str = format_size(size_after);
+        let size_w = format_size(size_after);
         
         let end_state = detect_path_algorithm(&path);
-        let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, "Done".to_string(), size_str, end_state));
+        let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, to_wstring("Done"), size_w, end_state));
     }
 
     let s = success.load(Ordering::Relaxed);
     let f = failed.load(Ordering::Relaxed);
     let p = processed.load(Ordering::Relaxed);
     
-    let report = format!("Batch complete! Processed: {} files | Success: {} | Failed: {}", p, s, f);
+    // "Batch complete! Processed: {} files | Success: {} | Failed: {}"
+    let p_w = u64_to_wstring(p);
+    let s_w = u64_to_wstring(s);
+    let f_w = u64_to_wstring(f);
+    let report_w = concat_wstrings(&[
+        &to_wstring("Batch complete! Processed: "), &p_w, 
+        &to_wstring(" files | Success: "), &s_w, 
+        &to_wstring(" | Failed: "), &f_w
+    ]);
     
-    let _ = tx.send(UiMessage::Log(report.clone()));
-    let _ = tx.send(UiMessage::Status(report));
+    let _ = tx.send(UiMessage::Log(report_w.clone()));
+    let _ = tx.send(UiMessage::Status(report_w));
     let _ = tx.send(UiMessage::Progress(total_files, total_files));
     let _ = tx.send(UiMessage::Finished);
 }
@@ -716,10 +769,17 @@ pub fn single_item_worker(
         BatchAction::Compress => "Compressing",
         BatchAction::Decompress => "Decompressing",
     };
-    let _ = tx.send(UiMessage::Status(format!("{} {} ({} files)...", action_str, path, total_files)));
+    let tot_w = u64_to_wstring(total_files);
+    let path_w = to_wstring(&path);
+    // "{} {} ({} files)..."
+    let stat_w = concat_wstrings(&[
+        &to_wstring(action_str), &to_wstring(" "), &path_w, &to_wstring(" ("), &tot_w, &to_wstring(" files)...")
+    ]);
+    let _ = tx.send(UiMessage::Status(stat_w));
     
     // Send initial row update
-    let _ = tx.send(UiMessage::RowUpdate(row, format!("0/{}", total_files), "Running".to_string(), "".to_string()));
+    let start_prog = concat_wstrings(&[&to_wstring("0/"), &tot_w]);
+    let _ = tx.send(UiMessage::RowUpdate(row, start_prog, to_wstring("Running"), vec![0;1]));
     
     if is_single_file {
         // Handle pause for single file
@@ -729,8 +789,8 @@ pub fn single_item_worker(
         
         // Check if stopped
         if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
-            let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
+            let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Cancelled"), vec![0;1], crate::engine::wof::CompressionState::None));
+            let _ = tx.send(UiMessage::Status(to_wstring("Cancelled.")));
             let _ = tx.send(UiMessage::Finished);
             return;
         }
@@ -743,22 +803,22 @@ pub fn single_item_worker(
             ProcessResult::Success => {
                 success += 1;
                 let compressed_size = get_real_file_size(&path);
-                let disk_str = format_size(compressed_size);
+                let disk_w = format_size(compressed_size);
                 let final_state = detect_path_algorithm(&path);
-                let _ = tx.send(UiMessage::ItemFinished(row, "Done".to_string(), disk_str, final_state));
+                let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Done"), disk_w, final_state));
             }
             ProcessResult::Skipped(_) => {
                 success += 1;
                 let final_state = detect_path_algorithm(&path);
-                let _ = tx.send(UiMessage::ItemFinished(row, "Skipped".to_string(), "".to_string(), final_state));
+                let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Skipped"), vec![0;1], final_state));
             }
             ProcessResult::Failed(_) => {
                 failed += 1;
-                let _ = tx.send(UiMessage::ItemFinished(row, "Failed".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
+                let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Failed"), vec![0;1], crate::engine::wof::CompressionState::None));
             }
         }
 
-        let _ = tx.send(UiMessage::RowUpdate(row, "1/1".to_string(), "Running".to_string(), "".to_string()));
+        let _ = tx.send(UiMessage::RowUpdate(row, to_wstring("1/1"), to_wstring("Running"), vec![0;1]));
         let _ = tx.send(UiMessage::Progress(1, 1));
     } else {
         // Process folder using streaming producer-consumer model
@@ -844,8 +904,11 @@ pub fn single_item_worker(
                         
                         // Throttled updates
                         if current % 100 == 0 || current == total_files_copy {
-                             let progress_str = format!("{}/{}", current, total_files_copy);
-                             let _ = tx_clone.send(UiMessage::RowUpdate(row_copy, progress_str, "Running".to_string(), "".to_string())); 
+                             // format!("{}/{}", current, total)
+                             let cur_w = u64_to_wstring(current);
+                             let tot_w = u64_to_wstring(total_files_copy);
+                             let prog_w = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
+                             let _ = tx_clone.send(UiMessage::RowUpdate(row_copy, prog_w, to_wstring("Running"), vec![0;1])); 
                         }
                         let _ = tx_clone.send(UiMessage::Progress(current, total_files_copy));
                     }
@@ -857,8 +920,8 @@ pub fn single_item_worker(
         let _ = producer_handle.join();
         
         if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-            let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
-            let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
+            let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Cancelled"), vec![0;1], crate::engine::wof::CompressionState::None));
+            let _ = tx.send(UiMessage::Status(to_wstring("Cancelled.")));
             let _ = tx.send(UiMessage::Finished);
             return;
         }
@@ -873,14 +936,29 @@ pub fn single_item_worker(
     let size_after_str = format_size(size_after);
     
     // Send final status with disk size for On Disk column
-    let status = if failed > 0 { format!("Done+{} err", failed) } else { "Done".to_string() };
+    // Send final status with disk size for On Disk column
+    // let status = if failed > 0 { format!("Done+{} err", failed) } else { "Done".to_string() };
+    let status_w = if failed > 0 {
+        let f_w = u64_to_wstring(failed);
+        concat_wstrings(&[&to_wstring("Done+"), &f_w, &to_wstring(" err")])
+    } else {
+        to_wstring("Done")
+    };
+    
     let final_state = detect_path_algorithm(&path);
-    let _ = tx.send(UiMessage::ItemFinished(row, status, size_after_str, final_state));
+    let _ = tx.send(UiMessage::ItemFinished(row, status_w, size_after_str, final_state));
     
-    let report = format!("Done! {} files | Success: {} | Failed: {}", 
-        total_files, success, failed);
+    // format!("Done! {} files | Success: {} | Failed: {}", ...)
+    let t_w = u64_to_wstring(total_files);
+    let s_w = u64_to_wstring(success);
+    let f_w = u64_to_wstring(failed);
+    let report_w = concat_wstrings(&[
+        &to_wstring("Done! "), &t_w, 
+        &to_wstring(" files | Success: "), &s_w, 
+        &to_wstring(" | Failed: "), &f_w
+    ]);
     
-    let _ = tx.send(UiMessage::Status(report));
+    let _ = tx.send(UiMessage::Status(report_w));
     let _ = tx.send(UiMessage::Progress(total_files, total_files));
     let _ = tx.send(UiMessage::Finished);
 }

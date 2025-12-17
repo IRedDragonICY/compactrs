@@ -98,7 +98,7 @@ fn main() {
         
         // We'll update create_main_window to accept isize (HINSTANCE)
         if let Err(e) = ui::window::create_main_window(instance) {
-            let msg = to_wstring(&format!("Failed to create main window: {}", e));
+            let msg = to_wstring(&("Failed to create main window: ".to_string() + &e.to_string()));
             MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), to_wstring("Error").as_ptr(), MB_ICONERROR | MB_OK);
             return;
         }

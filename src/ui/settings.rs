@@ -16,8 +16,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::Controls::SetWindowTheme;
-use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, InvalidateRect};
+use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 
 const SETTINGS_TITLE: &str = "Settings";
 
@@ -171,7 +170,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                     SendMessageW(h, BM_SETCHECK, 1, 0);
                 }
                 // Apply theme to radio button
-                crate::ui::theme::apply_theme(h, crate::ui::theme::ControlType::Button, is_dark_mode);
+                crate::ui::theme::apply_theme(h, crate::ui::theme::ControlType::RadioButton, is_dark_mode);
             };
             
             // Determine initial check
@@ -266,7 +265,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                         IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
                                         IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD => crate::ui::theme::ControlType::CheckBox,
                                         IDC_BTN_CANCEL => crate::ui::theme::ControlType::Button,
-                                        _ => crate::ui::theme::ControlType::Button, // Radio buttons
+                                        _ => crate::ui::theme::ControlType::RadioButton, // Radio buttons
                                     };
                                     crate::ui::theme::apply_theme(h_ctl, ctl_type, new_is_dark);
                                     InvalidateRect(h_ctl, std::ptr::null(), 1);

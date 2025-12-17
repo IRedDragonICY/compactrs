@@ -114,7 +114,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 crate::ui::theme::set_window_frame_theme(hwnd, is_dark);
             
                 // Message Label
-                let msg_text = format!("Process '{}' is locking this file.\nForce Stop and try again?", st.process_name);
+                let msg_text = "Process '".to_string() + &st.process_name + "' is locking this file.\nForce Stop and try again?";
                 let msg_wide = to_wstring(&msg_text);
                 let static_cls = to_wstring("STATIC");
                 
@@ -135,7 +135,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                     .text("Force Stop (Yes)").pos(40, 90).size(130, 32).dark_mode(is_dark).build();
                 
                 // No Button with Timer
-                let no_text = format!("Cancel ({})", st.seconds_left);
+                let no_text = "Cancel (".to_string() + &st.seconds_left.to_string() + ")";
                 ButtonBuilder::new(hwnd, IDC_BTN_NO)
                     .text(&no_text).pos(190, 90).size(130, 32).dark_mode(is_dark).build();
                 
@@ -152,7 +152,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                         st.seconds_left -= 1;
                         
                         // Update No button text
-                        let no_text = format!("Cancel ({})", st.seconds_left);
+                        let no_text = "Cancel (".to_string() + &st.seconds_left.to_string() + ")";
                         let no_wide = to_wstring(&no_text);
                         let h_btn = GetDlgItem(hwnd, IDC_BTN_NO as i32);
                         if h_btn != std::ptr::null_mut() {

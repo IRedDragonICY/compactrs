@@ -47,7 +47,7 @@ use crate::engine::worker::{
     batch_process_worker,
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm,
 };
-use crate::utils::to_wstring;
+use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
 use crate::ui::utils::{format_size, get_window_state, load_app_icon};
 use crate::config::AppConfig;
 
@@ -261,7 +261,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 
                                 if let Some(ctrls) = &st.controls {
                                     if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
-                                        ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, detected_algo);
+                                        ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
                                     }
                                 }
                          }
@@ -343,7 +343,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     let disk_str = format_size(disk_size);
                                     if let Some(ctrls) = &st.controls {
                                         if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
-                                            ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, detected_algo);
+                                            ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
                                         }
                                     }
                                  }
@@ -363,7 +363,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 let disk_str = format_size(disk_size);
                                 if let Some(ctrls) = &st.controls {
                                     if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
-                                        ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, detected_algo);
+                                        ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
                                     }
                                 }
                              }
@@ -414,14 +414,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                        WofAlgorithm::Lzx => "LZX",
                                    };
                                    for &row in &indices_to_process {
-                                       ctrls.file_list.update_item_text(row as i32, 2, algo_name);
+                                       ctrls.file_list.update_item_text(row as i32, 2, to_wstring(algo_name));
                                    }
                                    if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
                                    windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 1); // TRUE
 
-                                   let status_msg = format!("Processing {} items...", indices_to_process.len());
-                                   let w_status = to_wstring(&status_msg);
-                                   SetWindowTextW(ctrls.status_bar.label_hwnd(), w_status.as_ptr());
+                                   // format!("Processing {} items...", count)
+                                   let count_w = u64_to_wstring(indices_to_process.len() as u64);
+                                   let status_msg = concat_wstrings(&[&to_wstring("Processing "), &count_w, &to_wstring(" items...")]);
+                                   SetWindowTextW(ctrls.status_bar.label_hwnd(), status_msg.as_ptr());
                                    
                                    let tx = st.tx.clone();
                                    let state_global = st.global_state.clone();
@@ -520,21 +521,29 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                  },
                                  UiMessage::Status(text) => {
                                      if let Some(ctrls) = &st.controls {
-                                         let w_text = to_wstring(&text);
-                                         SetWindowTextW(ctrls.status_bar.label_hwnd(), w_text.as_ptr());
+                                         SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
                                      }
                                  },
                                  UiMessage::Log(text) => {
                                      st.logs.push(text.clone());
-                                     append_log_msg(&text);
+                                     append_log_msg(text);
                                  },
                                  UiMessage::Error(text) => {
                                      if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Error); }
-                                     st.logs.push(format!("ERROR: {}", text));
-                                     append_log_msg(&format!("ERROR: {}", text));
+                                     // format!("ERROR: {}", text)
+                                     let err_prefix = to_wstring("ERROR: ");
+                                     let full_err = concat_wstrings(&[&err_prefix, &text]);
+                                     st.logs.push(full_err.clone());
+                                     append_log_msg(full_err);
+                                     
                                      if let Some(ctrls) = &st.controls {
-                                         let w_text = to_wstring(&text);
-                                         SetWindowTextW(ctrls.status_bar.label_hwnd(), w_text.as_ptr());
+                                         // text is Vec<u16>, needs null term? to_wstring added it?
+                                         // UiMessage uses Vec<u16> which should be null terminated if coming from helpers
+                                         // But safe to ensure. SetWindowTextW needs ptr.
+                                         // text already likely has \0 from sender.
+                                         // If it doesn't, we might read OOB.
+                                         // Our helpers always add \0.
+                                         SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
                                      }
                                  },
                                  UiMessage::Finished => {
@@ -545,14 +554,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                  },
                                  UiMessage::RowUpdate(row, progress, status, _) => {
                                      if let Some(ctrls) = &st.controls {
-                                         ctrls.file_list.update_item_text(row, 6, &progress);
-                                         ctrls.file_list.update_item_text(row, 7, &status);
+                                         ctrls.file_list.update_item_text(row, 6, progress);
+                                         ctrls.file_list.update_item_text(row, 7, status);
                                      }
                                  },
                                  UiMessage::ItemFinished(row, status, disk_size, final_state) => {
                                      if let Some(ctrls) = &st.controls {
-                                         ctrls.file_list.update_item_text(row, 7, &status);
-                                         if !disk_size.is_empty() { ctrls.file_list.update_item_text(row, 5, &disk_size); }
+                                         ctrls.file_list.update_item_text(row, 7, status);
+                                         if !disk_size.is_empty() && disk_size.len() > 1 { ctrls.file_list.update_item_text(row, 5, disk_size); }
                                          let state_str = match final_state {
                                              CompressionState::None => "-",
                                              CompressionState::Specific(algo) => match algo {
@@ -561,8 +570,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                              },
                                              CompressionState::Mixed => "Mixed",
                                          };
-                                         ctrls.file_list.update_item_text(row, 1, state_str);
-                                         ctrls.file_list.update_item_text(row, 8, "▶ Start");
+                                         ctrls.file_list.update_item_text(row, 1, to_wstring(state_str));
+                                         ctrls.file_list.update_item_text(row, 8, to_wstring("▶ Start"));
                                          if let Some(item) = st.batch_items.get_mut(row as usize) {
                                              item.status = BatchStatus::Pending;
                                              item.state_flag = None;
@@ -574,8 +583,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                      let disk_str = format_size(disk);
                                      if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
                                          if let Some(ctrls) = &st.controls {
-                                             ctrls.file_list.update_item_text(pos as i32, 4, &log_str);
-                                             ctrls.file_list.update_item_text(pos as i32, 5, &disk_str);
+                                             ctrls.file_list.update_item_text(pos as i32, 4, log_str);
+                                             ctrls.file_list.update_item_text(pos as i32, 5, disk_str);
                                              let state_str = match state {
                                                 CompressionState::None => "-",
                                                 CompressionState::Specific(algo) => match algo {
@@ -584,12 +593,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                                 },
                                                 CompressionState::Mixed => "Mixed",
                                              };
-                                             ctrls.file_list.update_item_text(pos as i32, 1, state_str);
-                                             ctrls.file_list.update_item_text(pos as i32, 7, "Pending");
+                                             ctrls.file_list.update_item_text(pos as i32, 1, to_wstring(state_str));
+                                             ctrls.file_list.update_item_text(pos as i32, 7, to_wstring("Pending"));
                                              let count = st.batch_items.len();
-                                             let msg = format!("{} item(s) analyzed.", count);
-                                             let w_msg = to_wstring(&msg);
-                                             SetWindowTextW(ctrls.status_bar.label_hwnd(), w_msg.as_ptr());
+                                             // format!("{} item(s) analyzed.", count)
+                                             let count_w = u64_to_wstring(count as u64);
+                                             let msg = concat_wstrings(&[&count_w, &to_wstring(" item(s) analyzed.")]);
+                                             SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
                                          }
                                      }
                                  },
@@ -675,7 +685,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         let id = st.add_batch_item(path.clone());
                         if let Some(ctrls) = &st.controls {
                              if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == id) {
-                                 ctrls.file_list.add_item(id, batch_item, "Calculating...", "Calculating...", CompressionState::None);
+                                 // "Calculating..." uses Vec<u16>
+                                 ctrls.file_list.add_item(id, batch_item, to_wstring("Calculating..."), to_wstring("Calculating..."), CompressionState::None);
                              }
                         }
                         items_to_analyze.push((id, path));
@@ -689,7 +700,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                          let algo = detect_path_algorithm(&path);
                          let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, algo));
                     }
-                    let _ = tx.send(UiMessage::Status("Ready.".to_string()));
+                    let _ = tx.send(UiMessage::Status(to_wstring("Ready.")));
                 });
             }
             0
@@ -721,7 +732,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                              if col == 0 { // Open Path
                                  if let Some(item) = st.batch_items.get(row as usize) {
                                      let path = &item.path;
-                                     let args = to_wstring(&format!("/select,\"{}\"", path));
+                                     // format!("/select,\"{}\"", path)
+                                     let select_prefix = to_wstring("/select,\"");
+                                     let path_w = to_wstring(path);
+                                     let suffix = to_wstring("\"");
+                                     let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
+                                     
                                      ShellExecuteW(std::ptr::null_mut(), to_wstring("open").as_ptr(), to_wstring("explorer.exe").as_ptr(), args.as_ptr(), std::ptr::null(), SW_SHOWNORMAL);
                                  }
                              } else if col == 2 { // Cycle Algo
@@ -736,7 +752,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                           WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
                                           WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
                                       };
-                                      if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 2, name); }
+                                      if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 2, to_wstring(name)); }
                                   }
                              } else if col == 3 { // Toggle Action
                                   if let Some(item) = st.batch_items.get_mut(row as usize) {
@@ -747,7 +763,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                       let name = match item.action {
                                           BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
                                       };
-                                      if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, name); }
+                                      if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, to_wstring(name)); }
                                   }
                              } else if col == 8 { // Start/Pause
                                   // Simplified logic for brevity (simulated click handler)

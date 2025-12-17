@@ -32,7 +32,7 @@ static mut BTN_COPY_HWND: Option<HWND> = None;
 static mut BTN_CLEAR_HWND: Option<HWND> = None;
 static mut IS_DARK_MODE: bool = false;
 
-pub unsafe fn show_console_window(_parent: HWND, initial_logs: &[String], is_dark: bool) {
+pub unsafe fn show_console_window(_parent: HWND, initial_logs: &[Vec<u16>], is_dark: bool) {
     IS_DARK_MODE = is_dark;
     
     if let Some(hwnd) = CONSOLE_HWND {
@@ -89,26 +89,29 @@ pub unsafe fn show_console_window(_parent: HWND, initial_logs: &[String], is_dar
         // Populate initial logs
         for log in initial_logs {
              // unwrap_or(0) is incorrect if type is pointer, use null_mut
-             append_log(EDIT_HWND.unwrap_or(std::ptr::null_mut()), log);
+             append_log(EDIT_HWND.unwrap_or(std::ptr::null_mut()), log.clone());
         }
     }
 }
 
-pub unsafe fn append_log_msg(msg: &str) {
+pub unsafe fn append_log_msg(msg: Vec<u16>) {
     if let Some(edit) = EDIT_HWND {
         append_log(edit, msg);
     }
 }
 
-unsafe fn append_log(edit: HWND, msg: &str) {
+unsafe fn append_log(edit: HWND, mut text: Vec<u16>) {
     if edit.is_null() { return; }
 
     // Move caret to end
     let len = GetWindowTextLengthW(edit);
     SendMessageW(edit, EM_SETSEL, len as WPARAM, len as LPARAM);
     
-    // Append text
-    let mut text: Vec<u16> = msg.encode_utf16().collect();
+    // Ensure CRLF and null terminator
+    // Remove existing null if present
+    if text.last() == Some(&0) {
+        text.pop();
+    }
     text.push(13); // CR
     text.push(10); // LF
     text.push(0);  // Null

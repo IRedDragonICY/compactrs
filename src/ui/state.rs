@@ -52,16 +52,25 @@ pub enum UiMessage {
     Progress(u64, u64), // current, total (global progress)
     BatchItemStatus(u32, BatchStatus),   // Individual item status update
     BatchItemProgress(u32, u64, u64),    // Individual item progress (id, current, total)
-    /// Row update for ListView: (row_index, progress_str, status_str, size_after_str)
-    RowUpdate(i32, String, String, String),
-    Log(String),
-    Status(String),
+    /// Row update for ListView: (row_index, progress_wide, status_wide, size_after_wide)
+    RowUpdate(i32, Vec<u16>, Vec<u16>, Vec<u16>),
+    Log(Vec<u16>),
+    Status(Vec<u16>),
     Finished,
-    /// Single item finished: (row_index, status, size_after, final_state)
-    ItemFinished(i32, String, String, crate::engine::wof::CompressionState),
-    /// Item analyzed (id, logical_size, disk_size, compression_state)
+    /// Single item finished: (row_index, status_wide, size_after_wide, final_state)
+    ItemFinished(i32, Vec<u16>, Vec<u16>, crate::engine::wof::CompressionState),
+    /// Item analyzed (id, logical_size, disk_size, compression_state, logical_str_wide, disk_str_wide)
+    /// Note: I'm adding pre-formatted strings here to avoid re-formatting in UI thread if possible, 
+    /// or just keeping numbers. Actually, let's keep numbers and format in UI? 
+    /// User said: "Modify format_size to return Vec<u16> ... Refactor UI Logic ... Identify where we perform UI updates".
+    /// If I format in worker, I send Vec<u16>.
+    /// The original was: BatchItemAnalyzed(u32, u64, u64, ...).
+    /// Let's keep numbers for BatchItemAnalyzed as they are stored in BatchItem? 
+    /// Wait, BatchItem has progress(u64,u64). It doesn't store size strings.
+    /// UI updates text.
+    /// Let's stick to the current definition for BatchItemAnalyzed but remember that window.rs formats them.
     BatchItemAnalyzed(u32, u64, u64, crate::engine::wof::CompressionState),
-    Error(String),
+    Error(Vec<u16>),
 }
 
 /// Action to perform on a batch item
@@ -185,7 +194,7 @@ pub struct AppState {
     pub theme: AppTheme,
     
     // Console
-    pub logs: Vec<String>,
+    pub logs: Vec<Vec<u16>>,
     pub console_hwnd: Option<HWND>,
     pub force_compress: bool,
     pub enable_force_stop: bool,
