@@ -181,7 +181,6 @@ jobs:
           $hash = (Get-FileHash "target/release/${{ env.BINARY_NAME }}.exe" -Algorithm SHA256).Hash
           $size = [math]::Round((Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length / 1KB, 2)
           
-          # VirusTotal status badge
           $vtLink = "${{ steps.virustotal.outputs.VT_LINK }}"
           $vtStatus = "${{ steps.virustotal.outputs.VT_STATUS }}"
           $vtMalicious = "${{ steps.virustotal.outputs.VT_MALICIOUS }}"
@@ -189,62 +188,57 @@ jobs:
           
           if ($vtStatus -eq "completed") {
             if ($vtMalicious -eq "0") {
-              $vtBadge = "✅ **Clean** - No threats detected ($vtTotal engines scanned)"
+              $vtBadge = "Clean - No threats detected ($vtTotal engines scanned)"
             } else {
-              $vtBadge = "⚠️ **$vtMalicious/$vtTotal detections** - May be false positive (UPX compression)"
+              $vtBadge = "$vtMalicious/$vtTotal detections - May be false positive (UPX compression)"
             }
           } else {
-            $vtBadge = "🔄 **Pending** - Analysis in progress"
+            $vtBadge = "Pending - Analysis in progress"
           }
           
-          $changelog = @"
-## 🔒 Security Verification
-
-| Check | Status |
-|-------|--------|
-| VirusTotal | $vtBadge |
-| **[View Full Report]($vtLink)** | SHA256-based permanent link |
-
-> **Note**: UPX-compressed binaries may trigger false positives in some antivirus engines. 
-> This is a known behavior and does not indicate actual malware.
-
----
-
-## Changes
-
-$commitMsg
-
-$commitBody
-
-## Build Information
-
-| Property | Value |
-|----------|-------|
-| Commit | ``${{ github.sha }}`` |
-| Author | $author |
-| Platform | Windows x64 |
-| Binary Size | $size KB (UPX compressed) |
-| Rust Toolchain | Stable |
-
-## Installation
-
-1. Download ``compactrs.exe`` from assets below
-2. Run as Administrator (required for WOF compression)
-3. Drag and drop files or folders to compress
-
-## Checksum
-
-```
-SHA256: $hash
-```
-
-**Verify integrity:**
-```powershell
-(Get-FileHash .\compactrs.exe -Algorithm SHA256).Hash -eq "$hash"
-```
-"@
+          $sb = [System.Text.StringBuilder]::new()
+          [void]$sb.AppendLine("## Security Verification")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("**VirusTotal Scan:** $vtBadge")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("[View Full VirusTotal Report]($vtLink)")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("> **Note**: UPX-compressed binaries may trigger false positives in some antivirus engines.")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("---")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("## Changes")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("$commitMsg")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("$commitBody")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("## Build Information")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("- **Commit:** ``${{ github.sha }}``")
+          [void]$sb.AppendLine("- **Author:** $author")
+          [void]$sb.AppendLine("- **Platform:** Windows x64")
+          [void]$sb.AppendLine("- **Binary Size:** $size KB (UPX compressed)")
+          [void]$sb.AppendLine("- **Rust Toolchain:** Stable")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("## Installation")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("1. Download ``compactrs.exe`` from assets below")
+          [void]$sb.AppendLine("2. Run as Administrator (required for WOF compression)")
+          [void]$sb.AppendLine("3. Drag and drop files or folders to compress")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("## Checksum")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("``````")
+          [void]$sb.AppendLine("SHA256: $hash")
+          [void]$sb.AppendLine("``````")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("**Verify integrity:**")
+          [void]$sb.AppendLine("``````powershell")
+          [void]$sb.AppendLine("(Get-FileHash .\compactrs.exe -Algorithm SHA256).Hash -eq `"$hash`"")
+          [void]$sb.AppendLine("``````")
           
-          $changelog | Out-File -FilePath changelog.md -Encoding utf8
+          $sb.ToString() | Out-File -FilePath changelog.md -Encoding utf8
         shell: pwsh
 
       - name: Create Release
