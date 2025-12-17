@@ -27,6 +27,21 @@ pub enum ProcessResult {
     Failed(String),
 }
 
+// ===== SINGLE-PASS SCAN STATISTICS =====
+
+/// Aggregated statistics from a single-pass directory traversal.
+/// Eliminates redundant I/O by gathering count, logical size, and optionally file paths
+/// in one traversal instead of multiple passes.
+#[derive(Default)]
+pub struct ScanStats {
+    /// Total number of files discovered
+    pub file_count: u64,
+    /// Total logical size (uncompressed) from WIN32_FIND_DATAW
+    pub logical_size: u64,
+    /// Optional collection of file paths (only populated if collect_paths=true)
+    pub file_paths: Vec<String>,
+}
+
 // ===== SKIP HEURISTICS =====
 
 /// Extensions that should be skipped during compression (already compressed or incompressible)
@@ -135,33 +150,41 @@ where
     }
 }
 
-/// Recursively walks a directory using Win32 FindFirstFileExW/FindNextFileW APIs.
-/// Collects file paths into a vector.
-fn walk_directory_win32_collect(path: &str, files: &mut Vec<String>, state: &Arc<AtomicU8>) {
-    walk_directory_generic(path, Some(state), &mut |full_path, is_dir, _| {
+/// Single-pass directory scanner that gathers all metadata in one traversal.
+/// 
+/// This eliminates redundant I/O by collecting count, logical size, and optionally
+/// file paths in a single pass instead of multiple separate walks.
+/// 
+/// # Arguments
+/// * `path` - Directory path to scan
+/// * `collect_paths` - If true, collects file paths into the result (allocates Vec)
+/// * `state` - Optional cancellation token for cooperative cancellation
+/// 
+/// # Returns
+/// `ScanStats` containing file count, logical size, and optionally file paths.
+/// Logical size is calculated directly from WIN32_FIND_DATAW to avoid extra fs::metadata calls.
+fn scan_directory_optimized(
+    path: &str,
+    collect_paths: bool,
+    state: Option<&Arc<AtomicU8>>,
+) -> ScanStats {
+    let mut stats = ScanStats::default();
+    
+    walk_directory_generic(path, state, &mut |full_path, is_dir, find_data| {
         if !is_dir {
-            files.push(full_path.to_string());
-        }
-    });
-}
-
-/// Counts files in a directory using Win32 traversal (for size calculations)
-fn walk_directory_win32_count(path: &str, counter: &mut u64) {
-    walk_directory_generic(path, None, &mut |_, is_dir, _| {
-        if !is_dir {
-            *counter += 1;
-        }
-    });
-}
-
-/// Accumulates logical size of all files using Win32 traversal
-fn walk_directory_win32_logical_size(path: &str, total: &mut u64) {
-    walk_directory_generic(path, None, &mut |_, is_dir, find_data| {
-        if !is_dir {
+            stats.file_count += 1;
+            // Calculate logical size directly from WIN32_FIND_DATAW
+            // Uses bitwise shift: (high << 32) | low for correct 64-bit size
             let size = ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
-            *total += size;
+            stats.logical_size += size;
+            
+            if collect_paths {
+                stats.file_paths.push(full_path.to_string());
+            }
         }
     });
+    
+    stats
 }
 
 /// Accumulates disk size of all files using Win32 traversal
@@ -196,11 +219,10 @@ fn walk_directory_win32_detect_algo(
 // ===== HELPER FUNCTIONS =====
 
 /// Calculate total LOGICAL size of all files in a folder (uncompressed content size)
-/// This counts ALL files including hidden and .gitignored files
+/// This counts ALL files including hidden and .gitignored files.
+/// Uses single-pass traversal for efficiency.
 pub fn calculate_folder_logical_size(path: &str) -> u64 {
-    let mut total = 0u64;
-    walk_directory_win32_logical_size(path, &mut total);
-    total
+    scan_directory_optimized(path, false, None).logical_size
 }
 
 /// Calculate total DISK size of all files in a folder (actual space used, respects compression)
@@ -420,16 +442,15 @@ pub fn batch_process_worker(
     // Track total files per row (row_index -> count)
     let mut row_totals: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
     
-    // First pass: count files for progress tracking
+    // Single-pass discovery: count files using optimized scanner
     let mut total_files = 0u64;
     for (path, _, row) in &items {
-        let mut row_count = 0u64;
-        
-        if std::path::Path::new(path).is_file() {
-            row_count = 1;
+        let row_count = if std::path::Path::new(path).is_file() {
+            1u64
         } else {
-            walk_directory_win32_count(path, &mut row_count);
-        }
+            // Single-pass scan: gets count (and logical_size is available if needed later)
+            scan_directory_optimized(path, false, None).file_count
+        };
         
         row_totals.insert(*row, row_count);
         total_files += row_count;
@@ -476,11 +497,10 @@ pub fn batch_process_worker(
                 // Single file
                 let _ = file_tx.send(FileTask { path, action, row_idx: row });
             } else {
-                // Directory - collect files then send
-                let mut files = Vec::new();
-                walk_directory_win32_collect(&path, &mut files, &state_producer);
+                // Directory - collect files using single-pass optimized scanner
+                let stats = scan_directory_optimized(&path, true, Some(&state_producer));
                 
-                for file_path in files {
+                for file_path in stats.file_paths {
                     if state_producer.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                         break;
                     }
@@ -621,11 +641,11 @@ pub fn single_item_worker(
     
     let is_single_file = std::path::Path::new(&path).is_file();
     
-    // Count files first
+    // Count files first using single-pass scanner
     if is_single_file {
         total_files = 1;
     } else {
-        walk_directory_win32_count(&path, &mut total_files);
+        total_files = scan_directory_optimized(&path, false, None).file_count;
     }
     
     let _ = tx.send(UiMessage::Progress(0, total_files));
@@ -689,9 +709,9 @@ pub fn single_item_worker(
         let success_atomic = Arc::new(AtomicU64::new(0));
         let failed_atomic = Arc::new(AtomicU64::new(0));
         
-        // Collect files first (required because we need to count them)
-        let mut files = Vec::new();
-        walk_directory_win32_collect(&path, &mut files, &state);
+        // Collect files using single-pass optimized scanner
+        let stats = scan_directory_optimized(&path, true, Some(&state));
+        let files = stats.file_paths;
         total_files = files.len() as u64;
         
         // Producer thread
