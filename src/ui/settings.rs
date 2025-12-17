@@ -12,9 +12,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::SetWindowTheme;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, HDC, DeleteObject, HGDIOBJ, InvalidateRect, FillRect};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, DeleteObject, HGDIOBJ, InvalidateRect};
 
-use windows::Win32::UI::WindowsAndMessaging::{WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect};
 use crate::ui::state::AppTheme;
 use crate::ui::builder::ButtonBuilder;
 use crate::ui::utils::get_window_state;
@@ -133,28 +132,14 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
     // Use centralized helper for state access
     let get_state = || get_window_state::<SettingsState>(hwnd);
 
+    // Centralized handler for theme-related messages
+    if let Some(st) = get_state() {
+        if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, st.is_dark) {
+            return result;
+        }
+    }
+
     match msg {
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
-            if let Some(st) = get_state() {
-                if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, st.is_dark) {
-                    return result;
-                }
-            }
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        },
-        WM_ERASEBKGND => {
-            if let Some(st) = get_state() {
-                let is_dark = st.is_dark;
-                let (brush, _, _) = crate::ui::theme::get_theme_colors(is_dark);
-                
-                let hdc = HDC(wparam.0 as *mut _);
-                let mut rc = windows::Win32::Foundation::RECT::default();
-                GetClientRect(hwnd, &mut rc);
-                FillRect(hdc, &rc, brush);
-                return LRESULT(1);
-            }
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        },
         WM_CREATE => {
             let createstruct = &*(lparam.0 as *const windows::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
             let state_ptr = createstruct.lpCreateParams as *mut SettingsState;

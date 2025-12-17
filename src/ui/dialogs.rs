@@ -8,11 +8,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, WM_TIMER, SetTimer, KillTimer,
     DestroyWindow, SetWindowTextW, GetDlgItem,
-    WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_ERASEBKGND, GetClientRect,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, FillRect, HDC};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
 
 
 use crate::ui::builder::ButtonBuilder;
@@ -96,6 +95,13 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
     // Use centralized helper for state access
     let get_state = || get_window_state::<DialogState>(hwnd);
 
+    // Centralized handler for theme-related messages
+    if let Some(st) = get_state() {
+        if let Some(result) = theme::handle_standard_colors(hwnd, msg, wparam, st.is_dark) {
+            return result;
+        }
+    }
+
     match msg {
         WM_CREATE => {
             let createstruct = &*(lparam.0 as *const windows::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
@@ -104,7 +110,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
             
             let instance = GetModuleHandleW(None).unwrap_or_default();
             
-            if let Some(st) = unsafe { state_ptr.as_ref() } {
+            if let Some(st) = state_ptr.as_ref() {
                 let is_dark = st.is_dark;
                 
                 // Apply Dark Mode to Title Bar using centralized helper
@@ -139,29 +145,6 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 SetTimer(Some(hwnd), TIMER_ID, 1000, None);
             }
             LRESULT(0)
-        },
-        
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
-            if let Some(st) = get_state() {
-                if let Some(result) = theme::handle_ctl_color(hwnd, wparam, st.is_dark) {
-                    return result;
-                }
-            }
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        },
-
-        WM_ERASEBKGND => {
-            if let Some(st) = get_state() {
-                let is_dark = st.is_dark;
-                let (brush, _, _) = theme::get_theme_colors(is_dark);
-                
-                let hdc = HDC(wparam.0 as *mut _);
-                let mut rc = windows::Win32::Foundation::RECT::default();
-                GetClientRect(hwnd, &mut rc);
-                FillRect(hdc, &rc, brush);
-                return LRESULT(1);
-            }
-            DefWindowProcW(hwnd, msg, wparam, lparam)
         },
         
         WM_TIMER => {

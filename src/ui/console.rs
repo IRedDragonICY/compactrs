@@ -1,16 +1,16 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF};
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, CreateSolidBrush, HDC, FillRect};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_COMMAND, WM_CTLCOLORBTN, WM_ERASEBKGND,
+    WM_CTLCOLOREDIT, WM_COMMAND,
     CreateWindowExW, DefWindowProcW, DestroyWindow, 
     LoadCursorW, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, SetWindowPos, SWP_NOZORDER,
     WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL,
-    SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW, GetClientRect,
+    SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW,
 };
 use windows::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -31,7 +31,6 @@ static mut EDIT_HWND: Option<HWND> = None;
 static mut BTN_COPY_HWND: Option<HWND> = None;
 static mut BTN_CLEAR_HWND: Option<HWND> = None;
 static mut IS_DARK_MODE: bool = false;
-static mut DARK_BRUSH: Option<HBRUSH> = None;
 
 pub unsafe fn show_console_window(_parent: HWND, initial_logs: &[String], is_dark: bool) {
     IS_DARK_MODE = is_dark;
@@ -121,6 +120,11 @@ pub unsafe fn close_console() {
 }
 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    // Centralized handler for theme-related messages
+    if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, IS_DARK_MODE) {
+        return result;
+    }
+
     match msg {
         WM_CREATE => {
              let instance = GetModuleHandleW(None).unwrap();
@@ -157,24 +161,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
              }
              
              LRESULT(0)
-        },
-        WM_ERASEBKGND => {
-            if IS_DARK_MODE {
-                let hdc = HDC(wparam.0 as *mut _);
-                let mut rc = windows::Win32::Foundation::RECT::default();
-                GetClientRect(hwnd, &mut rc);
-                
-                let brush = if let Some(b) = DARK_BRUSH {
-                    b
-                } else {
-                    let new_brush = CreateSolidBrush(COLORREF(0x001E1E1E));
-                    DARK_BRUSH = Some(new_brush);
-                    new_brush
-                };
-                FillRect(hdc, &rc, brush);
-                return LRESULT(1);
-            }
-            DefWindowProcW(hwnd, msg, wparam, lparam)
         },
         WM_SIZE => {
             let width = (lparam.0 & 0xFFFF) as i32;
@@ -235,24 +221,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
             LRESULT(0)
         },
-        WM_CTLCOLORBTN => {
-            if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
-                return result;
-            }
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        },
         WM_DESTROY => {
             CONSOLE_HWND = None;
             EDIT_HWND = None;
             BTN_COPY_HWND = None;
             BTN_CLEAR_HWND = None;
-            if let Some(brush) = DARK_BRUSH {
-                windows::Win32::Graphics::Gdi::DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
-                DARK_BRUSH = None;
-            }
             LRESULT(0)
         },
-        WM_CTLCOLOREDIT | WM_CTLCOLORSTATIC => {
+        WM_CTLCOLOREDIT => {
+            // Special handling for edit control colors (not covered by handle_standard_colors)
             if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, IS_DARK_MODE) {
                 return result;
             }
@@ -262,12 +239,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         0x8002 => {
             let new_is_dark = wparam.0 == 1;
             IS_DARK_MODE = new_is_dark;
-            
-            // Delete old brush if switching themes
-            if let Some(brush) = DARK_BRUSH {
-                windows::Win32::Graphics::Gdi::DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(brush.0));
-                DARK_BRUSH = None;
-            }
             
             // Update edit control theme for scrollbar
             if let Some(edit) = EDIT_HWND {

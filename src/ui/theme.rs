@@ -6,14 +6,15 @@
 
 use std::sync::OnceLock;
 use windows::core::{w, PCSTR};
-use windows::Win32::Foundation::{COLORREF, HWND, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontW, CreateSolidBrush, GetStockObject, 
+    CreateFontW, CreateSolidBrush, FillRect, GetStockObject, 
     HBRUSH, HDC, HFONT, SetBkMode, SetTextColor, TRANSPARENT, WHITE_BRUSH,
     DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS,
     CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FW_NORMAL,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_ERASEBKGND};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ};
 
@@ -266,21 +267,70 @@ pub unsafe fn apply_control_theme(h_ctrl: HWND, is_dark: bool) {
 
 /// Handle WM_CTLCOLORSTATIC and WM_CTLCOLORBTN messages.
 ///
-/// Returns Some(LRESULT) with brush if is_dark, None otherwise.
+/// Returns Some(LRESULT) with appropriate brush for both dark and light modes.
+/// In Light Mode, forces transparent text background to prevent gray highlights.
 pub unsafe fn handle_ctl_color(
     _hwnd: HWND,
     hdc_raw: WPARAM,
     is_dark: bool,
 ) -> Option<windows::Win32::Foundation::LRESULT> {
     unsafe {
+        let hdc = HDC(hdc_raw.0 as *mut _);
+        
         if is_dark {
+            // Dark Mode: Use dark background brush and white text
             let (brush, text_col, _) = get_theme_colors(true);
-            let hdc = HDC(hdc_raw.0 as *mut _);
             SetTextColor(hdc, text_col);
             SetBkMode(hdc, TRANSPARENT);
             Some(windows::Win32::Foundation::LRESULT(brush.0 as isize))
         } else {
-            None
+            // Light Mode: Force transparent text background to remove gray highlights
+            SetTextColor(hdc, COLORREF(0x00000000)); // Black text
+            SetBkMode(hdc, TRANSPARENT);             // Transparent background
+            
+            // Return White Brush to match window background
+            let brush = GetStockObject(WHITE_BRUSH);
+            Some(windows::Win32::Foundation::LRESULT(brush.0 as isize))
+        }
+    }
+}
+
+/// Centralized handler for standard background and control coloring messages.
+///
+/// Handles `WM_CTLCOLORSTATIC`, `WM_CTLCOLORBTN`, and `WM_ERASEBKGND` messages
+/// for consistent theming across all window procedures.
+///
+/// # Arguments
+/// * `hwnd` - The window handle
+/// * `msg` - The message being processed
+/// * `wparam` - The WPARAM containing HDC for painting
+/// * `is_dark` - Whether dark mode is active
+///
+/// # Returns
+/// `Some(LRESULT)` if the message was handled, `None` otherwise.
+///
+/// # Safety
+/// Calls Win32 GDI APIs.
+pub unsafe fn handle_standard_colors(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    is_dark: bool,
+) -> Option<windows::Win32::Foundation::LRESULT> {
+    unsafe {
+        match msg {
+            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+                handle_ctl_color(hwnd, wparam, is_dark)
+            }
+            WM_ERASEBKGND => {
+                let (brush, _, _) = get_theme_colors(is_dark);
+                let hdc = HDC(wparam.0 as *mut _);
+                let mut rc = RECT::default();
+                let _ = GetClientRect(hwnd, &mut rc);
+                FillRect(hdc, &rc, brush);
+                Some(windows::Win32::Foundation::LRESULT(1))
+            }
+            _ => None,
         }
     }
 }

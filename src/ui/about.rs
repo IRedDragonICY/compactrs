@@ -8,7 +8,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, DestroyWindow, 
     WM_NOTIFY, SetWindowLongPtrW, GWLP_USERDATA,
-    WM_CTLCOLORSTATIC, WM_ERASEBKGND, GetClientRect,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
 };
 use windows::Win32::Foundation::HINSTANCE;
@@ -20,7 +19,7 @@ use windows::Win32::UI::Controls::{
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows::Win32::Graphics::Gdi::{
-    HBRUSH, COLOR_WINDOW, HDC, DeleteObject, HGDIOBJ, FillRect,
+    HBRUSH, COLOR_WINDOW, DeleteObject, HGDIOBJ,
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT,
 };
@@ -113,28 +112,14 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
         // Use centralized helper for state access
         let get_state = || get_window_state::<AboutState>(hwnd);
 
+        // Centralized handler for theme-related messages
+        if let Some(st) = get_state() {
+            if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, st.is_dark) {
+                return result;
+            }
+        }
+
         match msg {
-            WM_CTLCOLORSTATIC => {
-                if let Some(st) = get_state() {
-                    if let Some(result) = crate::ui::theme::handle_ctl_color(hwnd, wparam, st.is_dark) {
-                        return result;
-                    }
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            },
-            WM_ERASEBKGND => {
-                if let Some(st) = get_state() {
-                    let is_dark = st.is_dark;
-                    let (brush, _, _) = crate::ui::theme::get_theme_colors(is_dark);
-                    
-                    let hdc = HDC(wparam.0 as *mut _);
-                    let mut rc = windows::Win32::Foundation::RECT::default();
-                    GetClientRect(hwnd, &mut rc);
-                    FillRect(hdc, &rc, brush);
-                    return LRESULT(1);
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            },
             // WM_APP + 2: Theme change broadcast from Settings
             0x8002 => {
                 if let Some(st) = get_state() {

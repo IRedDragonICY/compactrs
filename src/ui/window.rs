@@ -2,14 +2,14 @@
 use windows::core::{w, Result, PCWSTR};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::Graphics::Gdi::{FillRect, InvalidateRect, HDC};
+use windows::Win32::Graphics::Gdi::InvalidateRect;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WM_TIMER, SetTimer,
-    MB_ICONINFORMATION, WM_NOTIFY, BM_GETCHECK, WM_ERASEBKGND, GetClientRect, GetWindowRect,
+    MB_ICONINFORMATION, WM_NOTIFY, BM_GETCHECK, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
 };
 use windows::Win32::UI::Shell::{
@@ -133,6 +133,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         // Use the centralized helper for state access
         let get_state = || get_window_state::<AppState>(hwnd);
 
+        // Centralized handler for theme-related messages
+        let is_dark = get_state()
+            .map(|st| theme::resolve_mode(st.theme))
+            .unwrap_or_else(|| theme::is_system_dark_mode());
+        if let Some(result) = theme::handle_standard_colors(hwnd, msg, wparam, is_dark) {
+            return result;
+        }
+
         match msg {
             WM_CREATE => {
                 let mut state = Box::new(AppState::new());
@@ -222,23 +230,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     InvalidateRect(Some(hwnd), None, true);
                 }
 
-                LRESULT(0)
-            }
-            
-            // WM_ERASEBKGND - Paint dark background when in dark mode
-            WM_ERASEBKGND => {
-                let hdc = HDC(wparam.0 as *mut _);
-                let mut rect = windows::Win32::Foundation::RECT::default();
-                if GetClientRect(hwnd, &mut rect).is_ok() {
-                    let is_dark = if let Some(st) = get_state() {
-                        theme::resolve_mode(st.theme)
-                    } else {
-                        theme::is_system_dark_mode()
-                    };
-                    let (brush, _, _) = theme::get_theme_colors(is_dark);
-                    FillRect(hdc, &rect, brush);
-                    return LRESULT(1);
-                }
                 LRESULT(0)
             }
             
@@ -902,22 +893,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 
                 LRESULT(0)
             }
-            
-            // WM_CTLCOLORSTATIC - handle static text colors
-            0x0138 => { // WM_CTLCOLORSTATIC
-                let is_dark = if let Some(st) = get_state() {
-                    theme::resolve_mode(st.theme)
-                } else {
-                    theme::is_system_dark_mode()
-                };
-                if let Some(result) = theme::handle_ctl_color(hwnd, wparam, is_dark) {
-                    return result;
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            },
 
-
-            
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
