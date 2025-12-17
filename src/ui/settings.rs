@@ -29,6 +29,7 @@ const IDC_RADIO_LIGHT: u16 = 2004;
 const IDC_BTN_OK: u16 = 2005;
 const IDC_BTN_CANCEL: u16 = 2006;
 const IDC_CHK_FORCE_STOP: u16 = 2007;
+const IDC_CHK_CONTEXT_MENU: u16 = 2008;
 
 struct SettingsState {
     theme: AppTheme,
@@ -36,6 +37,7 @@ struct SettingsState {
     is_dark: bool,
     dark_brush: Option<HBRUSH>,
     enable_force_stop: bool, // Track checkbox state
+    enable_context_menu: bool, // Track context menu checkbox state
 }
 
 impl Drop for SettingsState {
@@ -49,7 +51,7 @@ impl Drop for SettingsState {
 }
 
 // Main settings modal function with proper data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool) -> (Option<AppTheme>, bool) {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool) -> (Option<AppTheme>, bool, bool) {
     unsafe {
         let instance = GetModuleHandleW(None).unwrap_or_default();
         
@@ -85,7 +87,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         let p_width = rect.right - rect.left;
         let p_height = rect.bottom - rect.top;
         let width = 300;
-        let height = 300;
+        let height = 330;
         let x = rect.left + (p_width - width) / 2;
         let y = rect.top + (p_height - height) / 2;
 
@@ -95,6 +97,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
             is_dark,
             dark_brush: None,
             enable_force_stop,
+            enable_context_menu,
         };
 
         let _hwnd = CreateWindowExW(
@@ -123,7 +126,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         
         // EnableWindow(parent, true);
         
-        (state.result, state.enable_force_stop)
+        (state.result, state.enable_force_stop, state.enable_context_menu)
     }
 }
 
@@ -214,9 +217,21 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 }
             }
 
+            // Checkbox: Enable Explorer Context Menu
+            let enable_ctx = if let Some(st) = state_ptr.as_ref() { st.enable_context_menu } else { false };
+            let chk_ctx = crate::ui::controls::create_checkbox(hwnd, w!("Enable Explorer Context Menu"), 30, 190, 240, 25, IDC_CHK_CONTEXT_MENU);
+            if enable_ctx {
+                 SendMessageW(chk_ctx, BM_SETCHECK, Some(WPARAM(1)), None);
+            }
+            if let Some(st) = state_ptr.as_ref() {
+                if st.is_dark {
+                     let _ = SetWindowTheme(chk_ctx, w!(""), w!(""));
+                }
+            }
+
             // Buttons
             let _close_btn = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
-                .text("Close").pos(110, 200).size(80, 25).dark_mode(is_dark_mode).build();
+                .text("Close").pos(110, 235).size(80, 25).dark_mode(is_dark_mode).build();
 
             LRESULT(0)
         },
@@ -261,7 +276,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                             
                             // 5. Update controls theme
                             use windows::Win32::UI::WindowsAndMessaging::GetDlgItem;
-                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_BTN_CANCEL];
+                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_BTN_CANCEL];
                             
                             for &ctrl_id in &controls {
                                 if let Ok(h_ctl) = GetDlgItem(Some(hwnd), ctrl_id.into()) {
@@ -321,6 +336,42 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                if let Ok(parent) = GetParent(hwnd) {
                                    let val = if checked { 1 } else { 0 };
                                    SendMessageW(parent, 0x8000 + 3, Some(WPARAM(val)), None);
+                               }
+                          }
+                      }
+                  },
+                  IDC_CHK_CONTEXT_MENU => {
+                      if (code as u32) == BN_CLICKED {
+                          if let Some(st) = get_state() {
+                               let mut checked = false;
+                               if let Ok(h_ctl) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), IDC_CHK_CONTEXT_MENU.into()) {
+                                   checked = SendMessageW(h_ctl, windows::Win32::UI::WindowsAndMessaging::BM_GETCHECK, None, None) == LRESULT(1);
+                                   st.enable_context_menu = checked;
+                               }
+                               
+                               // Perform registry operation
+                               if checked {
+                                   if let Err(_e) = crate::registry::register_context_menu() {
+                                       // Show error, revert checkbox
+                                       windows::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                                           Some(hwnd),
+                                           windows::core::w!("Failed to register context menu. Run as Administrator."),
+                                           windows::core::w!("Error"),
+                                           windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR | windows::Win32::UI::WindowsAndMessaging::MB_OK
+                                       );
+                                       st.enable_context_menu = false;
+                                       if let Ok(h_ctl) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), IDC_CHK_CONTEXT_MENU.into()) {
+                                           SendMessageW(h_ctl, windows::Win32::UI::WindowsAndMessaging::BM_SETCHECK, Some(WPARAM(0)), None);
+                                       }
+                                   }
+                               } else {
+                                   let _ = crate::registry::unregister_context_menu();
+                               }
+                               
+                               // Notify Parent immediately (WM_APP + 4)
+                               if let Ok(parent) = GetParent(hwnd) {
+                                   let val = if st.enable_context_menu { 1 } else { 0 };
+                                   SendMessageW(parent, 0x8000 + 5, Some(WPARAM(val)), None);
                                }
                           }
                       }

@@ -135,7 +135,7 @@ impl ActionPanel {
 }
 
 impl Component for ActionPanel {
-    unsafe fn create(&mut self, parent: HWND) -> Result<()> {
+    unsafe fn create(&mut self, parent: HWND) -> Result<()> { unsafe {
         // Initial positions (will be updated in on_resize)
         let btn_h = 32;
         let btn_y = 460;
@@ -214,7 +214,7 @@ impl Component for ActionPanel {
             .build();
 
         Ok(())
-    }
+    }}
 
     fn hwnd(&self) -> Option<HWND> {
         // Return Process button as the "main" HWND (most important action)

@@ -241,6 +241,83 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     }
                     InvalidateRect(Some(hwnd), None, true);
                 }
+                
+                // Process startup items from CLI arguments
+                let startup_items = crate::get_startup_items();
+                let has_startup_items = !startup_items.is_empty();
+                if has_startup_items {
+                    if let Some(st) = get_state() {
+                        for startup_item in startup_items {
+                            // Check if already added
+                            let already_exists = st.batch_items.iter().any(|item| item.path == startup_item.path);
+                            if !already_exists {
+                                let item_id = st.add_batch_item(startup_item.path.clone());
+                                
+                                // Set algorithm and action
+                                if let Some(batch_item) = st.get_batch_item_mut(item_id) {
+                                    batch_item.algorithm = startup_item.algorithm;
+                                    batch_item.action = startup_item.action;
+                                }
+                                
+                                // Calculate sizes in background
+                                let logical_size = calculate_path_logical_size(&startup_item.path);
+                                let disk_size = calculate_path_disk_size(&startup_item.path);
+                                let detected_algo = detect_path_algorithm(&startup_item.path);
+                                let logical_str = format_size(logical_size);
+                                let disk_str = format_size(disk_size);
+                                
+                                if let Some(ctrls) = &st.controls {
+                                    if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
+                                        ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, detected_algo);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Auto-start processing if launched from context menu
+                if has_startup_items {
+                    if let Some(st) = get_state() {
+                        if !st.batch_items.is_empty() {
+                            // Get algorithm from first startup item
+                            let startup_items = crate::get_startup_items();
+                            let algo = startup_items.first().map(|i| i.algorithm).unwrap_or(WofAlgorithm::Xpress8K);
+                            
+                            if let Some(ctrls) = &st.controls {
+                                // Update status
+                                let status_msg = format!("Processing {} item(s)...", st.batch_items.len());
+                                let wstr = windows::core::HSTRING::from(&status_msg);
+                                SetWindowTextW(ctrls.status_bar.label_hwnd(), PCWSTR::from_raw(wstr.as_ptr()));
+                                
+                                // Enable cancel button
+                                EnableWindow(ctrls.action_panel.cancel_hwnd(), true);
+                                
+                                // Set taskbar progress
+                                if let Some(tb) = &st.taskbar {
+                                    tb.set_state(TaskbarState::Normal);
+                                }
+                            }
+                            
+                            // Start processing
+                            let tx = st.tx.clone();
+                            let state = st.global_state.clone();
+                            state.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                            
+                            // Clone items with their individual actions and algorithms
+                            let items: Vec<_> = st.batch_items.iter().enumerate().map(|(idx, item)| {
+                                (item.path.clone(), item.action, idx)
+                            }).collect();
+                            
+                            let force = st.force_compress;
+                            let main_hwnd_usize = hwnd.0 as usize;
+
+                            thread::spawn(move || {
+                                batch_process_worker(items, algo, tx, state, force, main_hwnd_usize);
+                            });
+                        }
+                    }
+                }
 
                 LRESULT(0)
             }
@@ -484,8 +561,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         if let Some(st) = get_state() {
                             let current_theme = st.theme;
                             let is_dark = theme::resolve_mode(st.theme);
+                            let enable_ctx = st.config.enable_context_menu;
                             // Modal will block until closed
-                            let (new_theme, new_force) = show_settings_modal(hwnd, current_theme, is_dark, st.enable_force_stop);
+                            let (new_theme, new_force, new_ctx) = show_settings_modal(hwnd, current_theme, is_dark, st.enable_force_stop, enable_ctx);
                             if let Some(t) = new_theme {
                                 st.theme = t;
                                 let new_is_dark = theme::resolve_mode(st.theme);
@@ -496,6 +574,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 InvalidateRect(Some(hwnd), None, true);
                             }
                             st.enable_force_stop = new_force;
+                            st.config.enable_context_menu = new_ctx;
                         }
                     },
                     
