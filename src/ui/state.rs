@@ -110,7 +110,10 @@ pub struct BatchItem {
     pub action: BatchAction,        // Compress or Decompress
     pub status: BatchStatus,        // Pending, Processing, Complete, Error
     pub progress: (u64, u64),       // (current, total) files
-    pub state_flag: Option<Arc<AtomicU8>>, // Processing state (0=Idle, 1=Running, 2=Paused, 3=Stopped)
+    pub state_flag: Option<Arc<AtomicU8>>, // Processing state
+    // Added for sorting
+    pub logical_size: u64,
+    pub disk_size: u64,
 }
 
 impl BatchItem {
@@ -123,6 +126,8 @@ impl BatchItem {
             status: BatchStatus::Pending,
             progress: (0, 0),
             state_flag: None,
+            logical_size: 0,
+            disk_size: 0,
         }
     }
 }
@@ -199,6 +204,10 @@ pub struct AppState {
     pub force_compress: bool,
     pub enable_force_stop: bool,
     pub taskbar: Option<super::taskbar::TaskbarProgress>,
+    
+    // Sorting state
+    pub sort_column: i32,
+    pub sort_ascending: bool,
 }
 
 impl AppState {
@@ -219,6 +228,8 @@ impl AppState {
             force_compress: config.force_compress,
             enable_force_stop: config.enable_force_stop,
             taskbar: None,
+            sort_column: -1,
+            sort_ascending: true,
         }
     }
     

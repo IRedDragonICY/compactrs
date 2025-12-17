@@ -18,6 +18,7 @@ use windows_sys::Win32::UI::Controls::{
     LVCOLUMNW, LVIF_PARAM, LVIF_TEXT, LVITEMW, LVNI_SELECTED, LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, NM_CUSTOMDRAW, NMCUSTOMDRAW,
     CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
+    LVM_GETITEMCOUNT, LVM_SETITEMSTATE, LVIS_SELECTED, LVM_SORTITEMS,
 };
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 
@@ -379,6 +380,40 @@ impl FileListView {
     /// Gets the selection count.
     pub fn get_selection_count(&self) -> usize {
         self.get_selected_indices().len()
+    }
+
+    /// Gets total item count.
+    pub fn get_item_count(&self) -> i32 {
+        unsafe { SendMessageW(self.hwnd, LVM_GETITEMCOUNT, 0, 0) as i32 }
+    }
+
+    /// Sets the selection state for an item.
+    ///
+    /// # Arguments
+    /// * `index` - Row index
+    /// * `selected` - True to select, False to deselect
+    pub fn set_selected(&self, index: i32, selected: bool) {
+        let state = if selected { LVIS_SELECTED } else { 0 };
+        let mask = LVIS_SELECTED;
+        let mut item = LVITEMW {
+            state,
+            stateMask: mask,
+            ..Default::default()
+        };
+        unsafe {
+            SendMessageW(self.hwnd, LVM_SETITEMSTATE, index as usize, &mut item as *mut _ as isize);
+        }
+    }
+
+    /// Sorts the items in the ListView.
+    ///
+    /// # Arguments
+    /// * `callback` - The comparison function.
+    /// * `context` - User-defined value passed to the callback (pointer to AppState).
+    pub fn sort_items(&self, callback: unsafe extern "system" fn(isize, isize, isize) -> i32, context: isize) {
+        unsafe {
+            SendMessageW(self.hwnd, LVM_SORTITEMS, context as usize, callback as isize);
+        }
     }
 
     /// Helper to convert WofAlgorithm to string.

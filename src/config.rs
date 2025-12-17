@@ -9,6 +9,8 @@ use crate::ui::state::AppTheme;
 #[repr(C)] 
 #[derive(Clone, Copy, Debug)]
 pub struct AppConfig {
+    pub magic: u32,   // 0x43505253 ("CPRS")
+    pub version: u32, // 1
     pub theme: AppTheme,
     pub default_algo: WofAlgorithm,
     pub force_compress: bool,
@@ -24,6 +26,8 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            magic: 0x43505253,
+            version: 1,
             theme: AppTheme::System,
             default_algo: WofAlgorithm::Xpress8K, // Default to XPRESS8K
             force_compress: false,
@@ -51,7 +55,13 @@ impl AppConfig {
             let mut buffer = [0u8; std::mem::size_of::<AppConfig>()];
             if file.read_exact(&mut buffer).is_ok() {
                 // Safety: AppConfig is repr(C) and contains only Copy types.
-                unsafe { return std::mem::transmute(buffer); }
+                unsafe { 
+                    let config: AppConfig = std::mem::transmute(buffer);
+                    // Validate magic and version
+                    if config.magic == 0x43505253 && config.version == 1 {
+                        return config;
+                    }
+                }
             }
         }
         Self::default()
