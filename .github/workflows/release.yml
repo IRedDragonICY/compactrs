@@ -83,33 +83,15 @@ jobs:
             exit 0
           }
           
-          # Upload to VirusTotal (fire-and-forget, no waiting)
-          try {
-            $boundary = [System.Guid]::NewGuid().ToString()
-            $fileBytes = [System.IO.File]::ReadAllBytes($filePath)
-            $fileName = [System.IO.Path]::GetFileName($filePath)
-            
-            $bodyLines = @(
-              "--$boundary",
-              "Content-Disposition: form-data; name=`"file`"; filename=`"$fileName`"",
-              "Content-Type: application/octet-stream",
-              "",
-              [System.Text.Encoding]::GetEncoding("ISO-8859-1").GetString($fileBytes),
-              "--$boundary--"
-            )
-            $body = $bodyLines -join "`r`n"
-            
-            $response = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/files" `
-              -Method POST `
-              -Headers @{ "x-apikey" = $vtApiKey } `
-              -ContentType "multipart/form-data; boundary=$boundary" `
-              -Body $body
-            
-            Write-Host "Uploaded to VirusTotal. Analysis ID: $($response.data.id)"
-            Write-Host "Results will be available at: $vtPermalink"
-          } catch {
-            Write-Host "::warning::VirusTotal upload failed: $_ - Link is still valid for manual upload."
-          }
+          # Upload using curl (more reliable for binary files)
+          Write-Host "Uploading to VirusTotal..."
+          $result = curl.exe --silent --show-error `
+            -X POST "https://www.virustotal.com/api/v3/files" `
+            -H "x-apikey: $vtApiKey" `
+            -F "file=@$filePath"
+          
+          Write-Host "Response: $result"
+          Write-Host "Results will be available at: $vtPermalink"
         shell: pwsh
 
       - name: Get version and changelog
