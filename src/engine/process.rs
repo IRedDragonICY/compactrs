@@ -1,11 +1,10 @@
-use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle};
-use windows::Win32::System::RestartManager::{
+use crate::utils::to_wstring;
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA};
+use windows_sys::Win32::System::RestartManager::{
     RmStartSession, RmRegisterResources, RmGetList, RmEndSession,
     CCH_RM_SESSION_KEY, RM_PROCESS_INFO, RmRebootReasonNone,
 };
-use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-use crate::ui::utils::ToWide;
+use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
 
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {
@@ -19,17 +18,26 @@ pub fn get_file_blockers(path: &str) -> Vec<ProcessInfo> {
         let mut session_handle: u32 = 0;
         let mut session_key = [0u16; CCH_RM_SESSION_KEY as usize];
         
-        let res = RmStartSession(&mut session_handle, Some(0), PWSTR(session_key.as_mut_ptr()));
-        if res.0 != 0 {
+        let res = RmStartSession(&mut session_handle, 0, session_key.as_mut_ptr());
+        if res != 0 {
             return Vec::new();
         }
 
-        let path_wide = path.to_wide();
-        let resources = [PCWSTR(path_wide.as_ptr())];
+        let path_wide = to_wstring(path);
+        let resources = [path_wide.as_ptr()];
         
         // Register connection to the file
-        let res = RmRegisterResources(session_handle, Some(&resources), None, None);
-        if res.is_err() {
+        let res = RmRegisterResources(
+             session_handle, 
+             1, 
+             resources.as_ptr(), 
+             0, 
+             std::ptr::null(), 
+             0, 
+             std::ptr::null()
+        );
+        
+        if res != 0 {
             let _ = RmEndSession(session_handle);
             return Vec::new();
         }
@@ -40,29 +48,46 @@ pub fn get_file_blockers(path: &str) -> Vec<ProcessInfo> {
         let mut reason = RmRebootReasonNone;
         
         // First call to get count
-        let _ = RmGetList(session_handle, &mut n_proc_info_needed, &mut n_proc_info, None, &mut reason as *mut _ as *mut u32);
+        let res = RmGetList(
+            session_handle,
+            &mut n_proc_info_needed,
+            &mut n_proc_info,
+            std::ptr::null_mut(),
+            &mut reason // windows-sys defines this as *mut u32 sometimes or enum? 
+               as *mut _ as *mut u32
+        );
+        
+        if res != ERROR_MORE_DATA && res != 0 {
+             let _ = RmEndSession(session_handle);
+             return Vec::new();
+        }
         
         if n_proc_info_needed == 0 {
             let _ = RmEndSession(session_handle);
             return Vec::new();
         }
 
-        let mut process_info = vec![RM_PROCESS_INFO::default(); n_proc_info_needed as usize];
+        // Allocate buffer
+        let mut process_info = vec![std::mem::zeroed::<RM_PROCESS_INFO>(); n_proc_info_needed as usize];
         n_proc_info = n_proc_info_needed;
         
-        let res = RmGetList(session_handle, &mut n_proc_info_needed, &mut n_proc_info, Some(process_info.as_mut_ptr()), &mut reason as *mut _ as *mut u32);
+        let res = RmGetList(
+            session_handle,
+            &mut n_proc_info_needed,
+            &mut n_proc_info,
+            process_info.as_mut_ptr(),
+            &mut reason as *mut _ as *mut u32
+        );
         
         let _ = RmEndSession(session_handle);
 
-        if res.is_err() {
+        if res != 0 {
             return Vec::new();
         }
 
         let mut results = Vec::new();
         for i in 0..n_proc_info as usize {
             let p = &process_info[i];
-            // ApplicationType 0 = Unknown, 1 = MainWindow, 2 = OtherWindow, 3 = Service, 4 = Explorer
-            // We usually care about all of them
             
             let pid = p.Process.dwProcessId;
             let name_arr = p.strAppName; // [u16; 256]
@@ -77,15 +102,22 @@ pub fn get_file_blockers(path: &str) -> Vec<ProcessInfo> {
 }
 
 /// Kill a process by PID
-pub fn kill_process(pid: u32) -> Result<(), windows::core::Error> {
+pub fn kill_process(pid: u32) -> Result<(), String> {
     unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, false, pid)?;
-        if !handle.is_invalid() {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        // Correctly handling null pointer check for handle
+        if handle != std::ptr::null_mut() {
             let res = TerminateProcess(handle, 1);
-            let _ = CloseHandle(handle);
-            res
+            CloseHandle(handle);
+            if res != 0 {
+                Ok(())
+            } else {
+                Err("TerminateProcess failed".to_string())
+            }
         } else {
-            Ok(()) // Already gone?
+            // Check if process basically doesn't exist?
+            // GetLastError could tell access denied vs not found
+            Ok(()) 
         }
     }
 }

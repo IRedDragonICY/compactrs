@@ -1,4 +1,4 @@
-use windows::Win32::Foundation::HWND;
+use windows_sys::Win32::Foundation::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicU8};
 use crate::engine::wof::WofAlgorithm;
@@ -138,9 +138,9 @@ impl Controls {
     ///
     /// # Safety
     /// Calls Win32 APIs for theme updates.
-    pub unsafe fn update_theme(&mut self, is_dark: bool, main_hwnd: windows::Win32::Foundation::HWND) {
-        use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+    pub unsafe fn update_theme(&mut self, is_dark: bool, main_hwnd: HWND) {
+        use windows_sys::Win32::Foundation::{LPARAM, WPARAM};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
         
         unsafe {
             // Get the cached app font
@@ -158,9 +158,9 @@ impl Controls {
             self.header_panel.set_font(hfont);
             
             // Set font on ListView
-            let wparam = WPARAM(hfont.0 as usize);
-            let lparam = LPARAM(1);
-            SendMessageW(self.file_list.hwnd(), WM_SETFONT, Some(wparam), Some(lparam));
+            let wparam = hfont as WPARAM;
+            let lparam = 1 as LPARAM;
+            SendMessageW(self.file_list.hwnd(), WM_SETFONT, wparam, lparam);
             
             // Apply subclass for header theming
             self.file_list.apply_subclass(main_hwnd);
@@ -170,9 +170,6 @@ impl Controls {
 
 /// Application state
 pub struct AppState {
-    // Legacy - single folder (will be phased out)
-
-    
     // New batch processing state
     pub batch_items: Vec<BatchItem>,
     pub next_item_id: u32,
@@ -200,7 +197,6 @@ impl AppState {
         let (tx, rx) = channel();
         let config = AppConfig::load();
         Self {
-
             batch_items: Vec::new(),
             next_item_id: 1,
             controls: None,

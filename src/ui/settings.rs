@@ -1,6 +1,9 @@
-use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{
+#![allow(unsafe_op_in_unsafe_fn)]
+use crate::ui::state::AppTheme;
+use crate::ui::builder::ButtonBuilder;
+use crate::ui::utils::{get_window_state, to_wstring};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
     WS_VISIBLE, WM_CREATE, WM_COMMAND, SetWindowLongPtrW, GWLP_USERDATA,
@@ -8,18 +11,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     BS_AUTORADIOBUTTON, BM_SETCHECK,
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
-    FindWindowW,
+    FindWindowW, HMENU, CREATESTRUCTW,
+    BM_GETCHECK, MessageBoxW, MB_ICONERROR, MB_OK,
+    GetWindowRect,
 };
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::SetWindowTheme;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, DeleteObject, HGDIOBJ, InvalidateRect};
+use windows_sys::Win32::Foundation::RECT;
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Controls::SetWindowTheme;
+use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, DeleteObject, InvalidateRect};
 
-use crate::ui::state::AppTheme;
-use crate::ui::builder::ButtonBuilder;
-use crate::ui::utils::get_window_state;
-
-const SETTINGS_CLASS_NAME: PCWSTR = w!("CompactRS_Settings");
-const SETTINGS_TITLE: PCWSTR = w!("Settings");
+const SETTINGS_TITLE: &str = "Settings";
 
 // Control IDs
 const IDC_GRP_THEME: u16 = 2001;
@@ -44,7 +45,7 @@ impl Drop for SettingsState {
     fn drop(&mut self) {
         if let Some(brush) = self.dark_brush {
             unsafe {
-                DeleteObject(HGDIOBJ(brush.0));
+                DeleteObject(brush);
             }
         }
     }
@@ -52,86 +53,76 @@ impl Drop for SettingsState {
 
 // Main settings modal function with proper data passing
 pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool) -> (Option<AppTheme>, bool, bool) {
-    unsafe {
-        let instance = GetModuleHandleW(None).unwrap_or_default();
-        
-        // Load App Icon using centralized helper
-        let icon = crate::ui::utils::load_app_icon(instance.into());
-        
-        let wc = WNDCLASSW {
-            style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(settings_wnd_proc),
-            hInstance: instance.into(),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hIcon: icon,
-            lpszClassName: SETTINGS_CLASS_NAME,
-            hbrBackground: HBRUSH(if is_dark {
-                // Use a dark brush initially if possible, but standard is COLOR_WINDOW
-                // We'll rely on WM_CTLCOLORSTATIC to paint background
-                // But for the main window background (if any exposed), we want dark.
-                // 0x1E1E1E is 30,30,30. 
-                // Creating a global brush just for class registration is tricky without leaks.
-                // Let's stick to COLOR_WINDOW and rely on DWM/Painting.
-                // Actually, for pure dark mode, we often want a dark background class brush.
-                // But standard practice is handle WM_ERASEBKGND or WM_CTLCOLOR.
-                COLOR_WINDOW.0 + 1
-            } else {
-                 COLOR_WINDOW.0 + 1
-            } as isize as *mut _),
-            ..Default::default()
-        };
-        RegisterClassW(&wc);
+    let instance = GetModuleHandleW(std::ptr::null());
+    
+    // Load App Icon using centralized helper
+    let icon = crate::ui::utils::load_app_icon(instance);
+    
+    let class_name = to_wstring("CompactRS_Settings");
+    let title = to_wstring(SETTINGS_TITLE);
+    
+    let wc = WNDCLASSW {
+        style: CS_HREDRAW | CS_VREDRAW,
+        lpfnWndProc: Some(settings_wnd_proc),
+        hInstance: instance,
+        hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
+        hIcon: icon,
+        lpszClassName: class_name.as_ptr(),
+        hbrBackground: if is_dark {
+            // Use a dark brush initially if possible, but standard is COLOR_WINDOW
+            // We'll rely on WM_CTLCOLORSTATIC to paint background
+            (COLOR_WINDOW + 1) as HBRUSH 
+        } else {
+             (COLOR_WINDOW + 1) as HBRUSH
+        },
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        lpszMenuName: std::ptr::null(),
+    };
+    RegisterClassW(&wc);
 
-        let mut rect = windows::Win32::Foundation::RECT::default();
-        windows::Win32::UI::WindowsAndMessaging::GetWindowRect(parent, &mut rect).unwrap_or_default();
-        let p_width = rect.right - rect.left;
-        let p_height = rect.bottom - rect.top;
-        let width = 300;
-        let height = 330;
-        let x = rect.left + (p_width - width) / 2;
-        let y = rect.top + (p_height - height) / 2;
+    let mut rect: RECT = std::mem::zeroed();
+    GetWindowRect(parent, &mut rect);
+    let p_width = rect.right - rect.left;
+    let p_height = rect.bottom - rect.top;
+    let width = 300;
+    let height = 330;
+    let x = rect.left + (p_width - width) / 2;
+    let y = rect.top + (p_height - height) / 2;
 
-        let mut state = SettingsState {
-            theme: current_theme,
-            result: None,
-            is_dark,
-            dark_brush: None,
-            enable_force_stop,
-            enable_context_menu,
-        };
+    let mut state = SettingsState {
+        theme: current_theme,
+        result: None,
+        is_dark,
+        dark_brush: None,
+        enable_force_stop,
+        enable_context_menu,
+    };
 
-        let _hwnd = CreateWindowExW(
-            Default::default(),
-            SETTINGS_CLASS_NAME,
-            SETTINGS_TITLE,
-            WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-            x, y, width, height,
-            Some(parent),
-            None,
-            Some(instance.into()),
-            Some(&mut state as *mut _ as *mut _),
-        ).unwrap_or_default();
+    let _hwnd = CreateWindowExW(
+        0,
+        class_name.as_ptr(),
+        title.as_ptr(),
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        x, y, width, height,
+        parent,
+        std::ptr::null_mut(),
+        instance,
+        &mut state as *mut _ as *mut std::ffi::c_void,
+    );
 
-        // Non-modal: DON'T disable parent window
-        // EnableWindow(parent, false);
-        
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        
-        // Non-modal: DON'T re-enable parent window
-        // EnableWindow(parent, true);
-        
-        // EnableWindow(parent, true);
-        
-        (state.result, state.enable_force_stop, state.enable_context_menu)
+    // Message loop
+    let mut msg: MSG = std::mem::zeroed();
+    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
+    
+    (state.result, state.enable_force_stop, state.enable_context_menu)
 }
 
 
-unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
+unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     // Use centralized helper for state access
     let get_state = || get_window_state::<SettingsState>(hwnd);
 
@@ -144,101 +135,98 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
 
     match msg {
         WM_CREATE => {
-            let createstruct = &*(lparam.0 as *const windows::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
+            let createstruct = &*(lparam as *const CREATESTRUCTW);
             let state_ptr = createstruct.lpCreateParams as *mut SettingsState;
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
             
             // Apply DWM title bar color using centralized helper
-            let is_dark = state_ptr.as_ref().map(|st| st.is_dark).unwrap_or(false);
+            let is_dark = (*state_ptr).is_dark;
             crate::ui::theme::set_window_frame_theme(hwnd, is_dark);
             
-            let instance = GetModuleHandleW(None).unwrap_or_default();
+            let instance = GetModuleHandleW(std::ptr::null());
+            let btn_cls = to_wstring("BUTTON");
+            let grp_text = to_wstring("App Theme");
             
             // Group Box
             let grp = CreateWindowExW(
-                Default::default(),
-                w!("BUTTON"),
-                w!("App Theme"),
-                windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | BS_GROUPBOX as u32),
+                0,
+                btn_cls.as_ptr(),
+                grp_text.as_ptr(),
+                WS_VISIBLE | WS_CHILD | BS_GROUPBOX as u32,
                 10, 10, 260, 140,
-                Some(hwnd),
-                Some(windows::Win32::UI::WindowsAndMessaging::HMENU(IDC_GRP_THEME as isize as *mut _)),
-                Some(instance.into()),
-                None
-            ).unwrap_or_default();
+                hwnd,
+                IDC_GRP_THEME as isize as HMENU,
+                instance,
+                std::ptr::null()
+            );
             
-            // Apply dark theme to group box - disable visual styles to allow WM_CTLCOLORSTATIC
+            // Apply theme to group box
             if let Some(st) = state_ptr.as_ref() {
-                if st.is_dark {
-                    let _ = SetWindowTheme(grp, w!(""), w!(""));
-                }
+                crate::ui::theme::apply_control_theme(grp, st.is_dark);
             }
 
             // Radio Buttons
             let is_dark_mode = if let Some(st) = state_ptr.as_ref() { st.is_dark } else { false };
-            let create_radio = |text: PCWSTR, id: u16, y: i32, checked: bool| {
-                let instance = GetModuleHandleW(None).unwrap_or_default();
+            let create_radio = |text: &str, id: u16, y: i32, checked: bool| {
+                let instance = GetModuleHandleW(std::ptr::null());
+                let cls = to_wstring("BUTTON");
+                let txt = to_wstring(text);
+                
                  let h = CreateWindowExW(
-                    Default::default(),
-                    w!("BUTTON"),
-                    text,
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | BS_AUTORADIOBUTTON as u32),
+                    0,
+                    cls.as_ptr(),
+                    txt.as_ptr(),
+                    WS_VISIBLE | WS_CHILD | BS_AUTORADIOBUTTON as u32,
                     30, y, 200, 25,
-                    Some(hwnd),
-                    Some(windows::Win32::UI::WindowsAndMessaging::HMENU(id as isize as *mut _)),
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
+                    hwnd,
+                    id as isize as HMENU,
+                    instance,
+                    std::ptr::null()
+                );
                 if checked {
-                    SendMessageW(h, BM_SETCHECK, Some(WPARAM(1)), None);
+                    SendMessageW(h, BM_SETCHECK, 1, 0);
                 }
-                // Apply dark theme to radio button - disable visual styles for WM_CTLCOLORSTATIC
-                if is_dark_mode {
-                    let _ = SetWindowTheme(h, w!(""), w!(""));
-                }
+                // Apply theme to radio button
+                crate::ui::theme::apply_control_theme(h, is_dark_mode);
             };
             
             // Determine initial check
             let theme = if let Some(st) = state_ptr.as_ref() { st.theme } else { AppTheme::System };
             
-            create_radio(w!("System Default"), IDC_RADIO_SYSTEM, 40, theme == AppTheme::System);
-            create_radio(w!("Dark Mode"), IDC_RADIO_DARK, 70, theme == AppTheme::Dark);
-            create_radio(w!("Light Mode"), IDC_RADIO_LIGHT, 100, theme == AppTheme::Light);
+            create_radio("System Default", IDC_RADIO_SYSTEM, 40, theme == AppTheme::System);
+            create_radio("Dark Mode", IDC_RADIO_DARK, 70, theme == AppTheme::Dark);
+            create_radio("Light Mode", IDC_RADIO_LIGHT, 100, theme == AppTheme::Light);
             
             // Checkbox: Enable Force Stop (Auto-kill)
             let enable_force = if let Some(st) = state_ptr.as_ref() { st.enable_force_stop } else { false };
-            let chk = crate::ui::controls::create_checkbox(hwnd, w!("Enable Force Stop (Auto-kill)"), 30, 160, 240, 25, IDC_CHK_FORCE_STOP);
+            let chk = crate::ui::controls::create_checkbox(hwnd, "Enable Force Stop (Auto-kill)", 30, 160, 240, 25, IDC_CHK_FORCE_STOP);
             if enable_force {
-                 SendMessageW(chk, BM_SETCHECK, Some(WPARAM(1)), None);
+                 SendMessageW(chk, BM_SETCHECK, 1, 0);
             }
             if let Some(st) = state_ptr.as_ref() {
-                if st.is_dark {
-                     let _ = SetWindowTheme(chk, w!(""), w!(""));
-                }
+                crate::ui::theme::apply_control_theme(chk, st.is_dark);
             }
 
             // Checkbox: Enable Explorer Context Menu
             let enable_ctx = if let Some(st) = state_ptr.as_ref() { st.enable_context_menu } else { false };
-            let chk_ctx = crate::ui::controls::create_checkbox(hwnd, w!("Enable Explorer Context Menu"), 30, 190, 240, 25, IDC_CHK_CONTEXT_MENU);
+            let chk_ctx = crate::ui::controls::create_checkbox(hwnd, "Enable Explorer Context Menu", 30, 190, 240, 25, IDC_CHK_CONTEXT_MENU);
             if enable_ctx {
-                 SendMessageW(chk_ctx, BM_SETCHECK, Some(WPARAM(1)), None);
+                 SendMessageW(chk_ctx, BM_SETCHECK, 1, 0);
             }
             if let Some(st) = state_ptr.as_ref() {
-                if st.is_dark {
-                     let _ = SetWindowTheme(chk_ctx, w!(""), w!(""));
-                }
+                crate::ui::theme::apply_control_theme(chk_ctx, st.is_dark);
             }
 
             // Buttons
             let _close_btn = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
                 .text("Close").pos(110, 235).size(80, 25).dark_mode(is_dark_mode).build();
 
-            LRESULT(0)
+            0
         },
         
         WM_COMMAND => {
-             let id = (wparam.0 & 0xFFFF) as u16;
-             let code = ((wparam.0 >> 16) & 0xFFFF) as u16;
+             let id = (wparam & 0xFFFF) as u16;
+             let code = ((wparam >> 16) & 0xFFFF) as u16;
              
              match id {
                  IDC_RADIO_SYSTEM | IDC_RADIO_DARK | IDC_RADIO_LIGHT => {
@@ -267,7 +255,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                              
                              // Delete old brush if theme changed
                              if let Some(brush) = st.dark_brush.take() {
-                                 DeleteObject(HGDIOBJ(brush.0));
+                                 DeleteObject(brush);
                              }
                          }
                          
@@ -275,67 +263,66 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                          crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
                             
                             // 5. Update controls theme
-                            use windows::Win32::UI::WindowsAndMessaging::GetDlgItem;
+                            use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
                             let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_BTN_CANCEL];
                             
                             for &ctrl_id in &controls {
-                                if let Ok(h_ctl) = GetDlgItem(Some(hwnd), ctrl_id.into()) {
+                                let h_ctl = GetDlgItem(hwnd, ctrl_id as i32);
+                                if h_ctl != std::ptr::null_mut() {
                                     crate::ui::theme::apply_control_theme(h_ctl, new_is_dark);
-                                    InvalidateRect(Some(h_ctl), None, true);
+                                    InvalidateRect(h_ctl, std::ptr::null(), 1);
                                 }
                             }
                             
                             // Repaint entire window
-                            InvalidateRect(Some(hwnd), None, true);
+                            InvalidateRect(hwnd, std::ptr::null(), 1);
                          
                          // Notify Parent Immediately (WM_APP + 1)
-                         if let Ok(parent) = GetParent(hwnd) {
+                         let parent = GetParent(hwnd);
+                         if parent != std::ptr::null_mut() {
                              let theme_val = match theme {
                                  AppTheme::System => 0,
                                  AppTheme::Dark => 1,
                                  AppTheme::Light => 2,
                              };
-                             SendMessageW(parent, 0x8000 + 1, Some(WPARAM(theme_val)), None);
+                             SendMessageW(parent, 0x8000 + 1, theme_val as WPARAM, 0);
                          }
                          
                          // Broadcast to About window if open (WM_APP + 2)
-                         if let Ok(about_hwnd) = FindWindowW(w!("CompactRS_About"), None) {
-                             if !about_hwnd.is_invalid() {
-                                 let is_dark_val = if new_is_dark { 1 } else { 0 };
-                                 SendMessageW(about_hwnd, 0x8000 + 2, Some(WPARAM(is_dark_val)), None);
-                             }
+                         let compactrs_about = to_wstring("CompactRS_About");
+                         let about_hwnd = FindWindowW(compactrs_about.as_ptr(), std::ptr::null());
+                         if about_hwnd != std::ptr::null_mut() {
+                             let is_dark_val = if new_is_dark { 1 } else { 0 };
+                             SendMessageW(about_hwnd, 0x8000 + 2, is_dark_val as WPARAM, 0);
                          }
                          
                          // Broadcast to Console window if open (WM_APP + 2)
-                         if let Ok(console_hwnd) = FindWindowW(w!("CompactRS_Console"), None) {
-                             if !console_hwnd.is_invalid() {
-                                 let is_dark_val = if new_is_dark { 1 } else { 0 };
-                                 SendMessageW(console_hwnd, 0x8000 + 2, Some(WPARAM(is_dark_val)), None);
-                             }
+                         let compactrs_console = to_wstring("CompactRS_Console");
+                         let console_hwnd = FindWindowW(compactrs_console.as_ptr(), std::ptr::null());
+                         if console_hwnd != std::ptr::null_mut() {
+                             let is_dark_val = if new_is_dark { 1 } else { 0 };
+                             SendMessageW(console_hwnd, 0x8000 + 2, is_dark_val as WPARAM, 0);
                          }
                      }
                  },
                  IDC_BTN_CANCEL => {
-                     // Non-modal: No need to re-enable parent
-                     // if let Ok(parent) = GetParent(hwnd) {
-                     //     let _ = EnableWindow(parent, true);
-                     //     SetActiveWindow(parent);
-                     // }
                      DestroyWindow(hwnd);
                  },
                   IDC_CHK_FORCE_STOP => {
                       if (code as u32) == BN_CLICKED {
                           if let Some(st) = get_state() {
                                let mut checked = false;
-                               if let Ok(h_ctl) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), IDC_CHK_FORCE_STOP.into()) {
-                                   checked = SendMessageW(h_ctl, windows::Win32::UI::WindowsAndMessaging::BM_GETCHECK, None, None) == LRESULT(1);
+                               let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_FORCE_STOP as i32);
+                               if h_ctl != std::ptr::null_mut() {
+                                   checked = SendMessageW(h_ctl, BM_GETCHECK, 0, 0) == 1; // BST_CHECKED = 1
                                    st.enable_force_stop = checked;
                                }
                                
                                // Notify Parent immediately (WM_APP + 3)
-                               if let Ok(parent) = GetParent(hwnd) {
+                               let parent = GetParent(hwnd);
+                               if parent != std::ptr::null_mut() {
                                    let val = if checked { 1 } else { 0 };
-                                   SendMessageW(parent, 0x8000 + 3, Some(WPARAM(val)), None);
+                                   SendMessageW(parent, 0x8000 + 3, val as WPARAM, 0);
                                }
                           }
                       }
@@ -344,8 +331,9 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                       if (code as u32) == BN_CLICKED {
                           if let Some(st) = get_state() {
                                let mut checked = false;
-                               if let Ok(h_ctl) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), IDC_CHK_CONTEXT_MENU.into()) {
-                                   checked = SendMessageW(h_ctl, windows::Win32::UI::WindowsAndMessaging::BM_GETCHECK, None, None) == LRESULT(1);
+                               let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
+                               if h_ctl != std::ptr::null_mut() {
+                                   checked = SendMessageW(h_ctl, BM_GETCHECK, 0, 0) == 1;
                                    st.enable_context_menu = checked;
                                }
                                
@@ -353,50 +341,51 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                if checked {
                                    if let Err(_e) = crate::registry::register_context_menu() {
                                        // Show error, revert checkbox
-                                       windows::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                                           Some(hwnd),
-                                           windows::core::w!("Failed to register context menu. Run as Administrator."),
-                                           windows::core::w!("Error"),
-                                           windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR | windows::Win32::UI::WindowsAndMessaging::MB_OK
+                                       let msg = to_wstring("Failed to register context menu. Run as Administrator.");
+                                       let title = to_wstring("Error");
+                                       
+                                       MessageBoxW(
+                                           hwnd,
+                                           msg.as_ptr(),
+                                           title.as_ptr(),
+                                           MB_ICONERROR | MB_OK
                                        );
                                        st.enable_context_menu = false;
-                                       if let Ok(h_ctl) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(Some(hwnd), IDC_CHK_CONTEXT_MENU.into()) {
-                                           SendMessageW(h_ctl, windows::Win32::UI::WindowsAndMessaging::BM_SETCHECK, Some(WPARAM(0)), None);
+                                       
+                                       let h_ctl_revert = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
+                                       if h_ctl_revert != std::ptr::null_mut() {
+                                           SendMessageW(h_ctl_revert, BM_SETCHECK, 0, 0);
                                        }
                                    }
                                } else {
                                    let _ = crate::registry::unregister_context_menu();
                                }
                                
-                               // Notify Parent immediately (WM_APP + 4)
-                               if let Ok(parent) = GetParent(hwnd) {
+                               // Notify Parent immediately (WM_APP + 5)
+                               let parent = GetParent(hwnd);
+                               if parent != std::ptr::null_mut() {
                                    let val = if st.enable_context_menu { 1 } else { 0 };
-                                   SendMessageW(parent, 0x8000 + 5, Some(WPARAM(val)), None);
+                                   SendMessageW(parent, 0x8000 + 5, val as WPARAM, 0);
                                }
                           }
                       }
                   },
                   _ => {}
              }
-             LRESULT(0)
+             0
         },
         
         WM_CLOSE => {
-            // Non-modal: No need to re-enable parent
-            // if let Ok(parent) = GetParent(hwnd) {
-            //     let _ = EnableWindow(parent, true);
-            //     SetActiveWindow(parent);
-            // }
             DestroyWindow(hwnd);
-            LRESULT(0)
+            0
         },
         
         WM_DESTROY => {
             // Do NOT free GWLP_USERDATA here because it points to stack memory of caller
             PostQuitMessage(0);
-            LRESULT(0)
+            0
         },
         
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
-}}
+}

@@ -1,18 +1,21 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+
 //! StatusBar component - encapsulates the status label and progress bar.
 //!
 //! This component manages the status display area at the bottom of the main window,
 //! containing a static text label for status messages and a progress bar.
 
-use windows::core::{w, Result};
-use windows::Win32::Foundation::{HWND, HINSTANCE, RECT};
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
-use windows::Win32::UI::Controls::{PBS_SMOOTH, PROGRESS_CLASSW, SetWindowTheme};
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, SetWindowPos, HMENU, SWP_NOZORDER, WS_CHILD, WS_VISIBLE,
-    WINDOW_STYLE,
+use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::UI::Controls::{PBS_SMOOTH, PROGRESS_CLASSW, SetWindowTheme};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, SetWindowPos, SWP_NOZORDER, WS_CHILD, WS_VISIBLE,
+    SendMessageW, WM_SETFONT, HMENU,
 };
+use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
+use crate::utils::to_wstring;
 
 /// Configuration for StatusBar control IDs.
 pub struct StatusBarIds {
@@ -42,8 +45,8 @@ impl StatusBar {
     /// Call `create()` to actually create the Win32 controls.
     pub fn new(ids: StatusBarIds) -> Self {
         Self {
-            hwnd_label: HWND::default(),
-            hwnd_progress: HWND::default(),
+            hwnd_label: std::ptr::null_mut(),
+            hwnd_progress: std::ptr::null_mut(),
             label_id: ids.label_id,
             progress_id: ids.progress_id,
             x: 0,
@@ -71,71 +74,78 @@ impl StatusBar {
     ///
     /// # Safety
     /// Calls Win32 SendMessageW API.
-    pub unsafe fn set_font(&self, hfont: windows::Win32::Graphics::Gdi::HFONT) {
-        use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+    pub unsafe fn set_font(&self, hfont: HFONT) {
+        let wparam = hfont as usize;
+        let lparam = 1; // Redraw
         
-        unsafe {
-            let wparam = WPARAM(hfont.0 as usize);
-            let lparam = LPARAM(1); // Redraw
-            
-            SendMessageW(self.hwnd_label, WM_SETFONT, Some(wparam), Some(lparam));
-        }
+        SendMessageW(self.hwnd_label, WM_SETFONT, wparam, lparam);
     }
 
     /// Enables/disables dark mode for a window using undocumented uxtheme API.
     #[allow(non_snake_case)]
     unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) {
-        unsafe {
-            if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
-                if let Some(func) = GetProcAddress(uxtheme, windows::core::PCSTR(133 as *const u8))
-                {
-                    let allow_dark: extern "system" fn(HWND, bool) -> bool =
-                        std::mem::transmute(func);
-                    allow_dark(hwnd, allow);
-                }
+        let lib_name = to_wstring("uxtheme.dll");
+        let uxtheme = LoadLibraryW(lib_name.as_ptr());
+        if uxtheme != std::ptr::null_mut() {
+            // Ordinal 133: AllowDarkModeForWindow
+            if let Some(func) = GetProcAddress(uxtheme, 133 as *const u8) {
+                 let allow_dark: extern "system" fn(HWND, bool) -> bool =
+                     std::mem::transmute(func);
+                 allow_dark(hwnd, allow);
             }
         }
     }
 }
 
 impl Component for StatusBar {
-    unsafe fn create(&mut self, parent: HWND) -> Result<()> {
+    unsafe fn create(&mut self, parent: HWND) -> Result<(), String> {
         unsafe {
-            let module = GetModuleHandleW(None)?;
-            let instance = HINSTANCE(module.0);
+            let instance = GetModuleHandleW(std::ptr::null());
 
             // Create header/status label
+            let label_text = to_wstring("Drag and drop files or folders, or use 'Files'/'Folder' buttons. Then click 'Process All'.");
+            let static_cls = to_wstring("STATIC");
+            
             self.hwnd_label = CreateWindowExW(
-                Default::default(),
-                w!("STATIC"),
-                w!("Drag and drop files or folders, or use 'Files'/'Folder' buttons. Then click 'Process All'."),
+                0,
+                static_cls.as_ptr(),
+                label_text.as_ptr(),
                 WS_CHILD | WS_VISIBLE,
                 10,
                 10,
                 860,
                 25,
-                Some(parent),
-                Some(HMENU(self.label_id as isize as *mut _)),
-                Some(instance),
-                None,
-            )?;
+                parent,
+                self.label_id as usize as HMENU,
+                instance,
+                std::ptr::null(),
+            );
+            
+            if self.hwnd_label == std::ptr::null_mut() {
+                return Err("Failed to create status label".to_string());
+            }
 
             // Create progress bar
+            let empty_text = to_wstring("");
+            
             self.hwnd_progress = CreateWindowExW(
-                Default::default(),
+                0,
                 PROGRESS_CLASSW,
-                w!(""),
-                WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | PBS_SMOOTH as u32),
+                empty_text.as_ptr(),
+                WS_VISIBLE | WS_CHILD | PBS_SMOOTH,
                 10,
                 430,
                 860,
                 20,
-                Some(parent),
-                Some(HMENU(self.progress_id as isize as *mut _)),
-                Some(instance),
-                None,
-            )?;
+                parent,
+                self.progress_id as usize as HMENU,
+                instance,
+                std::ptr::null(),
+            );
+
+            if self.hwnd_progress == std::ptr::null_mut() {
+                return Err("Failed to create progress bar".to_string());
+            }
 
             Ok(())
         }
@@ -167,7 +177,7 @@ impl Component for StatusBar {
             let label_y = padding;
             SetWindowPos(
                 self.hwnd_label,
-                None,
+                std::ptr::null_mut(),
                 padding,
                 label_y,
                 width - padding - 120,
@@ -180,7 +190,7 @@ impl Component for StatusBar {
             self.y = progress_y;
             SetWindowPos(
                 self.hwnd_progress,
-                None,
+                std::ptr::null_mut(),
                 padding,
                 progress_y,
                 width - padding * 2,
@@ -193,13 +203,10 @@ impl Component for StatusBar {
     unsafe fn on_theme_change(&mut self, is_dark: bool) {
         unsafe {
             // Apply theme to progress bar
-            if !self.hwnd_progress.is_invalid() {
+            if self.hwnd_progress != std::ptr::null_mut() {
                 Self::allow_dark_mode_for_window(self.hwnd_progress, is_dark);
-                if is_dark {
-                    let _ = SetWindowTheme(self.hwnd_progress, w!("DarkMode_Explorer"), None);
-                } else {
-                    let _ = SetWindowTheme(self.hwnd_progress, w!("Explorer"), None);
-                }
+                let theme = if is_dark { to_wstring("DarkMode_Explorer") } else { to_wstring("Explorer") };
+                let _ = SetWindowTheme(self.hwnd_progress, theme.as_ptr(), std::ptr::null());
             }
         }
     }

@@ -8,47 +8,37 @@ license = "MIT"
 repository = "https://github.com/IRedDragonICY/compactrs"
 
 [dependencies]
-
-[dependencies.windows]
-version = "0.62"
-features = [
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Controls",
+    "Win32_UI_Shell",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_System_LibraryLoader",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Threading",
-    "Win32_UI_Shell",
-    "Win32_Foundation",
-    "Win32_System_SystemServices",
-    "Win32_System_Com",
-    "Win32_System_Ioctl",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_System_IO",
-    "Win32_Security",
-    "Win32_Security_Authorization",
-    "Win32_System_Registry",
     "Win32_System_Memory",
-    "Win32_System_DataExchange",
-    "Win32_System_RestartManager",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Com",
     "Win32_System_Power",
-]
+    "Win32_System_Ioctl",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_Registry",
+    "Win32_System_RestartManager",
+    "Win32_System_DataExchange",
+    "Win32_System_IO",
+] }
 
 [build-dependencies]
 winres = "0.1"
 
 [profile.release]
-opt-level = "z"          # Optimize for smallest size (disables loop vectorization)
-lto = true               # Full Link-Time Optimization across all crates
-codegen-units = 1        # Single codegen unit = maximum optimization (slower compile)
-panic = "abort"          # Remove panic unwinding code (smaller binary)
-strip = "symbols"        # Strip all symbols from binary
+opt-level = "z"          # Optimize for size
+lto = true               # Link Time Optimization
+codegen-units = 1        # Maximize optimization
+panic = "abort"          # No unwinding
+strip = true             # Strip symbols
 debug = false            # No debug info
-overflow-checks = false  # Disable overflow checks for speed/size
-incremental = false      # Disable incremental for better optimization
-
-# Optional: Even more aggressive - uncomment if you want
-# [profile.release.build-override]
-# opt-level = "z"
-# codegen-units = 1
+overflow-checks = false  # No overflow checks

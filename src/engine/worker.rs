@@ -3,17 +3,16 @@ use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use crate::ui::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
-use crate::ui::utils::ToWide;
-use windows::Win32::Foundation::{HWND, WPARAM, LPARAM};
-use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
-use windows::Win32::Storage::FileSystem::{
+use crate::utils::to_wstring;
+use windows_sys::Win32::Foundation::{HWND, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+use windows_sys::Win32::Storage::FileSystem::{
     FindFirstFileExW, FindNextFileW, FindClose,
     FindExInfoBasic, FindExSearchNameMatch,
     FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
     FILE_ATTRIBUTE_DIRECTORY,
 };
-use windows::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
-use windows::core::PCWSTR;
+use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
 
 // ===== EXECUTION STATE GUARD (RAII for Prevent Sleep) =====
 
@@ -118,30 +117,33 @@ where
     } else {
         format!("{}\\*", path)
     };
-    let pattern_wide = pattern.to_wide();
+    let pattern_wide = to_wstring(&pattern);
 
-    let mut find_data = WIN32_FIND_DATAW::default();
+    // Default isn't implemented for WIN32_FIND_DATAW in windows-sys usually without feature, 
+    // but zero-init is safe.
+    let mut find_data: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
 
     unsafe {
         let handle = FindFirstFileExW(
-            PCWSTR(pattern_wide.as_ptr()),
+            pattern_wide.as_ptr(),
             FindExInfoBasic,
             &mut find_data as *mut _ as *mut _,
             FindExSearchNameMatch,
-            None,
+            std::ptr::null(),
             FIND_FIRST_EX_LARGE_FETCH,
         );
 
-        if handle.is_err() {
+        if handle == INVALID_HANDLE_VALUE {
+            // Check if it's just "file not found" or actual error? 
+            // In Rust `ignore` crate logic, we just return.
             return;
         }
-        let handle = handle.unwrap();
 
         loop {
             // Check stop signal in loop
             if let Some(s) = state {
                 if s.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-                    let _ = FindClose(handle);
+                    FindClose(handle);
                     return;
                 }
             }
@@ -160,7 +162,7 @@ where
                     format!("{}\\{}", path, filename)
                 };
 
-                let is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+                let is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 
                 // Invoke visitor
                 visitor(&full_path, is_dir, &find_data);
@@ -171,12 +173,12 @@ where
                 }
             }
 
-            if FindNextFileW(handle, &mut find_data).is_err() {
+            if FindNextFileW(handle, &mut find_data) == 0 {
                 break;
             }
         }
 
-        let _ = FindClose(handle);
+        FindClose(handle);
     }
 }
 
@@ -341,7 +343,8 @@ fn try_compress_with_lock_handling(
         Ok(res) => Ok(res),
         Err(e) => {
              // Check if force is true AND it is a sharing violation (0x80070020 = -2147024864)
-             if force && e.code().0 == -2147024864 {
+             // e is now u32 (raw OS error). ERROR_SHARING_VIOLATION is 32.
+             if force && e == 32 { // 0x20
                  // Try to get blockers; catch unwind in case it panics
                  let blockers_res = std::panic::catch_unwind(|| {
                      crate::engine::process::get_file_blockers(path)
@@ -351,15 +354,15 @@ fn try_compress_with_lock_handling(
                      if !blockers.is_empty() {
                          // Found a blocker. Ask Main Thread.
                          let name = &blockers[0].name;
-                         let name_wide = name.to_wide();
-                         let hwnd = HWND(main_hwnd as *mut _); // Cast usize back to HWND handle
+                         let name_wide = to_wstring(name);
+                         let hwnd = main_hwnd as HWND;
                          
                          // Synchronous call to Main UI
                          let res = unsafe { 
-                             SendMessageW(hwnd, 0x8004, Some(WPARAM(name_wide.as_ptr() as usize)), Some(LPARAM(0)))
+                             SendMessageW(hwnd, 0x8004, name_wide.as_ptr() as usize, 0)
                          };
                          
-                         if res.0 == 1 {
+                         if res == 1 {
                              // Kill approved
                              for b in blockers {
                                  let _ = crate::engine::process::kill_process(b.pid);
@@ -739,6 +742,7 @@ pub fn single_item_worker(
         let (file_tx, file_rx) = sync_channel::<String>(1024);
         let shared_rx = Arc::new(SharedReceiver::new(file_rx));
         
+        // Counters
         let processed = Arc::new(AtomicU64::new(0));
         let success_atomic = Arc::new(AtomicU64::new(0));
         let failed_atomic = Arc::new(AtomicU64::new(0));

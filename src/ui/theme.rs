@@ -1,23 +1,21 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 //! Theme provider module - pure resource functions for theming.
-//!
-//! This module provides pure functions for theme resources without coupling
-//! to specific UI control IDs or application state. It's the single source
-//! of truth for theme-related resources.
 
 use std::sync::OnceLock;
-use windows::core::{w, PCSTR};
-use windows::Win32::Foundation::{COLORREF, HWND, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE, DWMWA_SYSTEMBACKDROP_TYPE, DWM_SYSTEMBACKDROP_TYPE};
-use windows::Win32::Graphics::Gdi::{
+use windows_sys::Win32::Foundation::{COLORREF, HWND, WPARAM, LRESULT};
+use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE};
+use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, CreateSolidBrush, FillRect, GetStockObject, 
     HBRUSH, HDC, HFONT, SetBkMode, SetTextColor, TRANSPARENT, WHITE_BRUSH,
     DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS,
     CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FW_NORMAL,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_ERASEBKGND};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ};
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_ERASEBKGND};
+use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ};
+use windows_sys::Win32::UI::Controls::SetWindowTheme;
 
+use crate::utils::to_wstring;
 use crate::ui::state::AppTheme;
 
 // ============================================================================
@@ -33,27 +31,13 @@ pub const COLOR_LIGHT_TEXT: u32 = 0x00000000;
 // Static Resources (OnceLock cached)
 // ============================================================================
 
-/// Cached font handle (stored as isize for thread safety)
 static APP_FONT_HANDLE: OnceLock<isize> = OnceLock::new();
-
-/// Cached dark background brush handle
 static DARK_BRUSH_HANDLE: OnceLock<isize> = OnceLock::new();
 
 // ============================================================================
 // Pure Functions
 // ============================================================================
 
-/// Resolves the effective dark mode state from an AppTheme preference.
-///
-/// This is a pure function that takes an AppTheme and returns whether
-/// dark mode should be active. If the theme is set to System, it queries
-/// the Windows registry for the system preference.
-///
-/// # Arguments
-/// * `theme` - The app's theme preference (System, Dark, or Light)
-///
-/// # Returns
-/// `true` if dark mode should be active, `false` otherwise.
 pub fn resolve_mode(theme: AppTheme) -> bool {
     match theme {
         AppTheme::Dark => true,
@@ -62,275 +46,172 @@ pub fn resolve_mode(theme: AppTheme) -> bool {
     }
 }
 
-/// Returns the application font handle.
-///
-/// Creates a "Segoe UI Variable Display" font on first call and caches it.
-/// Subsequent calls return the cached handle.
-///
-/// # Returns
-/// The cached HFONT handle.
 pub fn get_app_font() -> HFONT {
     let handle = *APP_FONT_HANDLE.get_or_init(|| unsafe {
         let font_height = -12; // ~9pt
-        let hfont = CreateFontW(
+        let font_name = to_wstring("Segoe UI Variable Display");
+        CreateFontW(
             font_height,
             0, 0, 0,
-            FW_NORMAL.0 as i32,
+            FW_NORMAL as i32,
             0, 0, 0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY,
-            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
-            w!("Segoe UI Variable Display"),
-        );
-        hfont.0 as isize
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            CLEARTYPE_QUALITY as u32,
+            (DEFAULT_PITCH | FF_DONTCARE) as u32,
+            font_name.as_ptr(),
+        ) as isize
     });
-    HFONT(handle as *mut _)
+    handle as HFONT
 }
 
-/// Returns the dark mode background brush.
-///
-/// Creates a solid brush with color 0x202020 on first call and caches it.
-///
-/// # Returns
-/// The cached HBRUSH handle for dark backgrounds.
 pub fn get_dark_brush() -> HBRUSH {
     let handle = *DARK_BRUSH_HANDLE.get_or_init(|| unsafe {
-        let brush = CreateSolidBrush(COLORREF(0x00202020));
-        brush.0 as isize
+        CreateSolidBrush(COLOR_DARK_BG) as isize
     });
-    HBRUSH(handle as *mut _)
+    handle as HBRUSH
 }
 
-/// Sets the window frame theme (dark/light title bar).
-///
-/// Applies DWM window attributes to enable dark mode frame and Mica effect.
-///
-/// # Arguments
-/// * `hwnd` - The window handle
-/// * `is_dark` - Whether to apply dark mode frame
-///
-/// # Safety
-/// Calls Win32 DwmSetWindowAttribute API.
 pub unsafe fn set_window_frame_theme(hwnd: HWND, is_dark: bool) {
-    unsafe {
-        let dark_mode_val: i32 = if is_dark { 1 } else { 0 };
-        
-        // Dark Mode Frame (DWMWA_USE_IMMERSIVE_DARK_MODE = 20)
-        let dwm_dark_mode = DWMWINDOWATTRIBUTE(20);
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            dwm_dark_mode,
-            &dark_mode_val as *const _ as _,
-            std::mem::size_of::<i32>() as u32,
-        );
+    let dark_mode_val: i32 = if is_dark { 1 } else { 0 };
+    
+    // Dark Mode Frame (DWMWA_USE_IMMERSIVE_DARK_MODE = 20)
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        20, // DWMWA_USE_IMMERSIVE_DARK_MODE
+        &dark_mode_val as *const _ as _,
+        std::mem::size_of::<i32>() as u32,
+    );
 
-        // Mica Effect (Windows 11)
-        let mica = DWM_SYSTEMBACKDROP_TYPE(2);
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            &mica as *const _ as _,
-            std::mem::size_of::<DWM_SYSTEMBACKDROP_TYPE>() as u32,
-        );
-    }
+    // Mica Effect (Windows 11)
+    let mica = 2; // DWM_SYSTEMBACKDROP_TYPE(2)
+    let _ = DwmSetWindowAttribute(
+        hwnd,
+        DWMWA_SYSTEMBACKDROP_TYPE as u32,
+        &mica as *const _ as _,
+        std::mem::size_of::<i32>() as u32,
+    );
 }
 
 // ============================================================================
 // System Query Functions
 // ============================================================================
 
-/// Returns true if the SYSTEM is in Dark Mode.
-///
-/// Queries the Windows registry for the current system theme preference.
-///
-/// # Safety
-/// Calls Win32 registry APIs.
 pub unsafe fn is_system_dark_mode() -> bool {
-    unsafe {
-        let subkey = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
-        let val_name = w!("AppsUseLightTheme");
-        let mut hkey: HKEY = Default::default();
+    let subkey = to_wstring("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    let val_name = to_wstring("AppsUseLightTheme");
+    let mut hkey: HKEY = std::ptr::null_mut();
+    
+    if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) == 0 {
+        let mut data: u32 = 0;
+        let mut cb_data = std::mem::size_of::<u32>() as u32;
+        let result = RegQueryValueExW(
+            hkey,
+            val_name.as_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut data as *mut _ as *mut u8,
+            &mut cb_data,
+        );
+        RegCloseKey(hkey);
         
-        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey, Some(0), KEY_READ, &mut hkey).is_ok() {
-            let mut data: u32 = 0;
-            let mut cb_data = std::mem::size_of::<u32>() as u32;
-            let result = RegQueryValueExW(
-                hkey,
-                val_name,
-                None,
-                None,
-                Some(&mut data as *mut _ as _),
-                Some(&mut cb_data),
-            );
-            let _ = RegCloseKey(hkey);
-            
-            if result.is_ok() {
-                return data == 0; // 0 = dark mode, 1 = light mode
-            }
+        if result == 0 {
+            return data == 0; // 0 = dark mode, 1 = light mode
         }
-        false
     }
+    false
 }
 
-/// Enables dark mode for the application using SetPreferredAppMode.
-///
-/// Should be called once at application startup before creating windows.
-///
-/// # Safety
-/// Calls undocumented uxtheme APIs.
 #[allow(non_snake_case)]
 pub unsafe fn allow_dark_mode() {
-    unsafe {
-        if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
-            // Ordinal 135: SetPreferredAppMode
-            if let Some(set_preferred_app_mode) = GetProcAddress(uxtheme, PCSTR(135 as *const u8)) {
-                let set_preferred_app_mode: extern "system" fn(i32) -> i32 =
-                    std::mem::transmute(set_preferred_app_mode);
-                set_preferred_app_mode(2); // 2 = AllowDark
-            }
+    let uxtheme_name = to_wstring("uxtheme.dll");
+    let uxtheme = LoadLibraryW(uxtheme_name.as_ptr());
+    if uxtheme != std::ptr::null_mut() {
+        // Ordinal 135: SetPreferredAppMode
+        if let Some(set_preferred_app_mode) = GetProcAddress(uxtheme, 135 as *const u8) {
+             let set_preferred_app_mode: extern "system" fn(i32) -> i32 =
+                std::mem::transmute(set_preferred_app_mode);
+             set_preferred_app_mode(2); // 2 = AllowDark
         }
     }
 }
 
-/// Checks if the app is in dark mode by querying window state.
-///
-/// This helper retrieves the AppTheme from the window's GWLP_USERDATA
-/// and calls `resolve_mode` to determine the effective dark mode state.
-///
-/// # Arguments
-/// * `hwnd` - Main window handle containing AppState in GWLP_USERDATA
-///
-/// # Returns
-/// `true` if dark mode is active, `false` otherwise.
-///
-/// # Safety
-/// Accesses window user data pointer which must point to valid AppState.
 pub unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
     use crate::ui::state::AppState;
     use crate::ui::utils::get_window_state;
 
-    unsafe {
-        if let Some(st) = get_window_state::<AppState>(hwnd) {
-            resolve_mode(st.theme)
-        } else {
-            // Fallback during initialization
-            is_system_dark_mode()
-        }
+    if let Some(st) = get_window_state::<AppState>(hwnd) {
+        resolve_mode(st.theme)
+    } else {
+        is_system_dark_mode()
     }
 }
 
 // ============================================================================
-// Helper Functions (kept for compatibility)
+// Helper Functions
 // ============================================================================
 
-/// Returns the Background Brush and Text Color for the given mode.
-///
-/// # Returns
-/// (Brush, TextColor, BackgroundColor)
 pub unsafe fn get_theme_colors(is_dark: bool) -> (HBRUSH, COLORREF, COLORREF) {
-    unsafe {
-        if is_dark {
-            let brush = CreateSolidBrush(COLORREF(COLOR_DARK_BG));
-            (brush, COLORREF(COLOR_DARK_TEXT), COLORREF(COLOR_DARK_BG))
-        } else {
-            let brush = HBRUSH(GetStockObject(WHITE_BRUSH).0);
-            (brush, COLORREF(COLOR_LIGHT_TEXT), COLORREF(COLOR_LIGHT_BG))
-        }
+    if is_dark {
+        let brush = get_dark_brush();
+        (brush, COLOR_DARK_TEXT, COLOR_DARK_BG)
+    } else {
+        let brush = GetStockObject(WHITE_BRUSH);
+        (brush, COLOR_LIGHT_TEXT, COLOR_LIGHT_BG)
     }
 }
 
-/// Configures a generic control (Button, Checkbox, Radio) for the target theme.
-///
-/// Strips visual styles to allow WM_CTLCOLOR* to take effect for dark mode.
-///
-/// # Arguments
-/// * `h_ctrl` - Control window handle
-/// * `is_dark` - Whether to apply dark mode
-///
-/// # Safety
-/// Calls Win32 SetWindowTheme API.
 pub unsafe fn apply_control_theme(h_ctrl: HWND, is_dark: bool) {
-    use windows::Win32::UI::Controls::SetWindowTheme;
-    
-    unsafe {
-        if is_dark {
-            // Strip visual styles to allow WM_CTLCOLORSTATIC to work
-            let _ = SetWindowTheme(h_ctrl, w!(""), w!(""));
-        } else {
-            // Restore default visual styles
-            let _ = SetWindowTheme(h_ctrl, w!("Explorer"), w!(""));
-        }
+    if is_dark {
+        let empty = to_wstring("");
+        SetWindowTheme(h_ctrl, empty.as_ptr(), empty.as_ptr());
+    } else {
+        let explorer = to_wstring("Explorer");
+        let empty = to_wstring("");
+        SetWindowTheme(h_ctrl, explorer.as_ptr(), empty.as_ptr());
     }
 }
 
-/// Handle WM_CTLCOLORSTATIC and WM_CTLCOLORBTN messages.
-///
-/// Returns Some(LRESULT) with appropriate brush for both dark and light modes.
-/// In Light Mode, forces transparent text background to prevent gray highlights.
 pub unsafe fn handle_ctl_color(
     _hwnd: HWND,
     hdc_raw: WPARAM,
     is_dark: bool,
-) -> Option<windows::Win32::Foundation::LRESULT> {
-    unsafe {
-        let hdc = HDC(hdc_raw.0 as *mut _);
+) -> Option<LRESULT> {
+    let hdc = hdc_raw as HDC;
+    
+    if is_dark {
+        let (brush, text_col, _) = get_theme_colors(true);
+        SetTextColor(hdc, text_col);
+        SetBkMode(hdc, TRANSPARENT as i32);
+        Some(brush as LRESULT)
+    } else {
+        SetTextColor(hdc, 0x00000000); // Black text
+        SetBkMode(hdc, TRANSPARENT as i32);
         
-        if is_dark {
-            // Dark Mode: Use dark background brush and white text
-            let (brush, text_col, _) = get_theme_colors(true);
-            SetTextColor(hdc, text_col);
-            SetBkMode(hdc, TRANSPARENT);
-            Some(windows::Win32::Foundation::LRESULT(brush.0 as isize))
-        } else {
-            // Light Mode: Force transparent text background to remove gray highlights
-            SetTextColor(hdc, COLORREF(0x00000000)); // Black text
-            SetBkMode(hdc, TRANSPARENT);             // Transparent background
-            
-            // Return White Brush to match window background
-            let brush = GetStockObject(WHITE_BRUSH);
-            Some(windows::Win32::Foundation::LRESULT(brush.0 as isize))
-        }
+        let brush = GetStockObject(WHITE_BRUSH);
+        Some(brush as LRESULT)
     }
 }
 
-/// Centralized handler for standard background and control coloring messages.
-///
-/// Handles `WM_CTLCOLORSTATIC`, `WM_CTLCOLORBTN`, and `WM_ERASEBKGND` messages
-/// for consistent theming across all window procedures.
-///
-/// # Arguments
-/// * `hwnd` - The window handle
-/// * `msg` - The message being processed
-/// * `wparam` - The WPARAM containing HDC for painting
-/// * `is_dark` - Whether dark mode is active
-///
-/// # Returns
-/// `Some(LRESULT)` if the message was handled, `None` otherwise.
-///
-/// # Safety
-/// Calls Win32 GDI APIs.
 pub unsafe fn handle_standard_colors(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
     is_dark: bool,
-) -> Option<windows::Win32::Foundation::LRESULT> {
-    unsafe {
-        match msg {
-            WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
-                handle_ctl_color(hwnd, wparam, is_dark)
-            }
-            WM_ERASEBKGND => {
-                let (brush, _, _) = get_theme_colors(is_dark);
-                let hdc = HDC(wparam.0 as *mut _);
-                let mut rc = RECT::default();
-                let _ = GetClientRect(hwnd, &mut rc);
-                FillRect(hdc, &rc, brush);
-                Some(windows::Win32::Foundation::LRESULT(1))
-            }
-            _ => None,
+) -> Option<LRESULT> {
+    match msg {
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+            handle_ctl_color(hwnd, wparam, is_dark)
         }
+        WM_ERASEBKGND => {
+            let (brush, _, _) = get_theme_colors(is_dark);
+            let hdc = wparam as HDC;
+            let mut rc = unsafe { std::mem::zeroed() };
+            GetClientRect(hwnd, &mut rc);
+            FillRect(hdc, &rc, brush);
+            Some(1)
+        }
+        _ => None,
     }
 }

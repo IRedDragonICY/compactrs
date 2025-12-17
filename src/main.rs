@@ -1,19 +1,23 @@
 #![windows_subsystem = "windows"]
 
-use windows::core::{Result, w};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MessageBoxW, TranslateMessage, MB_ICONERROR, MB_OK, MSG, WM_QUIT,
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    DispatchMessageW, GetMessageW, MessageBoxW, TranslateMessage, 
+    MB_ICONERROR, MB_OK, MSG, WM_QUIT,
 };
+use std::ptr;
+use std::sync::OnceLock;
 
 pub mod ui;
-pub mod engine; // Make sure the engine module is available to the rest of the app
+pub mod engine;
 pub mod config;
 pub mod registry;
+pub mod utils; // New utils module
 
-use std::sync::OnceLock;
 use crate::engine::wof::WofAlgorithm;
 use crate::ui::state::BatchAction;
+use crate::utils::to_wstring;
 
 /// Startup item passed via command line arguments
 #[derive(Clone, Debug)]
@@ -32,7 +36,6 @@ pub fn get_startup_items() -> &'static [StartupItem] {
 }
 
 /// Parse command line arguments
-/// Supports: --path "C:\file" --algo xpress4k|xpress8k|xpress16k|lzx --action decompress
 fn parse_cli_args() -> Vec<StartupItem> {
     let args: Vec<String> = std::env::args().collect();
     let mut items = Vec::new();
@@ -80,35 +83,40 @@ fn parse_cli_args() -> Vec<StartupItem> {
     items
 }
 
-fn main() -> Result<()> {
+fn main() {
     // Parse CLI arguments before GUI initialization
     let startup_items = parse_cli_args();
     let _ = STARTUP_ITEMS.set(startup_items);
     
-    // Initialize GUI
     unsafe {
         // Initialize COM for IFileOpenDialog
-        use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // Ignore result, it might already be initialized
+        // Note: windows-sys defines COINIT_APARTMENTTHREADED as i32 (0x2), CoInitializeEx expects u32
+        let _ = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED as u32);
 
-        let instance = GetModuleHandleW(None)?;
+        let instance = GetModuleHandleW(ptr::null());
         
-        if let Err(e) = ui::window::create_main_window(instance.into()) {
-            MessageBoxW(None, w!("Failed to create main window!"), w!("Error"), MB_ICONERROR | MB_OK);
-            return Err(e);
+        // We'll update create_main_window to accept isize (HINSTANCE)
+        if let Err(e) = ui::window::create_main_window(instance) {
+            let msg = to_wstring(&format!("Failed to create main window: {}", e));
+            MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), to_wstring("Error").as_ptr(), MB_ICONERROR | MB_OK);
+            return;
         }
 
         // Message Loop
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+        let mut msg: MSG = std::mem::zeroed();
+        // GetMessageW returns BOOL (i32). strict > 0 check for success.
+        // HWND parameter should be NULL (0/null_mut) to retrieve messages for any window belonging to the current thread
+        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
             if msg.message == WM_QUIT {
                 break;
             }
+
+            // TODO: Add TranslateAcceleratorW here if we add an accelerator table later
+            
+            // Dispatch key events manually if needed or just translate
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
     }
-
-    Ok(())
 }
-

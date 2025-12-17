@@ -4,14 +4,14 @@
 //! high-level Rust interface. All unsafe Win32 operations are contained within
 //! this module.
 
-use windows::core::{w, Result, PWSTR};
-use windows::Win32::Foundation::{HWND, HINSTANCE, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::SetWindowPos;
-
-use super::base::Component;
-use windows::Win32::Graphics::Gdi::{InvalidateRect, SetBkMode, SetTextColor, TRANSPARENT};
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
-use windows::Win32::UI::Controls::{
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SetWindowPos, SendMessageW, CreateWindowExW, WS_VISIBLE, WS_CHILD, WS_BORDER, WM_NOTIFY,
+    SWP_NOZORDER, HMENU,
+};
+use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, SetBkMode, SetTextColor, TRANSPARENT};
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::UI::Controls::{
     LVM_DELETEITEM, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMNW,
     LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMW,
     LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, LVCFMT_LEFT, LVCF_FMT, LVCF_TEXT, LVCF_WIDTH,
@@ -20,14 +20,12 @@ use windows::Win32::UI::Controls::{
     NMHDR, SetWindowTheme, CDDS_ITEMPREPAINT, CDDS_PREPAINT,
     CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW,
 };
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, HMENU, SendMessageW, WM_NOTIFY, WS_BORDER, WS_CHILD, WS_VISIBLE,
-};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 
+use super::base::Component;
 use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::ui::state::BatchItem;
-use crate::ui::utils::ToWide;
+use crate::utils::to_wstring;
 
 /// Column indices for the FileListView
 pub mod columns {
@@ -61,36 +59,40 @@ impl FileListView {
     /// # Safety
     /// This function is unsafe because it calls Win32 APIs that require valid window handles.
     pub unsafe fn new(parent: HWND, x: i32, y: i32, w: i32, h: i32, id: u16) -> Self { unsafe {
-        // SAFETY: GetModuleHandleW with None returns the current module handle, which is always valid.
-        let module = GetModuleHandleW(None).unwrap();
-        let instance = HINSTANCE(module.0);
+        // SAFETY: GetModuleHandleW with null returns the current module handle.
+        let instance = GetModuleHandleW(std::ptr::null());
 
-        // SAFETY: CreateWindowExW is called with valid parameters. The parent HWND
-        // is provided by the caller and must be valid.
+        let class_name = to_wstring("SysListView32");
+        let empty_str = to_wstring("");
+
+        // SAFETY: CreateWindowExW is called with valid parameters.
         let hwnd = CreateWindowExW(
-            Default::default(),
-            w!("SysListView32"),
-            None,
-            windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(
-                WS_VISIBLE.0 | WS_CHILD.0 | WS_BORDER.0 | LVS_REPORT as u32 | LVS_SHOWSELALWAYS as u32,
-            ),
+            0,
+            class_name.as_ptr(),
+            empty_str.as_ptr(),
+            WS_VISIBLE | WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SHOWSELALWAYS,
             x,
             y,
             w,
             h,
-            Some(parent),
-            Some(HMENU(id as isize as *mut _)),
-            Some(instance),
-            None,
-        )
-        .unwrap_or_default();
+            parent,
+            id as usize as HMENU,
+            instance,
+            std::ptr::null(),
+        );
+
+        if hwnd == std::ptr::null_mut() {
+            // In a real app we might want to handle this better, but panic is consistent with previous code
+            // wrapped in Result in main builder sometimes, but here we return Self.
+            // Using default/placeholder if failed? struct has just hwnd.
+        }
 
         // SAFETY: SendMessageW with valid HWND and LVM_SETEXTENDEDLISTVIEWSTYLE message.
         SendMessageW(
             hwnd,
             LVM_SETEXTENDEDLISTVIEWSTYLE,
-            Some(WPARAM(0)),
-            Some(LPARAM((LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize)),
+            0,
+            (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize,
         );
 
         let file_list = Self { hwnd };
@@ -111,33 +113,33 @@ impl FileListView {
     fn setup_columns(&self) {
         // Columns: Path | Current | Algo | Action | Size | On Disk | Progress | Status | ▶ Start
         let columns = [
-            (w!("Path"), 250),
-            (w!("Current"), 70),
-            (w!("Algorithm"), 70),
-            (w!("Action"), 70),
-            (w!("Size"), 75),
-            (w!("On Disk"), 75),
-            (w!("Progress"), 70),
-            (w!("Status"), 80),
-            (w!("▶ Start"), 45),
+            ("Path", 250),
+            ("Current", 70),
+            ("Algorithm", 70),
+            ("Action", 70),
+            ("Size", 75),
+            ("On Disk", 75),
+            ("Progress", 70),
+            ("Status", 80),
+            ("▶ Start", 45),
         ];
 
         for (i, (name, width)) in columns.iter().enumerate() {
+            let name_wide = to_wstring(name);
             let col = LVCOLUMNW {
                 mask: LVCF_WIDTH | LVCF_TEXT | LVCF_FMT,
                 fmt: LVCFMT_LEFT,
                 cx: *width,
-                pszText: PWSTR(name.as_ptr() as *mut _),
+                pszText: name_wide.as_ptr() as *mut _,
                 ..Default::default()
             };
             // SAFETY: SendMessageW with valid HWND and LVM_INSERTCOLUMNW message.
-            // The column struct is valid for the duration of the call.
             unsafe {
                 SendMessageW(
                     self.hwnd,
                     LVM_INSERTCOLUMNW,
-                    Some(WPARAM(i)),
-                    Some(LPARAM(&col as *const _ as isize)),
+                    i as usize,
+                    &col as *const _ as isize,
                 );
             }
         }
@@ -162,17 +164,17 @@ impl FileListView {
         size_disk: &str,
         state: CompressionState,
     ) -> i32 {
-        let path_wide = item.path.to_wide();
+        let path_wide = to_wstring(&item.path); // Use helper directly
         let algo_str = Self::algo_to_str(item.algorithm);
-        let algo_wide = algo_str.to_wide();
+        let algo_wide = to_wstring(algo_str);
         let action_str = if item.action == crate::ui::state::BatchAction::Compress {
             "Compress"
         } else {
             "Decompress"
         };
-        let action_wide = action_str.to_wide();
-        let size_wide = size_logical.to_wide();
-        let disk_wide = size_disk.to_wide();
+        let action_wide = to_wstring(action_str);
+        let size_wide = to_wstring(size_logical);
+        let disk_wide = to_wstring(size_disk);
 
         // Format current state string
         let current_text = match state {
@@ -180,109 +182,72 @@ impl FileListView {
             CompressionState::Specific(algo) => Self::algo_to_str(algo).to_string(),
             CompressionState::Mixed => "Mixed".to_string(),
         };
-        let current_wide = current_text.to_wide();
+        let current_wide = to_wstring(&current_text);
 
         // Show pending status initially
-        let status_text = "Pending".to_string();
-        let status_wide = status_text.to_wide();
-        let start_wide = "▶".to_wide();
+        let status_wide = to_wstring("Pending");
+        let start_wide = to_wstring("▶");
 
         // SAFETY: All wide strings are valid null-terminated UTF-16.
-        // SendMessageW is called with valid HWND and message parameters.
         unsafe {
             // Insert main item (path column)
             let mut lvi = LVITEMW {
                 mask: LVIF_TEXT | LVIF_PARAM,
-                iItem: i32::MAX, // Append at end
+                iItem: std::i32::MAX, // Append at end
                 iSubItem: 0,
-                pszText: PWSTR(path_wide.as_ptr() as *mut _),
-                lParam: LPARAM(id as isize),
+                pszText: path_wide.as_ptr() as *mut _,
+                lParam: id as isize,
                 ..Default::default()
             };
             let idx = SendMessageW(
                 self.hwnd,
                 LVM_INSERTITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
+                0,
+                &lvi as *const _ as isize,
             );
-            let row = idx.0 as i32;
+            let row = idx as i32;
 
             // Set subitems
             lvi.mask = LVIF_TEXT;
             lvi.iItem = row;
 
+            // Helper macro for settings subitems to avoid repetition
+            // ... explicit calls are fine for now
+
             // Col 1 = Current State
             lvi.iSubItem = columns::CURRENT;
-            lvi.pszText = PWSTR(current_wide.as_ptr() as *mut _);
-            SendMessageW(
-                self.hwnd,
-                LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
-            );
+            lvi.pszText = current_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 2 = Algorithm
             lvi.iSubItem = columns::ALGORITHM;
-            lvi.pszText = PWSTR(algo_wide.as_ptr() as *mut _);
-            SendMessageW(
-                self.hwnd,
-                LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
-            );
+            lvi.pszText = algo_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 3 = Action
             lvi.iSubItem = columns::ACTION;
-            lvi.pszText = PWSTR(action_wide.as_ptr() as *mut _);
-            SendMessageW(
-                self.hwnd,
-                LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
-            );
+            lvi.pszText = action_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 4 = Size (logical/uncompressed)
             lvi.iSubItem = columns::SIZE;
-            lvi.pszText = PWSTR(size_wide.as_ptr() as *mut _);
-            SendMessageW(
-                self.hwnd,
-                LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
-            );
+            lvi.pszText = size_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 5 = On Disk (compressed size)
             lvi.iSubItem = columns::ON_DISK;
-            lvi.pszText = PWSTR(disk_wide.as_ptr() as *mut _);
-            SendMessageW(
-                self.hwnd,
-                LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
-            );
-
-            // Col 6 = Progress (empty initially)
-            // Left empty
+            lvi.pszText = disk_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 7 = Status (shows Pending)
             lvi.iSubItem = columns::STATUS;
-            lvi.pszText = PWSTR(status_wide.as_ptr() as *mut _);
-            SendMessageW(
-                self.hwnd,
-                LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
-            );
+            lvi.pszText = status_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 8 = Start button
             lvi.iSubItem = columns::START;
-            lvi.pszText = PWSTR(start_wide.as_ptr() as *mut _);
-            SendMessageW(
-                self.hwnd,
-                LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&lvi as *const _ as isize)),
-            );
+            lvi.pszText = start_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             row
         }
@@ -295,24 +260,22 @@ impl FileListView {
     /// * `col` - Column index (use `columns::*` constants)
     /// * `text` - New text value
     pub fn update_item_text(&self, row: i32, col: i32, text: &str) {
-        let text_wide = text.to_wide();
+        let text_wide = to_wstring(text);
 
         let item = LVITEMW {
             mask: LVIF_TEXT,
             iItem: row,
             iSubItem: col,
-            pszText: PWSTR(text_wide.as_ptr() as *mut _),
+            pszText: text_wide.as_ptr() as *mut _,
             ..Default::default()
         };
 
-        // SAFETY: SendMessageW with valid HWND and LVM_SETITEMW message.
-        // The item struct is valid for the duration of the call.
         unsafe {
             SendMessageW(
                 self.hwnd,
                 LVM_SETITEMW,
-                Some(WPARAM(0)),
-                Some(LPARAM(&item as *const _ as isize)),
+                0,
+                &item as *const _ as isize,
             );
         }
     }
@@ -322,24 +285,19 @@ impl FileListView {
         let mut selected = Vec::new();
         let mut item_idx: i32 = -1;
 
-        // SAFETY: SendMessageW with valid HWND and LVM_GETNEXTITEM message.
         unsafe {
             loop {
-                let start_param = if item_idx < 0 {
-                    usize::MAX
-                } else {
-                    item_idx as usize
-                };
+                let start_param = item_idx as usize;
                 let next = SendMessageW(
                     self.hwnd,
                     LVM_GETNEXTITEM,
-                    Some(WPARAM(start_param)),
-                    Some(LPARAM(LVNI_SELECTED as isize)),
+                    if item_idx < 0 { usize::MAX } else { start_param },
+                    LVNI_SELECTED as isize,
                 );
-                if next.0 < 0 {
+                if (next as i32) < 0 {
                     break;
                 }
-                item_idx = next.0 as i32;
+                item_idx = next as i32;
                 selected.push(item_idx as usize);
             }
         }
@@ -352,9 +310,8 @@ impl FileListView {
     /// # Arguments
     /// * `index` - Row index to remove (0-based)
     pub fn remove_item(&self, index: i32) {
-        // SAFETY: SendMessageW with valid HWND and LVM_DELETEITEM message.
         unsafe {
-            SendMessageW(self.hwnd, LVM_DELETEITEM, Some(WPARAM(index as usize)), None);
+            SendMessageW(self.hwnd, LVM_DELETEITEM, index as usize, 0);
         }
     }
 
@@ -363,16 +320,12 @@ impl FileListView {
     /// # Arguments
     /// * `is_dark` - Whether to apply dark mode theme
     pub fn set_theme(&self, is_dark: bool) {
-        // SAFETY: All Win32 calls use valid HWND and message parameters.
         unsafe {
             Self::allow_dark_mode_for_window(self.hwnd, is_dark);
 
             // Apply dark mode explorer theme (affects header, scrollbars, etc.)
-            if is_dark {
-                let _ = SetWindowTheme(self.hwnd, w!("DarkMode_ItemsView"), None);
-            } else {
-                let _ = SetWindowTheme(self.hwnd, w!("Explorer"), None);
-            }
+            let theme = if is_dark { to_wstring("DarkMode_ItemsView") } else { to_wstring("Explorer") };
+            let _ = SetWindowTheme(self.hwnd, theme.as_ptr(), std::ptr::null());
 
             // Set colors
             let (bg_color, text_color) = if is_dark {
@@ -381,40 +334,20 @@ impl FileListView {
                 (0x00FFFFFFu32, 0x00000000u32) // White bg, black text
             };
 
-            SendMessageW(
-                self.hwnd,
-                LVM_SETBKCOLOR,
-                Some(WPARAM(0)),
-                Some(LPARAM(bg_color as isize)),
-            );
-            SendMessageW(
-                self.hwnd,
-                LVM_SETTEXTBKCOLOR,
-                Some(WPARAM(0)),
-                Some(LPARAM(bg_color as isize)),
-            );
-            SendMessageW(
-                self.hwnd,
-                LVM_SETTEXTCOLOR,
-                Some(WPARAM(0)),
-                Some(LPARAM(text_color as isize)),
-            );
+            SendMessageW(self.hwnd, LVM_SETBKCOLOR, 0, bg_color as isize);
+            SendMessageW(self.hwnd, LVM_SETTEXTBKCOLOR, 0, bg_color as isize);
+            SendMessageW(self.hwnd, LVM_SETTEXTCOLOR, 0, text_color as isize);
 
             // Get and theme the header control
-            let header_result = SendMessageW(self.hwnd, LVM_GETHEADER, None, None);
-            let header = HWND(header_result.0 as *mut _);
+            let header = SendMessageW(self.hwnd, LVM_GETHEADER, 0, 0) as HWND;
 
-            if !header.is_invalid() {
+            if header != std::ptr::null_mut() {
                 Self::allow_dark_mode_for_window(header, is_dark);
-                if is_dark {
-                    let _ = SetWindowTheme(header, w!("DarkMode_ItemsView"), None);
-                } else {
-                    let _ = SetWindowTheme(header, w!("Explorer"), None);
-                }
+                let _ = SetWindowTheme(header, theme.as_ptr(), std::ptr::null());
             }
 
             // Force redraw
-            let _ = InvalidateRect(Some(self.hwnd), None, true);
+            let _ = InvalidateRect(self.hwnd, std::ptr::null(), 1);
         }
     }
 
@@ -423,14 +356,12 @@ impl FileListView {
     /// # Arguments
     /// * `main_hwnd` - Main window handle (passed to subclass proc for theme checks)
     pub fn apply_subclass(&self, main_hwnd: HWND) {
-        // SAFETY: SetWindowSubclass is called with valid HWND and callback.
-        // The main_hwnd is passed as reference data for theme checking.
         unsafe {
             let _ = SetWindowSubclass(
                 self.hwnd,
                 Some(listview_subclass_proc),
                 1, // Subclass ID
-                main_hwnd.0 as usize,
+                main_hwnd as usize,
             );
         }
     }
@@ -453,20 +384,25 @@ impl FileListView {
     /// Enables/disables dark mode for a window using undocumented uxtheme API.
     #[allow(non_snake_case)]
     unsafe fn allow_dark_mode_for_window(hwnd: HWND, allow: bool) { unsafe {
-        // SAFETY: LoadLibraryW and GetProcAddress are standard Win32 APIs.
-        // Ordinal 133 is the undocumented AllowDarkModeForWindow function.
-        if let Ok(uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
-            if let Some(func) = GetProcAddress(uxtheme, windows::core::PCSTR(133 as *const u8)) {
-                let allow_dark: extern "system" fn(HWND, bool) -> bool = std::mem::transmute(func);
-                allow_dark(hwnd, allow);
+        let lib_name = to_wstring("uxtheme.dll");
+        let uxtheme = LoadLibraryW(lib_name.as_ptr());
+        if uxtheme != std::ptr::null_mut() {
+            // Ordinal 133: AllowDarkModeForWindow
+            if let Some(func) = GetProcAddress(uxtheme, 133 as *const u8) {
+                 let allow_dark: extern "system" fn(HWND, bool) -> bool =
+                     std::mem::transmute(func);
+                 allow_dark(hwnd, allow);
             }
+            // Note: We intentionally leak the library handle as we might need it later/throughout app life
+            // or we could FreeLibrary(uxtheme) if we cache the function pointer? 
+            // For themes, keeping uxtheme loaded is standard.
         }
     }}
 }
 
 impl Component for FileListView {
     /// FileListView is created in its constructor, so this just returns Ok.
-    unsafe fn create(&mut self, _parent: HWND) -> Result<()> {
+    unsafe fn create(&mut self, _parent: HWND) -> Result<(), String> {
         // Already created in `new()` - nothing to do here
         Ok(())
     }
@@ -476,8 +412,6 @@ impl Component for FileListView {
     }
 
     unsafe fn on_resize(&mut self, parent_rect: &RECT) {
-        use windows::Win32::UI::WindowsAndMessaging::SWP_NOZORDER;
-        
         unsafe {
             let width = parent_rect.right - parent_rect.left;
             let height = parent_rect.bottom - parent_rect.top;
@@ -495,7 +429,7 @@ impl Component for FileListView {
 
             SetWindowPos(
                 self.hwnd,
-                None,
+                std::ptr::null_mut(),
                 padding,
                 list_y,
                 width - padding * 2,
@@ -526,26 +460,26 @@ unsafe extern "system" fn listview_subclass_proc(
     dwrefdata: usize,
 ) -> LRESULT { unsafe {
     // SAFETY: dwrefdata contains the main window HWND passed during subclass setup.
-    let main_hwnd = HWND(dwrefdata as *mut _);
+    let main_hwnd = dwrefdata as HWND;
 
     if umsg == WM_NOTIFY && crate::ui::theme::is_app_dark_mode(main_hwnd) {
         // SAFETY: lparam points to NMHDR struct provided by the system.
-        let nmhdr = &*(lparam.0 as *const NMHDR);
+        let nmhdr = &*(lparam as *const NMHDR);
 
         if nmhdr.code == NM_CUSTOMDRAW {
             // SAFETY: For NM_CUSTOMDRAW, lparam points to NMCUSTOMDRAW struct.
-            let nmcd = &mut *(lparam.0 as *mut NMCUSTOMDRAW);
+            let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
 
             if nmcd.dwDrawStage == CDDS_PREPAINT {
                 // Request item-level notifications
-                return LRESULT(CDRF_NOTIFYITEMDRAW as isize);
+                return CDRF_NOTIFYITEMDRAW as LRESULT;
             }
 
             if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
                 // Set text color to white for header items in dark mode
-                SetTextColor(nmcd.hdc, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
-                SetBkMode(nmcd.hdc, TRANSPARENT);
-                return LRESULT(CDRF_NEWFONT as isize);
+                SetTextColor(nmcd.hdc, 0x00FFFFFF);
+                SetBkMode(nmcd.hdc, TRANSPARENT as i32);
+                return CDRF_NEWFONT as LRESULT;
             }
         }
     }
@@ -553,4 +487,3 @@ unsafe extern "system" fn listview_subclass_proc(
     // SAFETY: DefSubclassProc is called with valid parameters.
     DefSubclassProc(hwnd, umsg, wparam, lparam)
 }}
-

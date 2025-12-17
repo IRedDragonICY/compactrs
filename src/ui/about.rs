@@ -1,6 +1,8 @@
-use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{
+#![allow(unsafe_op_in_unsafe_fn)]
+use crate::ui::utils::get_window_state;
+use crate::utils::to_wstring;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, SendMessageW,
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW, WM_SETFONT,
     WS_VISIBLE, WM_CREATE,
@@ -9,31 +11,30 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostQuitMessage, WM_CLOSE, DestroyWindow, 
     WM_NOTIFY, SetWindowLongPtrW, GWLP_USERDATA,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
+    GetWindowRect, CREATESTRUCTW, WS_TABSTOP,
 };
-use windows::Win32::Foundation::HINSTANCE;
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::{
+use windows_sys::Win32::Foundation::RECT;
+
+// Constants missing from windows-sys imports or feature gated
+const SS_CENTER: u32 = 0x1;
+const SS_ICON: u32 = 0x3;
+const SS_REALSIZEIMAGE: u32 = 0x800;
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Controls::{
     NMHDR, NM_CLICK, NM_RETURN, NMLINK, WC_LINK, ICC_LINK_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx,
     SetWindowTheme,
 };
-use windows::Win32::UI::Shell::ShellExecuteW;
-use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows::Win32::Graphics::Gdi::{
-    HBRUSH, COLOR_WINDOW, DeleteObject, HGDIOBJ,
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
+use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use windows_sys::Win32::Graphics::Gdi::{
+    HBRUSH, COLOR_WINDOW, DeleteObject,
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
-    DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT,
+    DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect,
 };
 
-// Removed: create_button, ButtonOpts, IDC_BTN_OK - OK button removed from About dialog
-use crate::ui::utils::get_window_state;
-
-const ABOUT_CLASS_NAME: PCWSTR = w!("CompactRS_About");
-const ABOUT_TITLE: PCWSTR = w!("About CompactRS");
-const GITHUB_URL: PCWSTR = w!("https://github.com/IRedDragonICY/compactrs");
-const LICENSE_URL: PCWSTR = w!("https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE");
-const SS_CENTER: u32 = 1;
-const SS_ICON: u32 = 0x3;
-const SS_REALSIZEIMAGE: u32 = 0x800;
+const ABOUT_TITLE: &str = "About CompactRS";
+const GITHUB_URL: &str = "https://github.com/IRedDragonICY/compactrs";
+const LICENSE_URL: &str = "https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE";
 
 struct AboutState {
     is_dark: bool,
@@ -44,302 +45,312 @@ impl Drop for AboutState {
     fn drop(&mut self) {
         if let Some(brush) = self.dark_brush {
             unsafe {
-                DeleteObject(HGDIOBJ(brush.0));
+                DeleteObject(brush);
             }
         }
     }
 }
 
 pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
-    unsafe {
-        let instance = GetModuleHandleW(None).unwrap_or_default();
-        
-        let wc = WNDCLASSW {
-            style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(about_wnd_proc),
-            hInstance: instance.into(),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            lpszClassName: ABOUT_CLASS_NAME,
-            hIcon: crate::ui::utils::load_app_icon(instance.into()),
-            hbrBackground: HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _),
-            ..Default::default()
-        };
-        RegisterClassW(&wc);
+    let instance = GetModuleHandleW(std::ptr::null());
+    let class_name = to_wstring("CompactRS_About");
+    let title = to_wstring(ABOUT_TITLE);
+    
+    // Load App Icon
+    let icon = crate::ui::utils::load_app_icon(instance);
+    
+    let wc = WNDCLASSW {
+        style: CS_HREDRAW | CS_VREDRAW,
+        lpfnWndProc: Some(about_wnd_proc),
+        hInstance: instance,
+        hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
+        lpszClassName: class_name.as_ptr(),
+        hIcon: icon,
+        hbrBackground: (COLOR_WINDOW + 1) as HBRUSH,
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        lpszMenuName: std::ptr::null(),
+    };
+    RegisterClassW(&wc);
 
-        // Calculate center position
-        let mut rect = windows::Win32::Foundation::RECT::default();
-        windows::Win32::UI::WindowsAndMessaging::GetWindowRect(parent, &mut rect).unwrap_or_default();
-        let p_width = rect.right - rect.left;
-        let p_height = rect.bottom - rect.top;
-        let width = 450;  // Wider for better text display
-        let height = 500; // Reduced height (no OK button)
-        let x = rect.left + (p_width - width) / 2;
-        let y = rect.top + (p_height - height) / 2;
+    // Calculate center position
+    let mut rect: RECT = std::mem::zeroed();
+    GetWindowRect(parent, &mut rect);
+    let p_width = rect.right - rect.left;
+    let p_height = rect.bottom - rect.top;
+    let width = 450;  // Wider for better text display
+    let height = 500; // Reduced height (no OK button)
+    let x = rect.left + (p_width - width) / 2;
+    let y = rect.top + (p_height - height) / 2;
 
-        let mut state = AboutState {
-            is_dark,
-            dark_brush: None,
-        };
+    let mut state = AboutState {
+        is_dark,
+        dark_brush: None,
+    };
 
-        let _hwnd = CreateWindowExW(
-            Default::default(),
-            ABOUT_CLASS_NAME,
-            ABOUT_TITLE,
-            WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-            x, y, width, height,
-            Some(parent),
-            None,
-            Some(instance.into()),
-            Some(&mut state as *mut _ as *mut _),
-        ).unwrap_or_default();
+    let _hwnd = CreateWindowExW(
+        0,
+        class_name.as_ptr(),
+        title.as_ptr(),
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        x, y, width, height,
+        parent,
+        std::ptr::null_mut(),
+        instance,
+        &mut state as *mut _ as *mut std::ffi::c_void,
+    );
 
-        // Non-modal: DON'T disable parent window
-        // EnableWindow(parent, false);
-        
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-        
-        // Non-modal: DON'T re-enable parent window
-        // EnableWindow(parent, true);
+    // Message loop
+    let mut msg: MSG = std::mem::zeroed();
+    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
 }
 
 unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe {
-        // Use centralized helper for state access
-        let get_state = || get_window_state::<AboutState>(hwnd);
+    // Use centralized helper for state access
+    let get_state = || get_window_state::<AboutState>(hwnd);
 
-        // Centralized handler for theme-related messages
-        if let Some(st) = get_state() {
-            if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, st.is_dark) {
-                return result;
+    // Centralized handler for theme-related messages
+    if let Some(st) = get_state() {
+        if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, st.is_dark) {
+            return result;
+        }
+    }
+
+    match msg {
+        // WM_APP + 2: Theme change broadcast from Settings
+        0x8002 => {
+            if let Some(st) = get_state() {
+                let new_is_dark = wparam == 1;
+                st.is_dark = new_is_dark;
+                
+                // Delete old brush if switching themes
+                if let Some(brush) = st.dark_brush.take() {
+                    DeleteObject(brush);
+                }
+                
+                // Update DWM title bar using centralized helper
+                crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
+                
+                // Force repaint
+                InvalidateRect(hwnd, std::ptr::null(), 1);
             }
-        }
-
-        match msg {
-            // WM_APP + 2: Theme change broadcast from Settings
-            0x8002 => {
-                if let Some(st) = get_state() {
-                    let new_is_dark = wparam.0 == 1;
-                    st.is_dark = new_is_dark;
-                    
-                    // Delete old brush if switching themes
-                    if let Some(brush) = st.dark_brush.take() {
-                        DeleteObject(HGDIOBJ(brush.0));
-                    }
-                    
-                    // Update DWM title bar using centralized helper
-                    crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
-                    
-                    // Force repaint
-                    windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), None, true);
-                }
-                LRESULT(0)
-            },
-            WM_CREATE => {
-                let createstruct = &*(lparam.0 as *const windows::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
-                let state_ptr = createstruct.lpCreateParams as *mut AboutState;
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
-                
-                let is_dark_mode = if let Some(st) = state_ptr.as_ref() { st.is_dark } else { false };
-                
-                // Apply DWM title bar color using centralized helper
-                crate::ui::theme::set_window_frame_theme(hwnd, is_dark_mode);
-                
-                let instance = GetModuleHandleW(None).unwrap_or_default();
-                
-                // Initialize Link Control
-                let iccex = INITCOMMONCONTROLSEX {
-                    dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
-                    dwICC: ICC_LINK_CLASS,
-                };
-                InitCommonControlsEx(&iccex);
-
-                let content_width = 410; // Wider content area
-                let margin = 20;
-
-                // Create modern fonts for visual hierarchy
-                let title_font = CreateFontW(
-                    -28, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
-                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI Variable Display"));
-                
-                let version_font = CreateFontW(
-                    -14, 0, 0, 0, FW_LIGHT.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
-                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI Variable Display"));
-                
-                let body_font = CreateFontW(
-                    -13, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, DEFAULT_CHARSET,
-                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI"));
-                
-                let creator_font = CreateFontW(
-                    -12, 0, 0, 0, FW_NORMAL.0 as i32, 1, 0, 0, DEFAULT_CHARSET, // Italic
-                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                    (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32, w!("Segoe UI"));
-
-                // Icon - Centered at top (Large Hero Icon)
-                let icon_size = 128;
-                let icon_x = (450 - icon_size) / 2;
-                
-                // Load icon from resources using centralized helper
-                let hinstance = HINSTANCE(instance.0);
-                
-                // Note: For the about dialog we want a larger icon display
-                // so we load at specific size using LR_DEFAULTCOLOR
-                let hicon = LoadImageW(
-                    Some(hinstance),
-                    PCWSTR(1 as *const u16),
-                    IMAGE_ICON,
-                    icon_size, icon_size,
-                    LR_DEFAULTCOLOR
-                ).unwrap_or_default();
-                
-                let icon_static = CreateWindowExW(
-                    Default::default(),
-                    w!("STATIC"),
-                    None,
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_ICON | SS_REALSIZEIMAGE | SS_CENTER),
-                    icon_x, 20, icon_size, icon_size,
-                    Some(hwnd),
-                    None,
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
-                
-                // Set the icon image
-                SendMessageW(icon_static, STM_SETICON, Some(WPARAM(hicon.0 as usize)), Some(LPARAM(0)));
-                
-                if is_dark_mode {
-                    // For static icons, theme might not be needed but good practice
-                    let _ = SetWindowTheme(icon_static, w!(""), w!(""));
-                }
-
-                // App Name - Large bold title
-                let app_name = CreateWindowExW(
-                    Default::default(),
-                    w!("STATIC"),
-                    w!("CompactRS"),
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 160, content_width, 40,
-                    Some(hwnd),
-                    None,
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
-                SendMessageW(app_name, WM_SETFONT, Some(WPARAM(title_font.0 as usize)), Some(LPARAM(1)));
-                if is_dark_mode {
-                    let _ = SetWindowTheme(app_name, w!(""), w!(""));
-                }
-
-                // Version - Lighter font
-                let version = CreateWindowExW(
-                    Default::default(),
-                    w!("STATIC"),
-                    w!("Version 0.1.0"),
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 205, content_width, 20,
-                    Some(hwnd),
-                    None,
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
-                SendMessageW(version, WM_SETFONT, Some(WPARAM(version_font.0 as usize)), Some(LPARAM(1)));
-                if is_dark_mode {
-                    let _ = SetWindowTheme(version, w!(""), w!(""));
-                }
-
-                // Description - Regular body text
-                let desc = CreateWindowExW(
-                    Default::default(),
-                    w!("STATIC"),
-                    w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."),
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 240, content_width, 130,
-                    Some(hwnd),
-                    None,
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
-                SendMessageW(desc, WM_SETFONT, Some(WPARAM(body_font.0 as usize)), Some(LPARAM(1)));
-                if is_dark_mode {
-                    let _ = SetWindowTheme(desc, w!(""), w!(""));
-                }
-
-                // Created by - Italic style
-                let creator = CreateWindowExW(
-                    Default::default(),
-                    w!("STATIC"),
-                    w!("Created by IRedDragonICY\n(Mohammad Farid Hendianto)"),
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | SS_CENTER),
-                    margin, 385, content_width, 40,
-                    Some(hwnd),
-                    None,
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
-                SendMessageW(creator, WM_SETFONT, Some(WPARAM(creator_font.0 as usize)), Some(LPARAM(1)));
-                if is_dark_mode {
-                    let _ = SetWindowTheme(creator, w!(""), w!(""));
-                }
-
-                // GitHub Link (SysLink) - Centered
-                let link_text = w!("<a href=\"https://github.com/IRedDragonICY/compactrs\">GitHub</a>  •  <a href=\"https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE\">License</a>");
-                let link = CreateWindowExW(
-                    Default::default(),
-                    WC_LINK,
-                    link_text,
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | windows::Win32::UI::WindowsAndMessaging::WS_TABSTOP.0),
-                    margin, 440, content_width, 25,
-                    Some(hwnd),
-                    None,
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
-                SendMessageW(link, WM_SETFONT, Some(WPARAM(body_font.0 as usize)), Some(LPARAM(1)));
-                if is_dark_mode {
-                    let _ = SetWindowTheme(link, w!(""), w!(""));
-                }
-
-                LRESULT(0)
-            },
-
-            WM_NOTIFY => {
-                let nmhdr = &*(lparam.0 as *const NMHDR);
-                // Handle SysLink clicks
-                if nmhdr.code == NM_CLICK || nmhdr.code == NM_RETURN {
-                     let nmlink = &*(lparam.0 as *const NMLINK);
-                     let item = nmlink.item;
-                     // Open URL
-                     if item.iLink == 0 {
-                          ShellExecuteW(None, w!("open"), GITHUB_URL, None, None, SW_SHOWNORMAL);
-                     } else if item.iLink == 1 {
-                          ShellExecuteW(None, w!("open"), LICENSE_URL, None, None, SW_SHOWNORMAL);
-                     }
-                }
-                LRESULT(0)
-            },
-
-             WM_CLOSE => {
-                // Non-modal: No need to re-enable parent
-                // if let Ok(parent) = GetParent(hwnd) {
-                //     let _ = EnableWindow(parent, true);
-                //     SetActiveWindow(parent);
-                // }
-                DestroyWindow(hwnd);
-                LRESULT(0)
-            },
+            0
+        },
+        WM_CREATE => {
+            let createstruct = &*(lparam as *const CREATESTRUCTW);
+            let state_ptr = createstruct.lpCreateParams as *mut AboutState;
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
             
-            WM_DESTROY => {
-                PostQuitMessage(0);
-                LRESULT(0)
-            },
+            let is_dark_mode = if let Some(st) = state_ptr.as_ref() { st.is_dark } else { false };
+            
+            // Apply DWM title bar color using centralized helper
+            crate::ui::theme::set_window_frame_theme(hwnd, is_dark_mode);
+            
+            let instance = GetModuleHandleW(std::ptr::null());
+            
+            // Initialize Link Control
+            let iccex = INITCOMMONCONTROLSEX {
+                dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+                dwICC: ICC_LINK_CLASS,
+            };
+            InitCommonControlsEx(&iccex);
 
-            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-        }
+            let content_width = 410; // Wider content area
+            let margin = 20;
+
+            // Create modern fonts for visual hierarchy
+            let segoe_ui_var = to_wstring("Segoe UI Variable Display");
+            let segoe_ui = to_wstring("Segoe UI");
+
+            let title_font = CreateFontW(
+                -28, 0, 0, 0, FW_BOLD as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
+                OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr());
+            
+            let version_font = CreateFontW(
+                -14, 0, 0, 0, FW_LIGHT as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
+                OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr());
+            
+            let body_font = CreateFontW(
+                -13, 0, 0, 0, FW_NORMAL as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
+                OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr());
+            
+            let creator_font = CreateFontW(
+                -12, 0, 0, 0, FW_NORMAL as i32, 1, 0, 0, DEFAULT_CHARSET as u32, // Italic
+                OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr());
+
+            // Icon - Centered at top (Large Hero Icon)
+            let icon_size = 128;
+            let icon_x = (450 - icon_size) / 2;
+            
+            // Note: For the about dialog we want a larger icon display
+            // so we load at specific size using LR_DEFAULTCOLOR
+            let hicon = LoadImageW(
+                instance, // Use instance instead of HINSTANCE struct
+                1 as *const u16, // Win32 MAKEINTRESOURCE(1)
+                IMAGE_ICON,
+                icon_size, icon_size,
+                LR_DEFAULTCOLOR
+            );
+            
+            let static_cls = to_wstring("STATIC");
+            
+            let icon_static = CreateWindowExW(
+                0,
+                static_cls.as_ptr(),
+                std::ptr::null(),
+                WS_VISIBLE | WS_CHILD | SS_ICON | SS_REALSIZEIMAGE | SS_CENTER,
+                icon_x, 20, icon_size, icon_size,
+                hwnd,
+                std::ptr::null_mut(), // ID 0 for static
+                instance,
+                std::ptr::null()
+            );
+            
+            // Set the icon image
+            SendMessageW(icon_static, STM_SETICON, hicon as WPARAM, 0);
+            
+            if is_dark_mode {
+                let empty = to_wstring("");
+                SetWindowTheme(icon_static, empty.as_ptr(), empty.as_ptr());
+            }
+
+            // App Name - Large bold title
+            let app_name_text = to_wstring("CompactRS");
+            let app_name = CreateWindowExW(
+                0,
+                static_cls.as_ptr(),
+                app_name_text.as_ptr(),
+                WS_VISIBLE | WS_CHILD | SS_CENTER,
+                margin, 160, content_width, 40,
+                hwnd,
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null()
+            );
+            SendMessageW(app_name, WM_SETFONT, title_font as WPARAM, 1);
+            if is_dark_mode {
+                let empty = to_wstring("");
+                SetWindowTheme(app_name, empty.as_ptr(), empty.as_ptr());
+            }
+
+            // Version - Lighter font
+            let ver_text = to_wstring("Version 0.1.0");
+            let version = CreateWindowExW(
+                0,
+                static_cls.as_ptr(),
+                ver_text.as_ptr(),
+                WS_VISIBLE | WS_CHILD | SS_CENTER,
+                margin, 205, content_width, 20,
+                hwnd,
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null()
+            );
+            SendMessageW(version, WM_SETFONT, version_font as WPARAM, 1);
+            if is_dark_mode {
+                let empty = to_wstring("");
+                SetWindowTheme(version, empty.as_ptr(), empty.as_ptr());
+            }
+
+            // Description - Regular body text
+            let desc_text = to_wstring("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary.");
+            let desc = CreateWindowExW(
+                0,
+                static_cls.as_ptr(),
+                desc_text.as_ptr(),
+                WS_VISIBLE | WS_CHILD | SS_CENTER,
+                margin, 240, content_width, 130,
+                hwnd,
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null()
+            );
+            SendMessageW(desc, WM_SETFONT, body_font as WPARAM, 1);
+            if is_dark_mode {
+                let empty = to_wstring("");
+                SetWindowTheme(desc, empty.as_ptr(), empty.as_ptr());
+            }
+
+            // Created by - Italic style
+            let creator_text = to_wstring("Created by IRedDragonICY\n(Mohammad Farid Hendianto)");
+            let creator = CreateWindowExW(
+                0,
+                static_cls.as_ptr(),
+                creator_text.as_ptr(),
+                WS_VISIBLE | WS_CHILD | SS_CENTER,
+                margin, 385, content_width, 40,
+                hwnd,
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null()
+            );
+            SendMessageW(creator, WM_SETFONT, creator_font as WPARAM, 1);
+            if is_dark_mode {
+                let empty = to_wstring("");
+                SetWindowTheme(creator, empty.as_ptr(), empty.as_ptr());
+            }
+
+            // GitHub Link (SysLink) - Centered
+            let link_text = to_wstring("<a href=\"https://github.com/IRedDragonICY/compactrs\">GitHub</a>  •  <a href=\"https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE\">License</a>");
+            let link_cls = WC_LINK; // Win32 constant in windows-sys
+            let link = CreateWindowExW(
+                0,
+                link_cls,
+                link_text.as_ptr(),
+                WS_VISIBLE | WS_CHILD | WS_TABSTOP,
+                margin, 440, content_width, 25,
+                hwnd,
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null()
+            );
+            SendMessageW(link, WM_SETFONT, body_font as WPARAM, 1);
+            if is_dark_mode {
+                let empty = to_wstring("");
+                SetWindowTheme(link, empty.as_ptr(), empty.as_ptr());
+            }
+
+            0
+        },
+
+        WM_NOTIFY => {
+            let nmhdr = &*(lparam as *const NMHDR);
+            // Handle SysLink clicks
+            if nmhdr.code == NM_CLICK || nmhdr.code == NM_RETURN {
+                 let nmlink = &*(lparam as *const NMLINK);
+                 let item = nmlink.item;
+                 
+                 let open = to_wstring("open");
+                 let github = to_wstring(GITHUB_URL);
+                 let license = to_wstring(LICENSE_URL);
+                 
+                 // Open URL
+                 if item.iLink == 0 {
+                      ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), github.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                 } else if item.iLink == 1 {
+                      ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), license.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                 }
+            }
+            0
+        },
+
+         WM_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        },
+        
+        WM_DESTROY => {
+            PostQuitMessage(0);
+            0
+        },
+
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }

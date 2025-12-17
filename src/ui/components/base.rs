@@ -3,8 +3,7 @@
 //! Defines the `Component` interface that all modular UI widgets must implement,
 //! enabling consistent lifecycle management for creation, layout, and theming.
 
-use windows::core::Result;
-use windows::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::Foundation::{HWND, RECT};
 
 /// A trait for modular UI components that can be created, resized, and themed.
 ///
@@ -26,7 +25,7 @@ use windows::Win32::Foundation::{HWND, RECT};
 /// }
 ///
 /// impl Component for MyComponent {
-///     unsafe fn create(&mut self, parent: HWND) -> Result<()> {
+///     unsafe fn create(&mut self, parent: HWND) -> Result<(), String> {
 ///         // Create child controls
 ///         Ok(())
 ///     }
@@ -52,7 +51,7 @@ pub trait Component {
     ///
     /// # Safety
     /// This function calls Win32 APIs that require a valid parent HWND.
-    unsafe fn create(&mut self, parent: HWND) -> Result<()>;
+    unsafe fn create(&mut self, parent: HWND) -> Result<(), String>;
 
     /// Returns the main HWND of this component, if applicable.
     ///
@@ -78,3 +77,4 @@ pub trait Component {
     /// This function calls Win32 APIs (like `SetWindowTheme`) that require valid HWNDs.
     unsafe fn on_theme_change(&mut self, is_dark: bool);
 }
+

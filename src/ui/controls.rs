@@ -1,17 +1,16 @@
-use windows::Win32::Foundation::{HWND, HINSTANCE};
-use windows::Win32::UI::WindowsAndMessaging::{
-    HMENU,
-    CreateWindowExW, 
-    WS_CHILD, WS_VISIBLE, WS_TABSTOP,
-    BS_AUTOCHECKBOX,
+#![allow(unsafe_op_in_unsafe_fn)]
+//! Helper module for creating UI controls.
+
+use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    HMENU, BS_AUTOCHECKBOX, WS_CHILD, WS_VISIBLE, CreateWindowExW, WS_TABSTOP
 };
-use windows::Win32::UI::Controls::SetWindowTheme;
-use windows::core::{w, PCWSTR};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::Controls::SetWindowTheme;
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use crate::utils::to_wstring;
 
-
+// Control IDs
 pub const IDC_COMBO_ALGO: u16 = 105;
-
 pub const IDC_STATIC_TEXT: u16 = 107;
 pub const IDC_PROGRESS_BAR: u16 = 108;
 pub const IDC_BTN_CANCEL: u16 = 109;
@@ -30,45 +29,51 @@ pub const IDC_CHK_FORCE: u16 = 119;
 pub const IDC_COMBO_ACTION_MODE: u16 = 120;
 
 
-
-
 /// Apply button theme dynamically (for theme changes after creation)
-pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) { unsafe {
-    if is_dark {
-        let _ = SetWindowTheme(hwnd, w!("DarkMode_Explorer"), None);
-    } else {
-        let _ = SetWindowTheme(hwnd, w!("Explorer"), None);
-    }
-}}
+pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
+    let theme_name = if is_dark { "DarkMode_Explorer" } else { "Explorer" };
+    SetWindowTheme(hwnd, to_wstring(theme_name).as_ptr(), std::ptr::null());
+}
 
 /// Apply ComboBox theme dynamically
-pub unsafe fn apply_combobox_theme(hwnd: HWND, is_dark: bool) { unsafe {
-    if is_dark {
-        let _ = SetWindowTheme(hwnd, w!("DarkMode_CFD"), None);
-    } else {
-        let _ = SetWindowTheme(hwnd, w!("Explorer"), None);
-    }
-}}
+pub unsafe fn apply_combobox_theme(hwnd: HWND, is_dark: bool) {
+    let theme_name = if is_dark { "DarkMode_CFD" } else { "Explorer" };
+    SetWindowTheme(hwnd, to_wstring(theme_name).as_ptr(), std::ptr::null());
+}
 
+/// Helper to create a checkbox.
+///
+/// # Arguments
+/// * `parent` - Parent window handle
+/// * `text` - Label text
+/// * `x`, `y`, `w`, `h` - Position and dimensions
+/// * `id` - Control ID
+///
+/// # Safety
+/// Calls Win32 CreateWindowExW API.
+pub unsafe fn create_checkbox(parent: HWND, text: &str, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND {
+    let instance = GetModuleHandleW(std::ptr::null());
+    let class_name = to_wstring("BUTTON");
+    let text_wide = to_wstring(text);
 
+    let hwnd = CreateWindowExW(
+        0,
+        class_name.as_ptr(),
+        text_wide.as_ptr(),
+        WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX as u32,
+        x,
+        y,
+        w,
+        h,
+        parent,
+        id as usize as HMENU,
+        instance,
+        std::ptr::null(),
+    );
+    
+    // Apply basic theme
+    let is_dark = crate::ui::theme::is_system_dark_mode();
+    apply_button_theme(hwnd, is_dark);
 
-
-
-pub unsafe fn create_checkbox(parent: HWND, text: PCWSTR, x: i32, y: i32, w: i32, h: i32, id: u16) -> HWND {
-    unsafe {
-        let module = GetModuleHandleW(None).unwrap();
-        let instance = HINSTANCE(module.0);
-        let hwnd = CreateWindowExW(
-            Default::default(),
-            w!("BUTTON"),
-            text,
-            windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0 | WS_TABSTOP.0 | BS_AUTOCHECKBOX as u32),
-            x, y, w, h,
-            Some(parent),
-            Some(HMENU(id as isize as *mut _)),
-            Some(instance),
-            None
-        ).unwrap_or_default();
-        hwnd
-    }
+    hwnd
 }

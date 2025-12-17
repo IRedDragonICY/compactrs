@@ -1,14 +1,16 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+
 //! HeaderPanel component - manages the header area with top-right buttons.
 //!
 //! This component contains the Settings, About, and Console buttons
 //! positioned in the top-right corner of the main window.
 
-use windows::core::Result;
-use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::WindowsAndMessaging::{
-    SetWindowPos, SWP_NOZORDER,
+use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SetWindowPos, SWP_NOZORDER, SendMessageW, WM_SETFONT,
 };
+use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
 use crate::ui::builder::ButtonBuilder;
@@ -40,9 +42,9 @@ impl HeaderPanel {
     /// Call `create()` to actually create the Win32 controls.
     pub fn new(ids: HeaderPanelIds) -> Self {
         Self {
-            hwnd_settings: HWND::default(),
-            hwnd_about: HWND::default(),
-            hwnd_console: HWND::default(),
+            hwnd_settings: std::ptr::null_mut(),
+            hwnd_about: std::ptr::null_mut(),
+            hwnd_console: std::ptr::null_mut(),
             ids,
         }
     }
@@ -72,25 +74,20 @@ impl HeaderPanel {
     ///
     /// # Safety
     /// Calls Win32 SendMessageW API.
-    pub unsafe fn set_font(&self, hfont: windows::Win32::Graphics::Gdi::HFONT) {
-        use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+    pub unsafe fn set_font(&self, hfont: HFONT) {
+        let wparam = hfont as usize;
+        let lparam = 1; // Redraw
         
-        unsafe {
-            let wparam = WPARAM(hfont.0 as usize);
-            let lparam = LPARAM(1); // Redraw
-            
-        SendMessageW(self.hwnd_settings, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_about, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_console, WM_SETFONT, Some(wparam), Some(lparam));
-        }
+        SendMessageW(self.hwnd_settings, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_about, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_console, WM_SETFONT, wparam, lparam);
     }
 }
 
 impl Component for HeaderPanel {
-    unsafe fn create(&mut self, parent: HWND) -> Result<()> {
+    unsafe fn create(&mut self, parent: HWND) -> Result<(), String> {
         unsafe {
-            let _module = GetModuleHandleW(None)?;
+            let _module = GetModuleHandleW(std::ptr::null());
 
             let is_dark = crate::ui::theme::is_system_dark_mode();
 
@@ -128,7 +125,7 @@ impl Component for HeaderPanel {
             // Position Settings button (Rightmost)
             SetWindowPos(
                 self.hwnd_settings,
-                None,
+                std::ptr::null_mut(),
                 width - padding - btn_width,
                 padding,
                 btn_width,
@@ -139,7 +136,7 @@ impl Component for HeaderPanel {
             // Position About button (Left of Settings)
             SetWindowPos(
                 self.hwnd_about,
-                None,
+                std::ptr::null_mut(),
                 width - padding - btn_width - 35,
                 padding,
                 btn_width,
@@ -150,7 +147,7 @@ impl Component for HeaderPanel {
             // Position Console button (Left of About)
             SetWindowPos(
                 self.hwnd_console,
-                None,
+                std::ptr::null_mut(),
                 width - padding - btn_width - 70,
                 padding,
                 btn_width,

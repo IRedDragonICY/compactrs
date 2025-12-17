@@ -1,6 +1,9 @@
-use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{
+use crate::ui::builder::ButtonBuilder;
+use crate::ui::theme;
+use crate::ui::utils::get_window_state;
+use crate::utils::to_wstring;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
     WS_VISIBLE, WM_CREATE, WM_COMMAND, SetWindowLongPtrW, GWLP_USERDATA,
@@ -8,17 +11,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetMessageW, TranslateMessage, DispatchMessageW, MSG,
     PostQuitMessage, WM_CLOSE, WM_TIMER, SetTimer, KillTimer,
     DestroyWindow, SetWindowTextW, GetDlgItem,
+    GetWindowRect, HMENU, CREATESTRUCTW,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
 
-
-use crate::ui::builder::ButtonBuilder;
-use crate::ui::theme;
-use crate::ui::utils::{ToWide, get_window_state};
-
-const DIALOG_CLASS_NAME: PCWSTR = w!("CompactRS_ForceStopDialog");
+const DIALOG_CLASS_NAME: &str = "CompactRS_ForceStopDialog";
 const TIMER_ID: usize = 1;
 const IDC_BTN_YES: u16 = 3001;
 const IDC_BTN_NO: u16 = 3002;
@@ -31,22 +30,27 @@ struct DialogState {
     is_dark: bool,
 }
 
-pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: bool) -> bool {
-    let instance = unsafe { GetModuleHandleW(None).unwrap_or_default() };
+pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: bool) -> bool { unsafe {
+    let instance = GetModuleHandleW(std::ptr::null());
+    let cls = to_wstring(DIALOG_CLASS_NAME);
+    let title = to_wstring("File Locked");
     
     let wc = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
         lpfnWndProc: Some(dialog_wnd_proc),
-        hInstance: instance.into(),
-        hCursor: unsafe { LoadCursorW(None, IDC_ARROW).unwrap_or_default() },
-        lpszClassName: DIALOG_CLASS_NAME,
-        hbrBackground: HBRUSH((COLOR_WINDOW.0 + 1) as isize as *mut _),
-        ..Default::default()
+        hInstance: instance,
+        hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
+        lpszClassName: cls.as_ptr(),
+        hbrBackground: (COLOR_WINDOW + 1) as HBRUSH,
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        hIcon: std::ptr::null_mut(),
+        lpszMenuName: std::ptr::null(),
     };
-    unsafe { RegisterClassW(&wc) };
+    RegisterClassW(&wc);
 
-    let mut rect = windows::Win32::Foundation::RECT::default();
-    unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(parent, &mut rect).unwrap_or_default() };
+    let mut rect: RECT = std::mem::zeroed();
+    GetWindowRect(parent, &mut rect);
     let p_width = rect.right - rect.left;
     let p_height = rect.bottom - rect.top;
     
@@ -63,33 +67,31 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
         is_dark,
     };
 
-    let _hwnd = unsafe { CreateWindowExW(
-        Default::default(),
-        DIALOG_CLASS_NAME,
-        w!("File Locked"),
+    let _hwnd = CreateWindowExW(
+        0,
+        cls.as_ptr(),
+        title.as_ptr(),
         WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU,
         x, y, width, height,
-        Some(parent),
-        None,
-        Some(instance.into()),
-        Some(&mut state as *mut _ as *mut _),
-    ).unwrap_or_default() };
+        parent,
+        std::ptr::null_mut(),
+        instance,
+        &mut state as *mut _ as *mut _,
+    );
 
-    unsafe { EnableWindow(parent, false) };
+    EnableWindow(parent, 0);
     
     // Message Loop
-    let mut msg = MSG::default();
-    while unsafe { GetMessageW(&mut msg, None, 0, 0).as_bool() } {
-        unsafe {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
+    let mut msg: MSG = std::mem::zeroed();
+    while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) != 0 {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
     
-    unsafe { EnableWindow(parent, true) };
+    EnableWindow(parent, 1);
     
     state.result
-}
+}}
 
 unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
     // Use centralized helper for state access
@@ -104,11 +106,11 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
 
     match msg {
         WM_CREATE => {
-            let createstruct = &*(lparam.0 as *const windows::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
+            let createstruct = &*(lparam as *const CREATESTRUCTW);
             let state_ptr = createstruct.lpCreateParams as *mut DialogState;
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
             
-            let instance = GetModuleHandleW(None).unwrap_or_default();
+            let instance = GetModuleHandleW(std::ptr::null());
             
             if let Some(st) = state_ptr.as_ref() {
                 let is_dark = st.is_dark;
@@ -118,19 +120,20 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
             
                 // Message Label
                 let msg_text = format!("Process '{}' is locking this file.\nForce Stop and try again?", st.process_name);
-                let msg_wide = msg_text.to_wide();
+                let msg_wide = to_wstring(&msg_text);
+                let static_cls = to_wstring("STATIC");
                 
                 let _h_msg = CreateWindowExW(
-                    Default::default(),
-                    w!("STATIC"),
-                    PCWSTR(msg_wide.as_ptr()),
-                    windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(WS_VISIBLE.0 | WS_CHILD.0),
+                    0,
+                    static_cls.as_ptr(),
+                    msg_wide.as_ptr(),
+                    WS_VISIBLE | WS_CHILD,
                     20, 20, 340, 60, // Widened label
-                    Some(hwnd),
-                    Some(windows::Win32::UI::WindowsAndMessaging::HMENU(IDC_LBL_MSG as isize as *mut _)),
-                    Some(instance.into()),
-                    None
-                ).unwrap_or_default();
+                    hwnd,
+                    IDC_LBL_MSG as isize as HMENU,
+                    instance,
+                    std::ptr::null()
+                );
                 
                 // Yes Button
                 ButtonBuilder::new(hwnd, IDC_BTN_YES)
@@ -142,22 +145,23 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                     .text(&no_text).pos(190, 90).size(130, 32).dark_mode(is_dark).build();
                 
                 // Start Timer
-                SetTimer(Some(hwnd), TIMER_ID, 1000, None);
+                SetTimer(hwnd, TIMER_ID, 1000, None);
             }
-            LRESULT(0)
+            0
         },
         
         WM_TIMER => {
-            if wparam.0 == TIMER_ID {
+            if wparam == TIMER_ID {
                 if let Some(st) = get_state() {
                     if st.seconds_left > 0 {
                         st.seconds_left -= 1;
                         
                         // Update No button text
                         let no_text = format!("Cancel ({})", st.seconds_left);
-                        let no_wide = no_text.to_wide();
-                        if let Ok(h_btn) = GetDlgItem(Some(hwnd), IDC_BTN_NO.into()) {
-                             let _ = SetWindowTextW(h_btn, PCWSTR(no_wide.as_ptr()));
+                        let no_wide = to_wstring(&no_text);
+                        let h_btn = GetDlgItem(hwnd, IDC_BTN_NO as i32);
+                        if h_btn != std::ptr::null_mut() {
+                             SetWindowTextW(h_btn, no_wide.as_ptr());
                         }
 
                         if st.seconds_left == 0 {
@@ -167,11 +171,11 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                     }
                 }
             }
-            LRESULT(0)
+            0
         },
         
         WM_COMMAND => {
-            let id = (wparam.0 & 0xFFFF) as u16;
+            let id = (wparam & 0xFFFF) as u16;
             match id {
                 IDC_BTN_YES => {
                     if let Some(st) = get_state() {
@@ -187,7 +191,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 },
                 _ => {}
             }
-            LRESULT(0)
+            0
         },
         
         WM_CLOSE => {
@@ -195,13 +199,13 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 st.result = false;
             }
             DestroyWindow(hwnd);
-            LRESULT(0)
+            0
         }
 
         WM_DESTROY => {
-            KillTimer(Some(hwnd), TIMER_ID);
+            KillTimer(hwnd, TIMER_ID);
             PostQuitMessage(0);
-            LRESULT(0)
+            0
         },
         
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),

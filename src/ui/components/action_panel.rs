@@ -1,11 +1,15 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+
 //! ActionPanel component - groups all action buttons and controls.
 //!
 //! This component manages the action bar at the bottom of the main window,
 //! containing buttons for file operations, algorithm selection, and process control.
 
-use windows::core::Result;
-use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER};
+use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    SetWindowPos, SWP_NOZORDER, SendMessageW, WM_SETFONT,
+};
+use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
@@ -46,14 +50,14 @@ impl ActionPanel {
     /// Call `create()` to actually create the Win32 controls.
     pub fn new(ids: ActionPanelIds) -> Self {
         Self {
-            hwnd_files: HWND::default(),
-            hwnd_folder: HWND::default(),
-            hwnd_remove: HWND::default(),
-            hwnd_action_mode: HWND::default(),
-            hwnd_combo: HWND::default(),
-            hwnd_force: HWND::default(),
-            hwnd_process: HWND::default(),
-            hwnd_cancel: HWND::default(),
+            hwnd_files: std::ptr::null_mut(),
+            hwnd_folder: std::ptr::null_mut(),
+            hwnd_remove: std::ptr::null_mut(),
+            hwnd_action_mode: std::ptr::null_mut(),
+            hwnd_combo: std::ptr::null_mut(),
+            hwnd_force: std::ptr::null_mut(),
+            hwnd_process: std::ptr::null_mut(),
+            hwnd_cancel: std::ptr::null_mut(),
             ids,
         }
     }
@@ -113,29 +117,24 @@ impl ActionPanel {
     ///
     /// # Safety
     /// Calls Win32 SendMessageW API.
-    pub unsafe fn set_font(&self, hfont: windows::Win32::Graphics::Gdi::HFONT) {
-        use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+    pub unsafe fn set_font(&self, hfont: HFONT) {
+        let wparam = hfont as usize;
+        let lparam = 1; // Redraw
         
-        unsafe {
-            let wparam = WPARAM(hfont.0 as usize);
-            let lparam = LPARAM(1); // Redraw
-            
-            SendMessageW(self.hwnd_files, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_folder, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_remove, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_action_mode, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_combo, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_force, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_process, WM_SETFONT, Some(wparam), Some(lparam));
-            SendMessageW(self.hwnd_cancel, WM_SETFONT, Some(wparam), Some(lparam));
-        }
+        SendMessageW(self.hwnd_files, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_folder, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_remove, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_action_mode, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_combo, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_force, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_process, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_cancel, WM_SETFONT, wparam, lparam);
     }
 
 }
 
 impl Component for ActionPanel {
-    unsafe fn create(&mut self, parent: HWND) -> Result<()> { unsafe {
+    unsafe fn create(&mut self, parent: HWND) -> Result<(), String> { unsafe {
         // Initial positions (will be updated in on_resize)
         let btn_h = 32;
         let btn_y = 460;
@@ -234,7 +233,7 @@ impl Component for ActionPanel {
             // Files button
             SetWindowPos(
                 self.hwnd_files,
-                None,
+                std::ptr::null_mut(),
                 padding,
                 btn_y,
                 55,
@@ -245,7 +244,7 @@ impl Component for ActionPanel {
             // Folder button
             SetWindowPos(
                 self.hwnd_folder,
-                None,
+                std::ptr::null_mut(),
                 padding + 60,
                 btn_y,
                 55,
@@ -256,7 +255,7 @@ impl Component for ActionPanel {
             // Remove button
             SetWindowPos(
                 self.hwnd_remove,
-                None,
+                std::ptr::null_mut(),
                 padding + 120,
                 btn_y,
                 65,
@@ -267,7 +266,7 @@ impl Component for ActionPanel {
             // Action Mode combo
             SetWindowPos(
                 self.hwnd_action_mode,
-                None,
+                std::ptr::null_mut(),
                 padding + 190,
                 btn_y,
                 100,
@@ -278,7 +277,7 @@ impl Component for ActionPanel {
             // Algorithm combo
             SetWindowPos(
                 self.hwnd_combo,
-                None,
+                std::ptr::null_mut(),
                 padding + 295,
                 btn_y,
                 100,
@@ -289,7 +288,7 @@ impl Component for ActionPanel {
             // Force checkbox
             SetWindowPos(
                 self.hwnd_force,
-                None,
+                std::ptr::null_mut(),
                 padding + 400,
                 btn_y,
                 60,
@@ -300,7 +299,7 @@ impl Component for ActionPanel {
             // Process All button
             SetWindowPos(
                 self.hwnd_process,
-                None,
+                std::ptr::null_mut(),
                 padding + 465,
                 btn_y,
                 90,
@@ -311,7 +310,7 @@ impl Component for ActionPanel {
             // Cancel button
             SetWindowPos(
                 self.hwnd_cancel,
-                None,
+                std::ptr::null_mut(),
                 padding + 560,
                 btn_y,
                 70,
