@@ -11,7 +11,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: compactrs
-  UPX_VERSION: "4.2.4"
 
 jobs:
   build:
@@ -31,6 +30,15 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+
+      - name: Check latest UPX version
+        id: upx-version
+        run: |
+          $latest = (Invoke-RestMethod -Uri "https://api.github.com/repos/upx/upx/releases/latest").tag_name
+          $version = $latest -replace '^v', ''
+          echo "UPX_VERSION=$version" >> $env:GITHUB_ENV
+          Write-Host "Detected latest UPX version: $version"
+        shell: pwsh
 
       - name: Cache UPX
         id: cache-upx
@@ -54,7 +62,7 @@ jobs:
       - name: Compress binary with UPX
         run: |
           $originalSize = (Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length
-          ./upx.exe --best --lzma "target/release/${{ env.BINARY_NAME }}.exe"
+          ./upx.exe --ultra-brute "target/release/${{ env.BINARY_NAME }}.exe"
           $compressedSize = (Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length
           $ratio = [math]::Round(($compressedSize / $originalSize) * 100, 2)
           Write-Host "Original: $([math]::Round($originalSize / 1KB, 2)) KB"
