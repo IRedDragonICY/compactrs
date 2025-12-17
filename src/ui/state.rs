@@ -1,9 +1,36 @@
 use windows::Win32::Foundation::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{Arc, atomic::AtomicU8};
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
 use crate::ui::components::{FileListView, Component};
+
+/// Processing state for items (state machine)
+/// Used with AtomicU8 for thread-safe state transitions
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessingState {
+    /// Not started or finished processing
+    Idle = 0,
+    /// Actively processing files
+    Running = 1,
+    /// Paused by user, can be resumed
+    Paused = 2,
+    /// Cancelled/stopped, cannot be resumed
+    Stopped = 3,
+}
+
+impl ProcessingState {
+    /// Convert from raw u8 value (for AtomicU8 loads)
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => ProcessingState::Running,
+            2 => ProcessingState::Paused,
+            3 => ProcessingState::Stopped,
+            _ => ProcessingState::Idle,
+        }
+    }
+}
 
 /// App Theme Preference
 #[repr(u32)]
@@ -74,7 +101,7 @@ pub struct BatchItem {
     pub action: BatchAction,        // Compress or Decompress
     pub status: BatchStatus,        // Pending, Processing, Complete, Error
     pub progress: (u64, u64),       // (current, total) files
-    pub cancel_token: Option<Arc<AtomicBool>>, // Cancellation token for this item
+    pub state_flag: Option<Arc<AtomicU8>>, // Processing state (0=Idle, 1=Running, 2=Paused, 3=Stopped)
 }
 
 impl BatchItem {
@@ -86,7 +113,7 @@ impl BatchItem {
             action: BatchAction::Compress,
             status: BatchStatus::Pending,
             progress: (0, 0),
-            cancel_token: None,
+            state_flag: None,
         }
     }
 }
@@ -154,7 +181,7 @@ pub struct AppState {
     pub controls: Option<Controls>,
     pub tx: Sender<UiMessage>,
     pub rx: Receiver<UiMessage>,
-    pub cancel_flag: Arc<AtomicBool>,
+    pub global_state: Arc<AtomicU8>, // Global processing state (0=Idle, 1=Running, 2=Paused, 3=Stopped)
     
     // Settings
     pub config: AppConfig,
@@ -179,7 +206,7 @@ impl AppState {
             controls: None,
             tx,
             rx,
-            cancel_flag: Arc::new(AtomicBool::new(false)),
+            global_state: Arc::new(AtomicU8::new(ProcessingState::Idle as u8)),
             config,
             theme: config.theme,
             logs: Vec::new(),

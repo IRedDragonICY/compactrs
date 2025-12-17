@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
+use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, Ordering}};
 use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use crate::ui::utils::format_size;
-use crate::ui::state::{UiMessage, BatchAction};
+use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
 use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
 use crate::ui::utils::ToWide;
 use windows::Win32::Foundation::{HWND, WPARAM, LPARAM};
@@ -57,16 +57,17 @@ fn should_skip_extension(path: &str) -> bool {
 /// # Arguments
 /// * `path` - Directory path to traverse
 /// * `files` - Vector to collect file paths
-/// * `cancel` - Cancellation flag
+/// * `state` - Processing state flag (stops if Stopped=3)
 /// 
 /// # Performance
 /// Uses `FindExInfoBasic` (faster, skips short name) and `FIND_FIRST_EX_LARGE_FETCH` for batch prefetching.
 fn walk_directory_win32_collect(
     path: &str,
     files: &mut Vec<String>,
-    cancel: &Arc<AtomicBool>,
+    state: &Arc<AtomicU8>,
 ) {
-    if cancel.load(Ordering::Relaxed) {
+    // Stop collection if state is Stopped (3)
+    if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
         return;
     }
 
@@ -97,7 +98,8 @@ fn walk_directory_win32_collect(
         let handle = handle.unwrap();
 
         loop {
-            if cancel.load(Ordering::Relaxed) {
+            // Check if stopped
+            if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                 let _ = FindClose(handle);
                 return;
             }
@@ -116,7 +118,7 @@ fn walk_directory_win32_collect(
 
                 if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0 {
                     // It's a directory - recurse
-                    walk_directory_win32_collect(&full_path, files, cancel);
+                    walk_directory_win32_collect(&full_path, files, state);
                 } else {
                     // It's a file - add to vector
                     files.push(full_path);
@@ -592,7 +594,7 @@ pub fn batch_process_worker(
     items: Vec<(String, BatchAction, usize)>, 
     algo: WofAlgorithm, 
     tx: Sender<UiMessage>, 
-    cancel: Arc<AtomicBool>,
+    state: Arc<AtomicU8>,
     force: bool,
     main_hwnd: usize
 ) {
@@ -644,11 +646,12 @@ pub fn batch_process_worker(
     let row_totals = Arc::new(row_totals);
     
     // Producer thread: walks directories and sends tasks
-    let cancel_producer = Arc::clone(&cancel);
+    let state_producer = Arc::clone(&state);
     let items_for_producer = items.clone();
     let producer_handle = std::thread::spawn(move || {
         for (path, action, row) in items_for_producer {
-            if cancel_producer.load(Ordering::Relaxed) {
+            // Check if stopped
+            if state_producer.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                 break;
             }
             
@@ -658,10 +661,10 @@ pub fn batch_process_worker(
             } else {
                 // Directory - collect files then send
                 let mut files = Vec::new();
-                walk_directory_win32_collect(&path, &mut files, &cancel_producer);
+                walk_directory_win32_collect(&path, &mut files, &state_producer);
                 
                 for file_path in files {
-                    if cancel_producer.load(Ordering::Relaxed) {
+                    if state_producer.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                         break;
                     }
                     let _ = file_tx.send(FileTask { 
@@ -686,7 +689,7 @@ pub fn batch_process_worker(
             let row_counts_ref = Arc::clone(&row_processed_counts);
             let row_totals_ref = Arc::clone(&row_totals);
             let tx_clone = tx.clone();
-            let cancel_ref = Arc::clone(&cancel);
+            let state_ref = Arc::clone(&state);
             let algo_copy = algo;
             let force_copy = force;
             let hwnd_val = main_hwnd;
@@ -695,7 +698,13 @@ pub fn batch_process_worker(
             s.spawn(move || {
                 // Consume tasks from channel
                 while let Some(task) = shared_rx_clone.recv() {
-                    if cancel_ref.load(Ordering::Relaxed) {
+                    // Handle pause: busy-wait while paused
+                    while state_ref.load(Ordering::Relaxed) == ProcessingState::Paused as u8 {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    
+                    // Check if stopped after potential pause
+                    if state_ref.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                         break;
                     }
 
@@ -746,7 +755,7 @@ pub fn batch_process_worker(
     // Wait for producer to finish
     let _ = producer_handle.join();
     
-    if cancel.load(Ordering::Relaxed) {
+    if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
         let _ = tx.send(UiMessage::Status("Batch processing cancelled.".to_string()));
          let _ = tx.send(UiMessage::Finished);
         return;
@@ -785,7 +794,7 @@ pub fn single_item_worker(
     action: BatchAction, 
     row: i32, 
     tx: Sender<UiMessage>, 
-    cancel: Arc<AtomicBool>,
+    state: Arc<AtomicU8>,
     force: bool,
     main_hwnd: usize
 ) {
@@ -813,8 +822,13 @@ pub fn single_item_worker(
     let _ = tx.send(UiMessage::RowUpdate(row, format!("0/{}", total_files), "Running".to_string(), "".to_string()));
     
     if is_single_file {
-        // Process single file directly
-        if cancel.load(Ordering::Relaxed) {
+        // Handle pause for single file
+        while state.load(Ordering::Relaxed) == ProcessingState::Paused as u8 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        
+        // Check if stopped
+        if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
             let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
             let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
             let _ = tx.send(UiMessage::Finished);
@@ -860,14 +874,14 @@ pub fn single_item_worker(
         
         // Collect files first (required because we need to count them)
         let mut files = Vec::new();
-        walk_directory_win32_collect(&path, &mut files, &cancel);
+        walk_directory_win32_collect(&path, &mut files, &state);
         total_files = files.len() as u64;
         
         // Producer thread
-        let cancel_producer = Arc::clone(&cancel);
+        let state_producer = Arc::clone(&state);
         let producer_handle = std::thread::spawn(move || {
             for file_path in files {
-                if cancel_producer.load(Ordering::Relaxed) {
+                if state_producer.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                     break;
                 }
                 let _ = file_tx.send(file_path);
@@ -882,7 +896,7 @@ pub fn single_item_worker(
                 let processed_ref = Arc::clone(&processed);
                 let success_ref = Arc::clone(&success_atomic);
                 let failed_ref = Arc::clone(&failed_atomic);
-                let cancel_ref = Arc::clone(&cancel);
+                let state_ref = Arc::clone(&state);
                 let algo_copy = algo;
                 let action_copy = action;
                 let tx_clone = tx.clone();
@@ -893,7 +907,13 @@ pub fn single_item_worker(
 
                 s.spawn(move || {
                     while let Some(file_path) = shared_rx_clone.recv() {
-                        if cancel_ref.load(Ordering::Relaxed) {
+                        // Handle pause: busy-wait while paused
+                        while state_ref.load(Ordering::Relaxed) == ProcessingState::Paused as u8 {
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                        
+                        // Check if stopped after potential pause
+                        if state_ref.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                             break;
                         }
                         
@@ -933,7 +953,7 @@ pub fn single_item_worker(
         // Wait for producer
         let _ = producer_handle.join();
         
-        if cancel.load(Ordering::Relaxed) {
+        if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
             let _ = tx.send(UiMessage::ItemFinished(row, "Cancelled".to_string(), "".to_string(), crate::engine::wof::CompressionState::None));
             let _ = tx.send(UiMessage::Status("Cancelled.".to_string()));
             let _ = tx.send(UiMessage::Finished);

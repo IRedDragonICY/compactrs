@@ -11,6 +11,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WM_TIMER, SetTimer,
     MB_ICONINFORMATION, WM_NOTIFY, BM_GETCHECK, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
+    WM_CONTEXTMENU, TrackPopupMenu, CreatePopupMenu, AppendMenuW, MF_STRING, TPM_RETURNCMD, TPM_LEFTALIGN,
+    DestroyMenu, GetCursorPos,
 };
 use windows::Win32::UI::Shell::{
     DragQueryFileW, DragFinish, HDROP, FileOpenDialog, IFileOpenDialog,
@@ -30,11 +32,11 @@ use crate::ui::components::{
 use crate::ui::settings::show_settings_modal;
 use crate::ui::about::show_about_modal;
 use crate::ui::console::{show_console_window, append_log_msg};
-use crate::ui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme};
+use crate::ui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme, ProcessingState};
 use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
 use crate::ui::theme; // New theme module import
 use std::thread;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::{AtomicU8, Ordering}};
 use windows::Win32::UI::Controls::{
     PBM_SETRANGE32, PBM_SETPOS, NM_DBLCLK, NMITEMACTIVATE,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
@@ -426,8 +428,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     SetWindowTextW(ctrls.status_bar.label_hwnd(), PCWSTR::from_raw(wstr.as_ptr()));
                                     
                                     let tx = st.tx.clone();
-                                    let cancel = st.cancel_flag.clone();
-                                    cancel.store(false, Ordering::Relaxed);
+                                    let state = st.global_state.clone();
+                                    state.store(ProcessingState::Running as u8, Ordering::Relaxed);
                                     
                                     // Get action mode
                                     let action_mode_idx = SendMessageW(ctrls.action_panel.action_mode_hwnd(), CB_GETCURSEL, Some(WPARAM(0)), Some(LPARAM(0)));
@@ -449,7 +451,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     let main_hwnd_usize = hwnd.0 as usize; // Cast to usize for thread safety
 
                                     thread::spawn(move || {
-                                        batch_process_worker(items, algo, tx, cancel, force, main_hwnd_usize);
+                                        batch_process_worker(items, algo, tx, state, force, main_hwnd_usize);
                                     });
                                 }
                             }
@@ -458,13 +460,22 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     
                     IDC_BTN_CANCEL => {
                         if let Some(st) = get_state() {
-                            st.cancel_flag.store(true, Ordering::Relaxed);
+                            // Stop all processing globally
+                            st.global_state.store(ProcessingState::Stopped as u8, Ordering::Relaxed);
+                            
+                            // Also stop all individual items
+                            for item in &st.batch_items {
+                                if let Some(state_flag) = &item.state_flag {
+                                    state_flag.store(ProcessingState::Stopped as u8, Ordering::Relaxed);
+                                }
+                            }
+                            
                             if let Some(tb) = &st.taskbar {
                                 tb.set_state(TaskbarState::Paused);
                             }
                             if let Some(ctrls) = &st.controls {
                                 let _ = EnableWindow(ctrls.action_panel.cancel_hwnd(), false);
-                                let _ = SetWindowTextW(ctrls.status_bar.label_hwnd(), w!("Cancelling..."));
+                                let _ = SetWindowTextW(ctrls.status_bar.label_hwnd(), w!("Stopping..."));
                             }
                         }
                     },
@@ -612,7 +623,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                             // Update item status in AppState
                                             if let Some(item) = st.batch_items.get_mut(row as usize) {
                                                 item.status = BatchStatus::Pending;
-                                                item.cancel_token = None; // Clear the token
+                                                item.state_flag = None; // Clear the state flag
                                             }
                                         }
                                     },
@@ -850,41 +861,76 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         }
                                     }
                                 } else if col == 8 {
-                                    // Start/Stop button clicked
+                                    // Start/Pause/Resume button clicked
                                     if let Some(item) = st.batch_items.get_mut(row_idx) {
-                                        // Check if running
-                                        if let BatchStatus::Processing = item.status {
-                                            // Stop
-                                            if let Some(token) = &item.cancel_token {
-                                                token.store(true, Ordering::Relaxed);
-                                            }
-                                            if let Some(ctrls) = &st.controls {
-                                                ctrls.file_list.update_item_text(row, 7, "Stopping...");
+                                        // Check current state
+                                        if let Some(state_flag) = &item.state_flag {
+                                            let current_state = ProcessingState::from_u8(state_flag.load(Ordering::Relaxed));
+                                            match current_state {
+                                                ProcessingState::Running => {
+                                                    // Pause
+                                                    state_flag.store(ProcessingState::Paused as u8, Ordering::Relaxed);
+                                                    if let Some(ctrls) = &st.controls {
+                                                        ctrls.file_list.update_item_text(row, 8, "▶ Resume");
+                                                        ctrls.file_list.update_item_text(row, 7, "Paused");
+                                                    }
+                                                }
+                                                ProcessingState::Paused => {
+                                                    // Resume
+                                                    state_flag.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                                                    if let Some(ctrls) = &st.controls {
+                                                        ctrls.file_list.update_item_text(row, 8, "⏸ Pause");
+                                                        ctrls.file_list.update_item_text(row, 7, "Running");
+                                                    }
+                                                }
+                                                ProcessingState::Idle | ProcessingState::Stopped => {
+                                                    // Restart - start fresh
+                                                    let path = item.path.clone();
+                                                    let algo = item.algorithm;
+                                                    let action = item.action;
+                                                    let tx = st.tx.clone();
+                                                    
+                                                    // Create new state flag
+                                                    let new_state = Arc::new(AtomicU8::new(ProcessingState::Running as u8));
+                                                    item.state_flag = Some(new_state.clone());
+                                                    item.status = BatchStatus::Processing;
+                                                    
+                                                    if let Some(ctrls) = &st.controls {
+                                                        ctrls.file_list.update_item_text(row, 8, "⏸ Pause");
+                                                        ctrls.file_list.update_item_text(row, 7, "Running");
+                                                    }
+                                                    
+                                                    let force = st.force_compress;
+                                                    let row_for_thread = row;
+                                                    let main_hwnd_usize = hwnd.0 as usize;
+                                                    thread::spawn(move || {
+                                                        single_item_worker(path, algo, action, row_for_thread, tx, new_state, force, main_hwnd_usize);
+                                                    });
+                                                }
                                             }
                                         } else {
-                                            // Start
+                                            // No state_flag = not running, start processing
                                             let path = item.path.clone();
                                             let algo = item.algorithm;
                                             let action = item.action;
                                             let tx = st.tx.clone();
                                             
-                                            // Create per-item cancellation token
-                                            let token = Arc::new(AtomicBool::new(false));
-                                            item.cancel_token = Some(token.clone());
+                                            // Create per-item state flag
+                                            let state_flag = Arc::new(AtomicU8::new(ProcessingState::Running as u8));
+                                            item.state_flag = Some(state_flag.clone());
                                             item.status = BatchStatus::Processing;
                                             
                                             // Update status and Button using facade
                                             if let Some(ctrls) = &st.controls {
-                                                ctrls.file_list.update_item_text(row, 6, "Running");
-                                                ctrls.file_list.update_item_text(row, 7, "■ Stop");
+                                                ctrls.file_list.update_item_text(row, 8, "⏸ Pause");
+                                                ctrls.file_list.update_item_text(row, 7, "Running");
                                             }
                                             
-                                            let force = st.force_compress; // Capture force flag
-                                            
+                                            let force = st.force_compress;
                                             let row_for_thread = row;
                                             let main_hwnd_usize = hwnd.0 as usize;
                                             thread::spawn(move || {
-                                                single_item_worker(path, algo, action, row_for_thread, tx, token, force, main_hwnd_usize);
+                                                single_item_worker(path, algo, action, row_for_thread, tx, state_flag, force, main_hwnd_usize);
                                             });
                                         }
                                     }
@@ -912,6 +958,86 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 // Note: Header NM_CUSTOMDRAW is handled by listview_subclass_proc
                 // Header sends NM_CUSTOMDRAW to its parent (ListView), not to main window
                 
+                LRESULT(0)
+            }
+            
+            WM_CONTEXTMENU => {
+                // Check if context menu is for our ListView
+                let hwnd_from = HWND(wparam.0 as *mut _);
+                if let Some(st) = get_state() {
+                    if let Some(ctrls) = &st.controls {
+                        if hwnd_from == ctrls.file_list.hwnd() {
+                            // Get selected item indices
+                            let selected = ctrls.file_list.get_selected_indices();
+                            
+                            if !selected.is_empty() {
+                                // Get cursor position for menu
+                                let mut pt = windows::Win32::Foundation::POINT::default();
+                                GetCursorPos(&mut pt);
+                                
+                                // Create popup menu
+                                let menu = CreatePopupMenu();
+                                if let Ok(menu) = menu {
+                                    // Menu item IDs
+                                    const ID_PAUSE: u32 = 1001;
+                                    const ID_RESUME: u32 = 1002;
+                                    const ID_STOP: u32 = 1003;
+                                    
+                                    // Check first selected item's state
+                                    let first_idx = selected[0];
+                                    if let Some(item) = st.batch_items.get(first_idx) {
+                                        if let Some(state_flag) = &item.state_flag {
+                                            let current_state = ProcessingState::from_u8(state_flag.load(Ordering::Relaxed));
+                                            match current_state {
+                                                ProcessingState::Running => {
+                                                    let _ = AppendMenuW(menu, MF_STRING, ID_PAUSE as usize, w!("⏸ Pause"));
+                                                    let _ = AppendMenuW(menu, MF_STRING, ID_STOP as usize, w!("■ Stop"));
+                                                }
+                                                ProcessingState::Paused => {
+                                                    let _ = AppendMenuW(menu, MF_STRING, ID_RESUME as usize, w!("▶ Resume"));
+                                                    let _ = AppendMenuW(menu, MF_STRING, ID_STOP as usize, w!("■ Stop"));
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Show menu and get selection
+                                    let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, Some(0), hwnd, None);
+                                    let _ = DestroyMenu(menu);
+                                    
+                                    // Handle menu selection
+                                    if cmd.as_bool() {
+                                        let cmd_id = cmd.0 as u32;
+                                        for &idx in &selected {
+                                            if let Some(item) = st.batch_items.get(idx) {
+                                                if let Some(state_flag) = &item.state_flag {
+                                                    match cmd_id {
+                                                        ID_PAUSE => {
+                                                            state_flag.store(ProcessingState::Paused as u8, Ordering::Relaxed);
+                                                            ctrls.file_list.update_item_text(idx as i32, 8, "▶ Resume");
+                                                            ctrls.file_list.update_item_text(idx as i32, 7, "Paused");
+                                                        }
+                                                        ID_RESUME => {
+                                                            state_flag.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                                                            ctrls.file_list.update_item_text(idx as i32, 8, "⏸ Pause");
+                                                            ctrls.file_list.update_item_text(idx as i32, 7, "Running");
+                                                        }
+                                                        ID_STOP => {
+                                                            state_flag.store(ProcessingState::Stopped as u8, Ordering::Relaxed);
+                                                            ctrls.file_list.update_item_text(idx as i32, 7, "Stopping...");
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 LRESULT(0)
             }
 
