@@ -10,7 +10,6 @@ use windows_sys::Win32::Storage::FileSystem::{
 use std::ptr;
 use std::ffi::c_void;
 use crate::utils::to_wstring;
-use tinyjson::JsonValue;
 
 type HINTERNET = *mut c_void;
 const WINHTTP_NO_PROXY_NAME: *const u16 = ptr::null();
@@ -144,17 +143,17 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     let json_str = String::from_utf8(body).map_err(|e| format!("Invalid UTF-8: {}", e))?;
     
     // 7. Parse JSON
-    let json: JsonValue = json_str.parse().map_err(|e| format!("JSON parse error: {:?}", e))?;
+    let json = crate::json::parse(&json_str).map_err(|e| format!("JSON parse error: {:?}", e))?;
     
-    let tag_name = json["tag_name"].get::<String>().ok_or("Missing tag_name")?;
+    let tag_name = json["tag_name"].as_str().ok_or("Missing tag_name")?.to_string();
     
     // Find asset
-    let assets = json["assets"].get::<Vec<JsonValue>>().ok_or("Missing assets")?;
+    let assets = json["assets"].as_array().ok_or("Missing assets")?;
     let download_url = assets.iter()
         .find(|asset| {
-             asset["name"].get::<String>().map(|n| n == "compactrs.exe").unwrap_or(false)
+             asset["name"].as_str().map(|n| n == "compactrs.exe").unwrap_or(false)
         })
-        .and_then(|asset| asset["browser_download_url"].get::<String>())
+        .and_then(|asset| asset["browser_download_url"].as_str().map(|s| s.to_string()))
         .ok_or("No compactrs.exe asset found")?;
 
     let current_version = env!("APP_VERSION");

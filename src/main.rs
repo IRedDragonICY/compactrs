@@ -4,8 +4,10 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MessageBoxW, TranslateMessage, 
-    MB_ICONERROR, MB_OK, MSG, WM_QUIT,
+    MB_ICONERROR, MB_OK, MSG, WM_QUIT, SW_SHOW,
 };
+use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
+use windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW;
 use std::ptr;
 use std::sync::OnceLock;
 
@@ -15,6 +17,7 @@ pub mod config;
 pub mod registry;
 pub mod utils;
 pub mod updater;
+pub mod json;
 
 use crate::engine::wof::WofAlgorithm;
 use crate::ui::state::BatchAction;
@@ -84,8 +87,56 @@ fn parse_cli_args() -> Vec<StartupItem> {
     items
 }
 
+// Helper function to check for admin privileges
+fn is_admin() -> bool {
+    unsafe { IsUserAnAdmin() != 0 }
+}
+
 fn main() {
-    // Parse CLI arguments before GUI initialization
+    // 1. Runtime Admin Check
+    if !is_admin() {
+        unsafe {
+            // Attempt to relaunch as administrator
+            let mut filename = [0u16; 32768]; // MAX_PATH is 260 but wide paths can be longer, using safe buffer
+            let len = GetModuleFileNameW(std::ptr::null_mut(), filename.as_mut_ptr(), filename.len() as u32);
+            
+            if len > 0 {
+                let operation = to_wstring("runas");
+                // Collect existing arguments to pass them along
+                // Note: This simple reconstruction might not perfectly preserve quotes/escapes for complex args
+                let args: Vec<String> = std::env::args().skip(1).collect();
+                let args_str = args.join(" ");
+                let args_wide = to_wstring(&args_str);
+
+                let res = ShellExecuteW(
+                    std::ptr::null_mut(), 
+                    operation.as_ptr(), 
+                    filename.as_ptr(), 
+                    if args.is_empty() { ptr::null() } else { args_wide.as_ptr() }, 
+                    ptr::null(), 
+                    SW_SHOW
+                );
+
+                // If ShellExecuteW returns > 32, it succeeded
+                if res as isize > 32 {
+                    return; // Exit this non-admin instance
+                }
+            }
+
+            // If elevation failed (user declined UAC, etc.), show error
+            let title = to_wstring("Privilege Error");
+            let msg = to_wstring("CompactRS requires Administrator privileges to perform compression operations.\n\nFailed to elevate privileges. Please restart as Administrator.");
+            
+            MessageBoxW(
+                std::ptr::null_mut(), 
+                msg.as_ptr(), 
+                title.as_ptr(), 
+                MB_ICONERROR | MB_OK
+            );
+        }
+        return;
+    }
+
     // Parse CLI arguments before GUI initialization
     let startup_items = parse_cli_args();
     let _ = STARTUP_ITEMS.set(startup_items);
