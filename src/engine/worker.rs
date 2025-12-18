@@ -10,7 +10,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FindFirstFileExW, FindNextFileW, FindClose,
     FindExInfoBasic, FindExSearchNameMatch,
     FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
-    FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
 };
 use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
 
@@ -187,12 +187,14 @@ where
                 };
 
                 let is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                // CRITICAL: Check for Junctions/Symlinks to prevent infinite loops
+                let is_reparse = (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 
                 // Invoke visitor
                 visitor(&full_path, is_dir, &find_data);
 
-                // Recurse into directories
-                if is_dir {
+                // Recurse into directories ONLY if they are real directories (not reparse points)
+                if is_dir && !is_reparse {
                     walk_directory_generic(&full_path, state, visitor);
                 }
             }
