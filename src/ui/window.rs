@@ -923,64 +923,64 @@ use std::ffi::c_void;
 
 #[repr(C)]
 struct IFileOpenDialogVtbl {
-    pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
     // IModalWindow
-    pub Show: unsafe extern "system" fn(*mut c_void, HWND) -> HRESULT,
+    pub show: unsafe extern "system" fn(*mut c_void, HWND) -> HRESULT,
     // IFileDialog
-    pub SetFileTypes: unsafe extern "system" fn(*mut c_void, u32, *const c_void) -> HRESULT,
-    pub SetFileTypeIndex: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
-    pub GetFileTypeIndex: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
-    pub Advise: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut u32) -> HRESULT,
-    pub Unadvise: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
-    pub SetOptions: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
-    pub GetOptions: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
-    pub SetDefaultFolder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
-    pub SetFolder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
-    pub GetFolder: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    pub GetCurrentSelection: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    pub SetFileName: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub GetFileName: unsafe extern "system" fn(*mut c_void, *mut PCWSTR) -> HRESULT,
-    pub SetTitle: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub SetOkButtonLabel: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub SetFileNameLabel: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub GetResult: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT, // Returns IShellItem
-    pub AddPlace: unsafe extern "system" fn(*mut c_void, *mut c_void, u32) -> HRESULT,
-    pub SetDefaultExtension: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub Close: unsafe extern "system" fn(*mut c_void, HRESULT) -> HRESULT,
-    pub SetClientGuid: unsafe extern "system" fn(*mut c_void, *const GUID) -> HRESULT,
-    pub ClearClientData: unsafe extern "system" fn(*mut c_void) -> HRESULT,
-    pub SetFilter: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    pub set_file_types: unsafe extern "system" fn(*mut c_void, u32, *const c_void) -> HRESULT,
+    pub set_file_type_index: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
+    pub get_file_type_index: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    pub advise: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut u32) -> HRESULT,
+    pub unadvise: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
+    pub set_options: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
+    pub get_options: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    pub set_default_folder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    pub set_folder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    pub get_folder: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub get_current_selection: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub set_file_name: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub get_file_name: unsafe extern "system" fn(*mut c_void, *mut PCWSTR) -> HRESULT,
+    pub set_title: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub set_ok_button_label: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub set_file_name_label: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub get_result: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT, // Returns IShellItem
+    pub add_place: unsafe extern "system" fn(*mut c_void, *mut c_void, u32) -> HRESULT,
+    pub set_default_extension: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub close: unsafe extern "system" fn(*mut c_void, HRESULT) -> HRESULT,
+    pub set_client_guid: unsafe extern "system" fn(*mut c_void, *const GUID) -> HRESULT,
+    pub clear_client_data: unsafe extern "system" fn(*mut c_void) -> HRESULT,
+    pub set_filter: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
     // IFileOpenDialog
-    pub GetResults: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT, // Returns IShellItemArray
-    pub GetSelectedItems: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub get_results: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT, // Returns IShellItemArray
+    pub get_selected_items: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
 }
 
 #[repr(C)]
 struct IShellItemVtbl {
-    pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub BindToHandler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub GetParent: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    pub GetDisplayName: unsafe extern "system" fn(*mut c_void, u32, *mut PCWSTR) -> HRESULT,
-    pub GetAttributes: unsafe extern "system" fn(*mut c_void, u32, *mut u32) -> HRESULT,
-    pub Compare: unsafe extern "system" fn(*mut c_void, *mut c_void, u32, *mut i32) -> HRESULT,
+    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub bind_to_handler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_parent: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub get_display_name: unsafe extern "system" fn(*mut c_void, u32, *mut PCWSTR) -> HRESULT,
+    pub get_attributes: unsafe extern "system" fn(*mut c_void, u32, *mut u32) -> HRESULT,
+    pub compare: unsafe extern "system" fn(*mut c_void, *mut c_void, u32, *mut i32) -> HRESULT,
 }
 
 #[repr(C)]
 struct IShellItemArrayVtbl {
-    pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub BindToHandler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub GetPropertyStore: unsafe extern "system" fn(*mut c_void, u32, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub GetPropertyDescriptionList: unsafe extern "system" fn(*mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub GetAttributes: unsafe extern "system" fn(*mut c_void, u32, u32, *mut c_void) -> HRESULT,
-    pub GetCount: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
-    pub GetItemAt: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT,
-    pub EnumItems: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub bind_to_handler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_property_store: unsafe extern "system" fn(*mut c_void, u32, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_property_description_list: unsafe extern "system" fn(*mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_attributes: unsafe extern "system" fn(*mut c_void, u32, u32, *mut c_void) -> HRESULT,
+    pub get_count: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    pub get_item_at: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT,
+    pub enum_items: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
 }
 
 // GUIDs
@@ -1002,19 +1002,19 @@ unsafe fn pick_files() -> Result<Vec<String>, HRESULT> {
     let vtbl = (*dialog).as_ref().unwrap();
 
     let mut options = 0;
-    (vtbl.GetOptions)(p_dialog, &mut options);
-    (vtbl.SetOptions)(p_dialog, options | FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT);
+    (vtbl.get_options)(p_dialog, &mut options);
+    (vtbl.set_options)(p_dialog, options | FOS_FORCEFILESYSTEM | FOS_ALLOWMULTISELECT);
     
-    let hr = (vtbl.Show)(p_dialog, std::ptr::null_mut()); // HWND owner = null
+    let hr = (vtbl.show)(p_dialog, std::ptr::null_mut()); // HWND owner = null
     if hr != 0 {
-        (vtbl.Release)(p_dialog);
+        (vtbl.release)(p_dialog);
         return Err(hr);
     }
 
     let mut p_results: *mut c_void = std::ptr::null_mut();
-    let hr = (vtbl.GetResults)(p_dialog, &mut p_results);
+    let hr = (vtbl.get_results)(p_dialog, &mut p_results);
     if hr != 0 {
-        (vtbl.Release)(p_dialog);
+        (vtbl.release)(p_dialog);
         return Err(hr);
     }
 
@@ -1022,17 +1022,17 @@ unsafe fn pick_files() -> Result<Vec<String>, HRESULT> {
     let results_vtbl = (*results).as_ref().unwrap();
 
     let mut count = 0;
-    (results_vtbl.GetCount)(p_results, &mut count);
+    (results_vtbl.get_count)(p_results, &mut count);
     
     let mut paths = Vec::new();
     for i in 0..count {
         let mut p_item: *mut c_void = std::ptr::null_mut();
-        if (results_vtbl.GetItemAt)(p_results, i, &mut p_item) == 0 {
+        if (results_vtbl.get_item_at)(p_results, i, &mut p_item) == 0 {
             let item = p_item as *mut *mut IShellItemVtbl;
             let item_vtbl = (*item).as_ref().unwrap();
             
             let mut name_ptr: PCWSTR = std::ptr::null();
-            if (item_vtbl.GetDisplayName)(p_item, SIGDN_FILESYSPATH, &mut name_ptr) == 0 && !name_ptr.is_null() {
+            if (item_vtbl.get_display_name)(p_item, SIGDN_FILESYSPATH, &mut name_ptr) == 0 && !name_ptr.is_null() {
                 let len = (0..).take_while(|&i| *name_ptr.offset(i) != 0).count();
                 let slice = std::slice::from_raw_parts(name_ptr, len);
                 if let Ok(path) = String::from_utf16(slice) {
@@ -1040,12 +1040,12 @@ unsafe fn pick_files() -> Result<Vec<String>, HRESULT> {
                 }
                 CoTaskMemFree(name_ptr as *mut _);
             }
-            (item_vtbl.Release)(p_item);
+            (item_vtbl.release)(p_item);
         }
     }
 
-    (results_vtbl.Release)(p_results);
-    (vtbl.Release)(p_dialog);
+    (results_vtbl.release)(p_results);
+    (vtbl.release)(p_dialog);
 
     Ok(paths)
 }
@@ -1060,19 +1060,19 @@ unsafe fn pick_folder() -> Result<String, HRESULT> {
     let vtbl = (*dialog).as_ref().unwrap();
 
     let mut options = 0;
-    (vtbl.GetOptions)(p_dialog, &mut options);
-    (vtbl.SetOptions)(p_dialog, options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    (vtbl.get_options)(p_dialog, &mut options);
+    (vtbl.set_options)(p_dialog, options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
     
-    let hr = (vtbl.Show)(p_dialog, std::ptr::null_mut()); // HWND owner = null
+    let hr = (vtbl.show)(p_dialog, std::ptr::null_mut()); // HWND owner = null
     if hr != 0 {
-        (vtbl.Release)(p_dialog);
+        (vtbl.release)(p_dialog);
         return Err(hr);
     }
 
     let mut p_item: *mut c_void = std::ptr::null_mut();
-    let hr = (vtbl.GetResult)(p_dialog, &mut p_item);
+    let hr = (vtbl.get_result)(p_dialog, &mut p_item);
     if hr != 0 {
-        (vtbl.Release)(p_dialog);
+        (vtbl.release)(p_dialog);
         return Err(hr);
     }
 
@@ -1082,7 +1082,7 @@ unsafe fn pick_folder() -> Result<String, HRESULT> {
     let mut name_ptr: PCWSTR = std::ptr::null();
     let mut path = String::new();
     
-    if (item_vtbl.GetDisplayName)(p_item, SIGDN_FILESYSPATH, &mut name_ptr) == 0 && !name_ptr.is_null() {
+    if (item_vtbl.get_display_name)(p_item, SIGDN_FILESYSPATH, &mut name_ptr) == 0 && !name_ptr.is_null() {
         let len = (0..).take_while(|&i| *name_ptr.offset(i) != 0).count();
         let slice = std::slice::from_raw_parts(name_ptr, len);
         if let Ok(s) = String::from_utf16(slice) {
@@ -1091,8 +1091,8 @@ unsafe fn pick_folder() -> Result<String, HRESULT> {
         CoTaskMemFree(name_ptr as *mut _);
     }
 
-    (item_vtbl.Release)(p_item);
-    (vtbl.Release)(p_dialog);
+    (item_vtbl.release)(p_item);
+    (vtbl.release)(p_dialog);
 
     Ok(path)
 }

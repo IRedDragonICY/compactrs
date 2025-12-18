@@ -10,22 +10,22 @@ type BOOL = i32;
 // Manual definition of ITaskbarList3 since it's missing in windows-sys
 #[repr(C)]
 pub struct ITaskbarList3 {
-    pub lpVtbl: *const ITaskbarList3Vtbl,
+    pub lp_vtbl: *const ITaskbarList3Vtbl,
 }
 
 #[repr(C)]
 pub struct ITaskbarList3Vtbl {
-    pub QueryInterface: unsafe extern "system" fn(*mut ITaskbarList3, *const GUID, *mut *mut std::ffi::c_void) -> HRESULT,
-    pub AddRef: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
-    pub Release: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
-    pub HrInit: unsafe extern "system" fn(*mut ITaskbarList3) -> HRESULT,
-    pub AddTab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub DeleteTab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub ActivateTab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub SetActiveAlt: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub MarkFullscreenWindow: unsafe extern "system" fn(*mut ITaskbarList3, HWND, BOOL) -> HRESULT,
-    pub SetProgressValue: unsafe extern "system" fn(*mut ITaskbarList3, HWND, u64, u64) -> HRESULT,
-    pub SetProgressState: unsafe extern "system" fn(*mut ITaskbarList3, HWND, TBPFLAG) -> HRESULT,
+    pub query_interface: unsafe extern "system" fn(*mut ITaskbarList3, *const GUID, *mut *mut std::ffi::c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
+    pub release: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
+    pub hr_init: unsafe extern "system" fn(*mut ITaskbarList3) -> HRESULT,
+    pub add_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub delete_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub activate_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub set_active_alt: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub mark_fullscreen_window: unsafe extern "system" fn(*mut ITaskbarList3, HWND, BOOL) -> HRESULT,
+    pub set_progress_value: unsafe extern "system" fn(*mut ITaskbarList3, HWND, u64, u64) -> HRESULT,
+    pub set_progress_state: unsafe extern "system" fn(*mut ITaskbarList3, HWND, TBPFLAG) -> HRESULT,
     // We don't need the rest of the methods for this app
 }
 
@@ -88,7 +88,7 @@ impl TaskbarProgress {
                 TaskbarState::Paused => TBPF_PAUSED,
             };
             unsafe {
-                let vtbl = (*self.taskbar_list).lpVtbl;
+                let vtbl = (*self.taskbar_list).lp_vtbl;
                 // SetProgressState is the 10th method in ITaskbarList3?
                 // ITaskbarList (3) -> ITaskbarList2 (1) -> ITaskbarList3 (SetProgressState is offset?)
                 // Actually windows-sys defines the Vtbl struct:
@@ -109,8 +109,8 @@ impl TaskbarProgress {
                 // 9: SetProgressValue
                 // 10: SetProgressState
                 
-                // Call SetProgressState(hwnd, flags)
-                ((*vtbl).SetProgressState)(self.taskbar_list, self.hwnd, flags);
+                // Call set_progress_state(hwnd, flags)
+                ((*vtbl).set_progress_state)(self.taskbar_list, self.hwnd, flags);
             }
         }
     }
@@ -118,9 +118,9 @@ impl TaskbarProgress {
     pub fn set_value(&self, completed: u64, total: u64) {
         if !self.taskbar_list.is_null() {
             unsafe {
-                let vtbl = (*self.taskbar_list).lpVtbl;
-                // Call SetProgressValue(hwnd, completed, total)
-                ((*vtbl).SetProgressValue)(self.taskbar_list, self.hwnd, completed, total);
+                let vtbl = (*self.taskbar_list).lp_vtbl;
+                // Call set_progress_value(hwnd, completed, total)
+                ((*vtbl).set_progress_value)(self.taskbar_list, self.hwnd, completed, total);
             }
         }
     }
@@ -130,8 +130,8 @@ impl Drop for TaskbarProgress {
     fn drop(&mut self) {
         if !self.taskbar_list.is_null() {
             unsafe {
-                let vtbl = (*self.taskbar_list).lpVtbl;
-                ((*vtbl).Release)(self.taskbar_list);
+                let vtbl = (*self.taskbar_list).lp_vtbl;
+                ((*vtbl).release)(self.taskbar_list);
             }
         }
     }
