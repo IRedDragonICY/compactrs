@@ -187,33 +187,36 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             
             // Checkbox: Enable Force Stop (Auto-kill)
             let enable_force = if let Some(st) = state_ptr.as_ref() { st.enable_force_stop } else { false };
-            let chk = crate::ui::controls::create_checkbox(hwnd, "Enable Force Stop (Auto-kill)", 30, 160, 240, 25, IDC_CHK_FORCE_STOP);
-            if enable_force {
-                 SendMessageW(chk, BM_SETCHECK, 1, 0);
-            }
-            if let Some(st) = state_ptr.as_ref() {
-                crate::ui::theme::apply_theme(chk, crate::ui::theme::ControlType::CheckBox, st.is_dark);
-            }
+            let _chk = ControlBuilder::new(hwnd, IDC_CHK_FORCE_STOP)
+                .checkbox()
+                .text("Enable Force Stop (Auto-kill)")
+                .pos(30, 160)
+                .size(240, 25)
+                .dark_mode(is_dark_mode)
+                .checked(enable_force)
+                .build();
 
             // Checkbox: Enable Explorer Context Menu
             let enable_ctx = if let Some(st) = state_ptr.as_ref() { st.enable_context_menu } else { false };
-            let chk_ctx = crate::ui::controls::create_checkbox(hwnd, "Enable Explorer Context Menu", 30, 190, 240, 25, IDC_CHK_CONTEXT_MENU);
-            if enable_ctx {
-                 SendMessageW(chk_ctx, BM_SETCHECK, 1, 0);
-            }
-            if let Some(st) = state_ptr.as_ref() {
-                crate::ui::theme::apply_theme(chk_ctx, crate::ui::theme::ControlType::CheckBox, st.is_dark);
-            }
+            let _chk_ctx = ControlBuilder::new(hwnd, IDC_CHK_CONTEXT_MENU)
+                .checkbox()
+                .text("Enable Explorer Context Menu")
+                .pos(30, 190)
+                .size(240, 25)
+                .dark_mode(is_dark_mode)
+                .checked(enable_ctx)
+                .build();
 
             // Checkbox: Enable System Critical Guard
             let enable_guard = if let Some(st) = state_ptr.as_ref() { st.enable_system_guard } else { true };
-            let chk_guard = crate::ui::controls::create_checkbox(hwnd, "Enable System Critical Path Guard", 30, 220, 240, 25, IDC_CHK_SYSTEM_GUARD);
-            if enable_guard {
-                 SendMessageW(chk_guard, BM_SETCHECK, 1, 0);
-            }
-            if let Some(st) = state_ptr.as_ref() {
-                crate::ui::theme::apply_theme(chk_guard, crate::ui::theme::ControlType::CheckBox, st.is_dark);
-            }
+            let _chk_guard = ControlBuilder::new(hwnd, IDC_CHK_SYSTEM_GUARD)
+                .checkbox()
+                .text("Enable System Critical Path Guard")
+                .pos(30, 220)
+                .size(240, 25)
+                .dark_mode(is_dark_mode)
+                .checked(enable_guard)
+                .build();
 
             // Updates Section
             let _btn_update = ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
