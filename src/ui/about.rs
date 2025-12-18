@@ -30,9 +30,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect, HFONT,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    HICON,
-};
+
 
 const ABOUT_TITLE: &str = "About CompactRS";
 const GITHUB_URL: &str = "https://github.com/IRedDragonICY/compactrs";
@@ -166,13 +164,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
                 (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr()) as HFONT;
 
-            // Store fonts in state
-            if let Some(st) = state_ptr.as_mut() {
-                st.fonts.push(title_font);
-                st.fonts.push(version_font);
-                st.fonts.push(body_font);
-                st.fonts.push(creator_font);
-            }
+
 
             // Icon - Centered at top (Large Hero Icon)
             let icon_size = 128;
@@ -188,10 +180,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 LR_DEFAULTCOLOR
             );
 
-            // Store icon in state
-            if let Some(st) = state_ptr.as_mut() {
-                st.icon = Some(hicon);
-            }
+
             
             let static_cls = to_wstring("STATIC");
             
