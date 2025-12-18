@@ -12,8 +12,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     MB_ICONINFORMATION, WM_NOTIFY, BM_GETCHECK, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
     WM_CONTEXTMENU, TrackPopupMenu, CreatePopupMenu, AppendMenuW, MF_STRING, TPM_RETURNCMD, TPM_LEFTALIGN,
-    DestroyMenu, GetCursorPos, WM_SETTINGCHANGE, SW_SHOWNORMAL,
+    DestroyMenu, GetCursorPos, WM_SETTINGCHANGE, SW_SHOWNORMAL, SetForegroundWindow,
+    GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop,
 };
+use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+use windows_sys::Win32::Foundation::{TRUE, FALSE};
 use windows_sys::Win32::UI::Shell::{
     DragQueryFileW, DragFinish, HDROP, DragAcceptFiles,
     ShellExecuteW,
@@ -24,6 +27,11 @@ use windows_sys::Win32::UI::Controls::{
     LVN_ITEMCHANGED, BST_CHECKED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NMLISTVIEW,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_DELETE, VK_CONTROL};
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn AttachThreadInput(idAttach: u32, idAttachTo: u32, fAttach: i32) -> i32;
+}
 use std::cmp::Ordering as CmpOrdering;
 use windows_sys::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
 
@@ -77,7 +85,13 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         let icon = load_app_icon(instance);
 
         let class_name = to_wstring(WINDOW_CLASS_NAME);
-        let title_name = to_wstring(WINDOW_TITLE);
+        let mut title_str = WINDOW_TITLE.to_string();
+        if crate::engine::elevation::is_system_or_ti() {
+            title_str.push_str(" [TrustedInstaller]");
+        } else if crate::is_admin() {
+            title_str.push_str(" [Administrator]");
+        }
+        let title_name = to_wstring(&title_str);
 
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
@@ -130,6 +144,24 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         theme::set_window_frame_theme(hwnd, is_dark);
 
         ShowWindow(hwnd, SW_SHOW);
+        
+        // Hostile Takeover: Force window to foreground (Bypass ASLR/Focus restrictions)
+        let foreground_hwnd = GetForegroundWindow();
+        if !foreground_hwnd.is_null() {
+            let foreground_thread = GetWindowThreadProcessId(foreground_hwnd, std::ptr::null_mut());
+            let current_thread = GetCurrentThreadId();
+            
+            if foreground_thread != current_thread {
+                AttachThreadInput(foreground_thread, current_thread, TRUE);
+                BringWindowToTop(hwnd);
+                SetForegroundWindow(hwnd);
+                AttachThreadInput(foreground_thread, current_thread, FALSE);
+            } else {
+                SetForegroundWindow(hwnd);
+            }
+        } else {
+            SetForegroundWindow(hwnd);
+        }
 
         Ok(hwnd)
     }

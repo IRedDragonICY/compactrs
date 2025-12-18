@@ -29,6 +29,11 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_DataExchange",
     "Win32_System_IO",
     "Win32_Networking_WinHttp",
+    "Win32_Security_Authorization",
+    "Win32_System_Services",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_WindowsProgramming",
 ] }
 
 

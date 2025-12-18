@@ -3,3 +3,4 @@ pub mod process;
 
 pub mod compresstimate;
 pub mod worker;
+pub mod elevation;

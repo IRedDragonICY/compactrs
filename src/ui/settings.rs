@@ -54,6 +54,7 @@ enum UpdateStatus {
 const WM_APP_UPDATE_CHECK_RESULT: u32 = 0x8000 + 10;
 const IDC_BTN_CHECK_UPDATE: u16 = 2010;
 const IDC_LBL_UPDATE_STATUS: u16 = 2011;
+const IDC_BTN_RESTART_TI: u16 = 2012;
 
 
 // Drop trait removed - resources managed globally
@@ -89,8 +90,9 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     let p_height = rect.bottom - rect.top;
 
     // Calculate required window size for desired client area
-    // Increased height to 350 to accommodate multi-line status text
-    let mut client_rect = RECT { left: 0, top: 0, right: 300, bottom: 350 };
+    // Calculate required window size for desired client area
+    // Increased height to 400 to accommodate TI button
+    let mut client_rect = RECT { left: 0, top: 0, right: 300, bottom: 400 };
     // AdjustWindowRect calculates the required window size based on client size + styles
     AdjustWindowRect(&mut client_rect, WS_POPUP | WS_CAPTION | WS_SYSMENU, 0);
     
@@ -240,6 +242,21 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 .pos(30, 250).size(150, 25)
                 .dark_mode(is_dark_mode)
                 .build();
+            
+            let _btn_ti = ButtonBuilder::new(hwnd, IDC_BTN_RESTART_TI)
+                .text("Restart as TrustedInstaller")
+                .pos(30, 320).size(240, 25)
+                .dark_mode(is_dark_mode)
+                .build();
+            
+            // Disable if already System/TI
+            if crate::engine::elevation::is_system_or_ti() {
+                use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+                let btn_ti = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_RESTART_TI as i32);
+                let txt = to_wstring("Running as TrustedInstaller");
+                SendMessageW(btn_ti, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
+                EnableWindow(btn_ti, 0);
+            }
 
             // Status Label
             let lbl_status = to_wstring(&("Current Version: ".to_string() + env!("APP_VERSION")));
@@ -342,7 +359,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                             
                             // 5. Update controls theme
                             use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
-                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS];
+                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI];
 
                             
                             for &ctrl_id in &controls {
@@ -352,7 +369,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                     let ctl_type = match ctrl_id {
                                         IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
                                         IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD => crate::ui::theme::ControlType::CheckBox,
-                                        IDC_BTN_CANCEL => crate::ui::theme::ControlType::Button,
+                                        IDC_BTN_CANCEL | IDC_BTN_CHECK_UPDATE | IDC_BTN_RESTART_TI => crate::ui::theme::ControlType::Button,
                                         _ => crate::ui::theme::ControlType::RadioButton, // Radio buttons
                                     };
                                     crate::ui::theme::apply_theme(h_ctl, ctl_type, new_is_dark);
@@ -536,6 +553,21 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                           SendMessageW(clone_hwnd, WM_APP_UPDATE_CHECK_RESULT, 0, Box::into_raw(boxed) as LPARAM);
                                       });
                                   }
+                              }
+                          }
+                      }
+                  },
+                  IDC_BTN_RESTART_TI => {
+                      if (code as u32) == BN_CLICKED {
+                          let msg = to_wstring("This will restart CompactRS as System/TrustedInstaller.\n\nUse this ONLY if you need to compress protected system folders (e.g. WinSxS).\n\nAre you sure?");
+                          let title = to_wstring("Privilege Elevation");
+                          let res = MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), windows_sys::Win32::UI::WindowsAndMessaging::MB_YESNO | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONWARNING);
+                          
+                          if res == windows_sys::Win32::UI::WindowsAndMessaging::IDYES {
+                              if let Err(e) = crate::engine::elevation::restart_as_trusted_installer() {
+                                  let err_msg = to_wstring(&format!("Failed to elevate: {}", e));
+                                  let err_title = to_wstring("Error");
+                                  MessageBoxW(hwnd, err_msg.as_ptr(), err_title.as_ptr(), MB_ICONERROR | MB_OK);
                               }
                           }
                       }
