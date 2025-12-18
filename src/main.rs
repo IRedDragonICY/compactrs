@@ -181,5 +181,8 @@ fn main() {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+
+        // Clean up COM
+        windows_sys::Win32::System::Com::CoUninitialize();
     }
 }

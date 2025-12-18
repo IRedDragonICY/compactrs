@@ -6,6 +6,26 @@ pub fn to_wstring(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Convert a Rust string to a null-terminated UTF-16 vector, handling long paths.
+/// Automatically adds `\\?\` prefix if the path is absolute and long.
+/// Also normalizes forward slashes to backslashes.
+pub fn to_wstring_long_path(value: &str) -> Vec<u16> {
+    // 1. Normalize separators (Windows extended paths require backslashes)
+    let clean_path = value.replace('/', "\\");
+    
+    let mut s = String::from(clean_path);
+    
+    // 2. Apply extended path prefix logic
+    // Heuristic: If it's an absolute path (contains ':'), lacks the prefix, 
+    // and exceeds standard limits (or is close to it), apply the prefix.
+    // We check for len > 240 to be safe near the 260 limit.
+    if s.len() > 240 && s.contains(':') && !s.starts_with("\\\\?\\") {
+        s.insert_str(0, "\\\\?\\");
+    }
+    
+    to_wstring(&s)
+}
+
 /// Helper macro to check BOOL return values from Win32 APIs.
 /// Returns Ok(()) if TRUE (1), Err(GetLastError()) if FALSE (0).
 #[macro_export]

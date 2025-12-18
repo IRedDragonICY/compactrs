@@ -13,7 +13,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
     WM_CONTEXTMENU, TrackPopupMenu, CreatePopupMenu, AppendMenuW, MF_STRING, TPM_RETURNCMD, TPM_LEFTALIGN,
     DestroyMenu, GetCursorPos, WM_SETTINGCHANGE, SW_SHOWNORMAL, SetForegroundWindow,
-    GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop,
+    GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, WM_CLOSE, WM_NCDESTROY, DestroyWindow,
 };
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::Foundation::{TRUE, FALSE};
@@ -668,6 +668,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             0
         }
         
+        WM_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        }
+
         WM_DESTROY => {
             if let Some(state) = get_window_state::<AppState>(hwnd) {
                 let mut rect: RECT = unsafe { std::mem::zeroed() };
@@ -695,6 +700,11 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let _ = Box::from_raw(ptr as *mut AppState);
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             }
+            PostQuitMessage(0);
+            0
+        }
+
+        WM_NCDESTROY => {
             PostQuitMessage(0);
             0
         }
