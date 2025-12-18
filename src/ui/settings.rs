@@ -290,11 +290,14 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 
                 match &st.update_status {
                     UpdateStatus::Available(ver, _) => {
-                         let txt = to_wstring("Download & Restart");
+                         let txt = to_wstring("Download and Restart");
                          SendMessageW(h_btn, starts_with_wm_settext(), 0, txt.as_ptr() as LPARAM);
                          
                          let status_txt = to_wstring(&format!("New version {} available!", ver));
                          SendMessageW(h_lbl, starts_with_wm_settext(), 0, status_txt.as_ptr() as LPARAM);
+                         
+                         // Re-enable button so user can click it
+                         windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
                     },
                     UpdateStatus::UpToDate => {
                          let txt = to_wstring("Check for Updates");
