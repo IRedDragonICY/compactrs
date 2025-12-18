@@ -1,6 +1,6 @@
 [package]
 name = "compactrs"
-version = "0.1.0"
+version = "2025.12.18"
 edition = "2024"
 authors = ["Mohammad Farid Hendianto (IRedDragonICY)"]
 description = "High-performance native Windows file compressor using WOF (Windows Overlay Filter)"
@@ -29,10 +29,14 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_RestartManager",
     "Win32_System_DataExchange",
     "Win32_System_IO",
+    "Win32_Networking_WinHttp",
 ] }
+
+tinyjson = "2.5"
 
 [build-dependencies]
 winres = "0.1"
+chrono = "0.4"
 
 [profile.release]
 opt-level = "z"          # Optimize for size

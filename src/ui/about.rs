@@ -223,7 +223,8 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             }
 
             // Version - Lighter font
-            let ver_text = to_wstring("Version 0.1.0");
+            let ver_string = format!("Version {}", env!("APP_VERSION"));
+            let ver_text = to_wstring(&ver_string);
             let version = CreateWindowExW(
                 0,
                 static_cls.as_ptr(),

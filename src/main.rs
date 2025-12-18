@@ -13,7 +13,8 @@ pub mod ui;
 pub mod engine;
 pub mod config;
 pub mod registry;
-pub mod utils; // New utils module
+pub mod utils;
+pub mod updater;
 
 use crate::engine::wof::WofAlgorithm;
 use crate::ui::state::BatchAction;
@@ -85,8 +86,19 @@ fn parse_cli_args() -> Vec<StartupItem> {
 
 fn main() {
     // Parse CLI arguments before GUI initialization
+    // Parse CLI arguments before GUI initialization
     let startup_items = parse_cli_args();
     let _ = STARTUP_ITEMS.set(startup_items);
+
+    // Cleanup old executable if it exists (from self-update)
+    if let Ok(exe) = std::env::current_exe() {
+        let old_exe = exe.with_extension("old");
+        if old_exe.exists() {
+             // We can just try to delete it. If it fails (still locked?), we ignore.
+             // It will be cleaned up next time.
+             let _ = std::fs::remove_file(old_exe);
+        }
+    }
     
     unsafe {
         // Initialize COM for IFileOpenDialog

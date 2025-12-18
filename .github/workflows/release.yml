@@ -56,8 +56,19 @@ jobs:
           Move-Item "upx-${{ env.UPX_VERSION }}-win64/upx.exe" .
         shell: pwsh
 
+      - name: Calculate Version
+        id: version
+        run: |
+          $date = Get-Date -Format "yyyy.MM.dd-HHmm"
+          $version = "v$date"
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Determined Version: $version"
+        shell: pwsh
+
       - name: Build release binary
         run: cargo build --release
+        env:
+          APP_VERSION: ${{ steps.version.outputs.VERSION }}
 
       - name: Compress binary with UPX
         run: |
@@ -102,13 +113,13 @@ jobs:
           Write-Host "Results will be available at: $vtPermalink"
         shell: pwsh
 
-      - name: Get version and changelog
+      - name: Generate Changelog
         id: info
         run: |
-          $date = Get-Date -Format "yyyy.MM.dd-HHmm"
-          $shortSha = "${{ github.sha }}".Substring(0, 7)
-          $version = "v$date"
+          $version = "${{ steps.version.outputs.VERSION }}"
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
           
           $commitMsg = git log -1 --pretty=format:"%s"
           $commitBody = git log -1 --pretty=format:"%b"

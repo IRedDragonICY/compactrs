@@ -12,7 +12,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
     FindWindowW, HMENU, CREATESTRUCTW,
     BM_GETCHECK, MessageBoxW, MB_ICONERROR, MB_OK,
-    GetWindowRect,
+    GetWindowRect, WM_SETTEXT, AdjustWindowRect,
 };
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -39,7 +39,22 @@ struct SettingsState {
     enable_force_stop: bool, // Track checkbox state
     enable_context_menu: bool, // Track context menu checkbox state
     enable_system_guard: bool, // Track system guard checkbox state
+    update_status: UpdateStatus,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+enum UpdateStatus {
+    Idle,
+    Checking,
+    Available(String, String), // Version, URL
+    UpToDate,
+    Error(String),
+}
+
+const WM_APP_UPDATE_CHECK_RESULT: u32 = 0x8000 + 10;
+const IDC_BTN_CHECK_UPDATE: u16 = 2010;
+const IDC_LBL_UPDATE_STATUS: u16 = 2011;
+
 
 // Drop trait removed - resources managed globally
 
@@ -72,8 +87,16 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     GetWindowRect(parent, &mut rect);
     let p_width = rect.right - rect.left;
     let p_height = rect.bottom - rect.top;
-    let width = 300;
-    let height = 330;
+
+    // Calculate required window size for desired client area
+    // Increased height to 350 to accommodate multi-line status text
+    let mut client_rect = RECT { left: 0, top: 0, right: 300, bottom: 350 };
+    // AdjustWindowRect calculates the required window size based on client size + styles
+    AdjustWindowRect(&mut client_rect, WS_POPUP | WS_CAPTION | WS_SYSMENU, 0);
+    
+    let width = client_rect.right - client_rect.left;
+    let height = client_rect.bottom - client_rect.top;
+
     let x = rect.left + (p_width - width) / 2;
     let y = rect.top + (p_height - height) / 2;
 
@@ -84,6 +107,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         enable_force_stop,
         enable_context_menu,
         enable_system_guard,
+        update_status: UpdateStatus::Idle,
     };
 
     let _hwnd = CreateWindowExW(
@@ -210,10 +234,73 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 crate::ui::theme::apply_theme(chk_guard, crate::ui::theme::ControlType::CheckBox, st.is_dark);
             }
 
+            // Updates Section
+            let _btn_update = ButtonBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
+                .text("Check for Updates")
+                .pos(30, 250).size(150, 25)
+                .dark_mode(is_dark_mode)
+                .build();
+
+            // Status Label
+            let lbl_status = to_wstring(&("Current Version: ".to_string() + env!("APP_VERSION")));
+            let h_lbl = CreateWindowExW(
+                0, to_wstring("STATIC").as_ptr(), lbl_status.as_ptr(),
+                WS_VISIBLE | WS_CHILD,
+                30, 280, 240, 40, // Increased height to 40 for wrapping
+                hwnd, IDC_LBL_UPDATE_STATUS as isize as HMENU, instance, std::ptr::null()
+            );
+            if let Some(st) = state_ptr.as_ref() {
+                // Use GroupBox theme for static text as it's usually transparent/neutral
+                crate::ui::theme::apply_theme(h_lbl, crate::ui::theme::ControlType::GroupBox, st.is_dark);
+            }
+
             // Buttons
             let _close_btn = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
-                .text("Close").pos(110, 260).size(80, 25).dark_mode(is_dark_mode).build();
+                .text("Close").pos(190, 250).size(80, 25).dark_mode(is_dark_mode).build();
 
+            0
+        },
+        
+        WM_APP_UPDATE_CHECK_RESULT => {
+            if let Some(st) = get_state() {
+                let status_ptr = lparam as *mut UpdateStatus;
+                let status = Box::from_raw(status_ptr); // Take ownership
+                st.update_status = *status;
+                
+                // Update UI based on status
+                let h_btn = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
+                let h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
+                
+                match &st.update_status {
+                    UpdateStatus::Available(ver, _) => {
+                         let txt = to_wstring("Download & Restart");
+                         SendMessageW(h_btn, starts_with_wm_settext(), 0, txt.as_ptr() as LPARAM);
+                         
+                         let status_txt = to_wstring(&format!("New version {} available!", ver));
+                         SendMessageW(h_lbl, starts_with_wm_settext(), 0, status_txt.as_ptr() as LPARAM);
+                    },
+                    UpdateStatus::UpToDate => {
+                         let txt = to_wstring("Check for Updates");
+                         SendMessageW(h_btn, starts_with_wm_settext(), 0, txt.as_ptr() as LPARAM);
+                         
+                         let status_txt = to_wstring("You are up to date.");
+                         SendMessageW(h_lbl, starts_with_wm_settext(), 0, status_txt.as_ptr() as LPARAM);
+                         
+                         // Re-enable button
+                         windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
+                    },
+                    UpdateStatus::Error(e) => {
+                         let txt = to_wstring("Check for Updates");
+                         SendMessageW(h_btn, starts_with_wm_settext(), 0, txt.as_ptr() as LPARAM);
+                         
+                         let status_txt = to_wstring(&format!("Error: {}", e));
+                         SendMessageW(h_lbl, starts_with_wm_settext(), 0, status_txt.as_ptr() as LPARAM);
+                         
+                         windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
+                    },
+                    _ => {}
+                }
+            }
             0
         },
         
@@ -255,7 +342,8 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                             
                             // 5. Update controls theme
                             use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
-                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_BTN_CANCEL];
+                            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS];
+
                             
                             for &ctrl_id in &controls {
                                 let h_ctl = GetDlgItem(hwnd, ctrl_id as i32);
@@ -387,6 +475,71 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                           }
                       }
                   },
+                  IDC_BTN_CHECK_UPDATE => {
+                      if (code as u32) == BN_CLICKED {
+                          let clone_hwnd_ptr = hwnd as usize;
+                          if let Some(st) = get_state() {
+                              match &st.update_status {
+                                  UpdateStatus::Available(_, url) => {
+                                      let url = url.clone();
+                                      // Start Update
+                                      std::thread::spawn(move || {
+                                           let clone_hwnd = clone_hwnd_ptr as HWND;
+                                           if let Err(e) = crate::updater::download_and_start_update(&url) {
+                                                let status = Box::new(UpdateStatus::Error(e));
+                                                SendMessageW(clone_hwnd, WM_APP_UPDATE_CHECK_RESULT, 0, Box::into_raw(status) as LPARAM);
+                                           } else {
+                                                // Restart Application
+                                                unsafe {
+                                                    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+                                                    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                                    
+                                                    let exe = std::env::current_exe().unwrap_or_default();
+                                                    let exe_path = crate::utils::to_wstring(exe.to_str().unwrap_or(""));
+                                                    
+                                                    ShellExecuteW(
+                                                        std::ptr::null_mut(),
+                                                        crate::utils::to_wstring("open").as_ptr(),
+                                                        exe_path.as_ptr(),
+                                                        std::ptr::null(),
+                                                        std::ptr::null(),
+                                                        SW_SHOW
+                                                    );
+                                                }
+                                                std::process::exit(0);
+                                           }
+                                      });
+                                  },
+                                  UpdateStatus::Checking => {}, // Ignore
+                                  _ => {
+                                      // Check for update
+                                      st.update_status = UpdateStatus::Checking;
+                                      
+                                      let h_btn = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
+                                      windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 0); // Disable button
+                                      let h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
+                                      let loading = to_wstring("Checking for updates...");
+                                      SendMessageW(h_lbl, starts_with_wm_settext(), 0, loading.as_ptr() as LPARAM);
+
+                                      let loading = to_wstring("Checking for updates...");
+                                      SendMessageW(h_lbl, starts_with_wm_settext(), 0, loading.as_ptr() as LPARAM);
+
+                                      let clone_hwnd_ptr = hwnd as usize;
+                                      std::thread::spawn(move || {
+                                          let clone_hwnd = clone_hwnd_ptr as HWND;
+                                          let res = match crate::updater::check_for_updates() {
+                                              Ok(Some(info)) => UpdateStatus::Available(info.version, info.download_url),
+                                              Ok(None) => UpdateStatus::UpToDate,
+                                              Err(e) => UpdateStatus::Error(e),
+                                          };
+                                          let boxed = Box::new(res);
+                                          SendMessageW(clone_hwnd, WM_APP_UPDATE_CHECK_RESULT, 0, Box::into_raw(boxed) as LPARAM);
+                                      });
+                                  }
+                              }
+                          }
+                      }
+                  },
                   _ => {}
              }
              0
@@ -406,3 +559,6 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
+
+
+fn starts_with_wm_settext() -> u32 { WM_SETTEXT }
