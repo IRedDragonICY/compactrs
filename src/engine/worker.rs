@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, Ordering}};
 use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use crate::ui::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
-use crate::engine::wof::{compress_file, uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm};
+use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm, smart_compress};
 use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
 use windows_sys::Win32::Foundation::{HWND, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
@@ -365,7 +365,7 @@ fn try_compress_with_lock_handling(
     force: bool, 
     main_hwnd: usize
 ) -> Result<bool, String> {
-    match compress_file(path, algo, force) {
+    match smart_compress(path, algo, force) {
         Ok(res) => Ok(res),
         Err(e) => {
              // Check if force is true AND it is a sharing violation (0x80070020 = -2147024864)
@@ -396,8 +396,8 @@ fn try_compress_with_lock_handling(
                              // Slight delay to allow OS to release lock
                              std::thread::sleep(std::time::Duration::from_millis(100));
                              
-                             // Retry Compression
-                             return compress_file(path, algo, force)
+                             // Retry Compression using smart_compress
+                             return smart_compress(path, algo, force)
                                 .map_err(|e2| {
                                     // "Failed retry {}: {:?}"
                                     // Manual simple error string
@@ -647,6 +647,9 @@ pub fn batch_process_worker(
             let total_files_copy = total_files;
 
             s.spawn(move || {
+                // Enable backup privileges ONCE per thread (reduces syscalls)
+                crate::engine::wof::enable_backup_privileges();
+                
                 // Consume tasks from channel
                 while let Some(task) = shared_rx_clone.recv() {
                     // Handle pause: busy-wait while paused
@@ -882,6 +885,9 @@ pub fn single_item_worker(
                 let total_files_copy = total_files;
 
                 s.spawn(move || {
+                    // Enable backup privileges ONCE per thread (reduces syscalls)
+                    crate::engine::wof::enable_backup_privileges();
+                    
                     while let Some(file_path) = shared_rx_clone.recv() {
                         // Handle pause: busy-wait while paused
                         while state_ref.load(Ordering::Relaxed) == ProcessingState::Paused as u8 {

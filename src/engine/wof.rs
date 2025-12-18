@@ -53,13 +53,26 @@ pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
             std::ptr::null(),
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS,
-            std::ptr::null_mut(), // Use null_mut instead of 0
+            std::ptr::null_mut(),
         );
 
         if handle == INVALID_HANDLE_VALUE {
             return None;
         }
 
+        let result = get_wof_algorithm_from_handle(handle);
+        CloseHandle(handle);
+        result
+    }
+}
+
+/// Get the WOF compression algorithm from an already-opened file handle.
+/// Returns None if file is not WOF-compressed.
+/// 
+/// # Safety
+/// The handle must be a valid, open file handle with at least read access.
+pub fn get_wof_algorithm_from_handle(handle: HANDLE) -> Option<WofAlgorithm> {
+    unsafe {
         // Buffer for WOF_EXTERNAL_INFO + FILE_PROVIDER_EXTERNAL_INFO_V1
         let mut out_buffer = [0u8; 1024];
         let mut bytes_returned = 0u32;
@@ -74,8 +87,6 @@ pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
             &mut bytes_returned,
             std::ptr::null_mut(),
         );
-        
-        CloseHandle(handle);
         
         if result == 0 {
             return None;
@@ -210,6 +221,117 @@ pub fn compress_file(path: &str, algo: WofAlgorithm, force: bool) -> Result<bool
     }
 }
 
+/// Smart compression that opens the file once and reuses the handle.
+/// 
+/// This eliminates redundant syscalls by:
+/// 1. Opening the file once with permissive sharing (Read|Write|Delete = 7)
+/// 2. Checking current compression state using the same handle
+/// 3. Compressing using the same handle if needed
+/// 
+/// # Returns
+/// - `Ok(true)` if compression succeeded or file was already optimally compressed
+/// - `Ok(false)` if compression was not beneficial (OS driver decision)
+/// - `Err(error_code)` on failure
+pub fn smart_compress(path: &str, target_algo: WofAlgorithm, force: bool) -> Result<bool, u32> {
+    // First attempt: Normal open with permissive sharing
+    let file_result = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(7) // FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+        .open(path);
+    
+    match file_result {
+        Ok(file) => {
+            let handle = file.as_raw_handle() as HANDLE;
+            
+            // Check current compression state using the SAME handle
+            if !force {
+                if let Some(current_algo) = get_wof_algorithm_from_handle(handle) {
+                    if current_algo == target_algo {
+                        // Already compressed with target algorithm, skip
+                        return Ok(true);
+                    }
+                }
+            }
+            
+            // Proceed with compression using the same file handle
+            compress_file_handle(&file, target_algo, force)
+        }
+        Err(e) => {
+            // Check if Access Denied and force is enabled
+            if force && e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
+                // Try backup semantics path
+                smart_compress_with_backup_semantics(path, target_algo, force)
+            } else {
+                Err(e.raw_os_error().unwrap_or(0) as u32)
+            }
+        }
+    }
+}
+
+/// Internal helper for smart_compress with backup semantics
+fn smart_compress_with_backup_semantics(path: &str, algo: WofAlgorithm, force: bool) -> Result<bool, u32> {
+    // Remove read-only attribute if set
+    force_remove_readonly(path);
+    
+    // Retry normal open after removing readonly
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(7)
+        .open(path)
+    {
+        let handle = file.as_raw_handle() as HANDLE;
+        
+        // Check current compression state
+        if !force {
+            if let Some(current_algo) = get_wof_algorithm_from_handle(handle) {
+                if current_algo == algo {
+                    return Ok(true);
+                }
+            }
+        }
+        
+        return compress_file_handle(&file, algo, force);
+    }
+    
+    // Try direct Win32 API with backup semantics
+    unsafe {
+        let wide = to_wstring_long_path(path);
+        let access = 0x80000000 | 0x40000000; // GENERIC_READ | GENERIC_WRITE
+        
+        let handle = CreateFileW(
+            wide.as_ptr(),
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        );
+        
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(GetLastError());
+        }
+        
+        // Check current compression state
+        if !force {
+            if let Some(current_algo) = get_wof_algorithm_from_handle(handle) {
+                if current_algo == algo {
+                    CloseHandle(handle);
+                    return Ok(true);
+                }
+            }
+        }
+        
+        // Convert to File for compress_file_handle
+        let file = File::from_raw_handle(handle as *mut _);
+        compress_file_handle(&file, algo, force)
+        // File is dropped here, closing the handle
+    }
+}
+
+
 /// Force remove read-only attribute from a file
 fn force_remove_readonly(path: &str) {
     unsafe {
@@ -225,8 +347,9 @@ fn force_remove_readonly(path: &str) {
     }
 }
 
-/// Enable backup and restore privileges for the current process
-fn enable_backup_privileges() {
+/// Enable backup and restore privileges for the current process.
+/// Call this once per thread for optimal performance (reduces syscalls).
+pub fn enable_backup_privileges() {
     unsafe {
         let mut token_handle: HANDLE = std::ptr::null_mut(); // Initialize with null_mut
         if OpenProcessToken(
