@@ -39,6 +39,7 @@ use crate::ui::controls::{
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST,
     IDC_BTN_ADD_FOLDER, IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES,
     IDC_BTN_SETTINGS, IDC_BTN_ABOUT, IDC_BTN_CONSOLE, IDC_CHK_FORCE, IDC_COMBO_ACTION_MODE,
+    IDC_LBL_ACTION_MODE, IDC_LBL_ALGO,
 };
 use crate::ui::components::{
     Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
@@ -203,7 +204,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 btn_folder: IDC_BTN_ADD_FOLDER,
                 btn_remove: IDC_BTN_REMOVE,
                 combo_action_mode: IDC_COMBO_ACTION_MODE,
+                lbl_action_mode: IDC_LBL_ACTION_MODE,
                 combo_algo: IDC_COMBO_ALGO,
+                lbl_algo: IDC_LBL_ALGO,
                 chk_force: IDC_CHK_FORCE,
                 btn_process: IDC_BTN_PROCESS_ALL,
                 btn_cancel: IDC_BTN_CANCEL,
@@ -221,18 +224,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             // Disable cancel button
             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(action_panel.cancel_hwnd(), 0);
 
-            // Populate algorithm combo
+            // Populate algorithm combo (As Listed uses the default per-item algorithm)
             let h_combo = action_panel.combo_hwnd();
-            let algos = ["XPRESS4K", "XPRESS8K", "XPRESS16K", "LZX"];
+            let algos = ["As Listed", "XPRESS4K", "XPRESS8K", "XPRESS16K", "LZX"];
             for alg in algos {
                 let w = to_wstring(alg);
                 SendMessageW(h_combo, CB_ADDSTRING, 0, w.as_ptr() as isize);
             }
             let algo_index = match state.config.default_algo {
-                WofAlgorithm::Xpress4K => 0,
-                WofAlgorithm::Xpress8K => 1,
-                WofAlgorithm::Xpress16K => 2,
-                WofAlgorithm::Lzx => 3,
+                WofAlgorithm::Xpress4K => 1,
+                WofAlgorithm::Xpress8K => 2,
+                WofAlgorithm::Xpress16K => 3,
+                WofAlgorithm::Lzx => 4,
             };
             SendMessageW(h_combo, CB_SETCURSEL, algo_index as usize, 0);
             
@@ -435,20 +438,27 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                        indices_to_process = (0..st.batch_items.len()).collect();
                                    }
                                    let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
-                                   let algo = match idx {
-                                       0 => WofAlgorithm::Xpress4K,
-                                       2 => WofAlgorithm::Xpress16K,
-                                       3 => WofAlgorithm::Lzx,
-                                       _ => WofAlgorithm::Xpress8K,
+                                   // Index 0 = "As Listed" (use per-item algorithm)
+                                   // Index 1-4 = specific algorithms
+                                   let use_as_listed = idx == 0;
+                                   let global_algo = match idx {
+                                       1 => WofAlgorithm::Xpress4K,
+                                       3 => WofAlgorithm::Xpress16K,
+                                       4 => WofAlgorithm::Lzx,
+                                       _ => WofAlgorithm::Xpress8K, // Default to Xpress8K
                                    };
-                                   let algo_name = match algo {
-                                       WofAlgorithm::Xpress4K => "XPRESS4K",
-                                       WofAlgorithm::Xpress8K => "XPRESS8K",
-                                       WofAlgorithm::Xpress16K => "XPRESS16K",
-                                       WofAlgorithm::Lzx => "LZX",
-                                   };
-                                   for &row in &indices_to_process {
-                                       ctrls.file_list.update_item_text(row as i32, 2, to_wstring(algo_name));
+                                   
+                                   // Update display in list (show "As Listed" or specific algo)
+                                   if !use_as_listed {
+                                       let algo_name = match global_algo {
+                                           WofAlgorithm::Xpress4K => "XPRESS4K",
+                                           WofAlgorithm::Xpress8K => "XPRESS8K",
+                                           WofAlgorithm::Xpress16K => "XPRESS16K",
+                                           WofAlgorithm::Lzx => "LZX",
+                                       };
+                                       for &row in &indices_to_process {
+                                           ctrls.file_list.update_item_text(row as i32, 2, to_wstring(algo_name));
+                                       }
                                    }
                                    if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
                                    windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 1); // TRUE
@@ -472,12 +482,19 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                        })
                                    }).collect();
                                    
+                                   // If "As Listed" is selected, use per-item algorithm, otherwise global
+                                   let effective_algo = if use_as_listed {
+                                       // Use Xpress8K as default for worker, but per-item will override
+                                       WofAlgorithm::Xpress8K
+                                   } else {
+                                       global_algo
+                                   };
                                    
                                    let force = st.force_compress;
                                    let guard = st.config.enable_system_guard;
                                    let main_hwnd_usize = hwnd as usize;
                                    thread::spawn(move || {
-                                       batch_process_worker(items, algo, tx, state_global, force, main_hwnd_usize, guard);
+                                       batch_process_worker(items, effective_algo, tx, state_global, force, main_hwnd_usize, guard);
                                    });
                                }
                            }
@@ -684,9 +701,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 }
                 if let Some(ctrls) = &state.controls {
                     let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
-                    state.config.default_algo = match idx {
-                        0 => WofAlgorithm::Xpress4K, 2 => WofAlgorithm::Xpress16K, 3 => WofAlgorithm::Lzx, _ => WofAlgorithm::Xpress8K,
-                    };
+                   // Index 0 = "As Listed" - save as Xpress8K default
+                   state.config.default_algo = match idx {
+                       1 => WofAlgorithm::Xpress4K,
+                       3 => WofAlgorithm::Xpress16K, 
+                       4 => WofAlgorithm::Lzx,
+                       _ => WofAlgorithm::Xpress8K,
+                   };
                     let force = SendMessageW(ctrls.action_panel.force_hwnd(), BM_GETCHECK, 0, 0);
                     state.config.force_compress = force as u32 == BST_CHECKED;
                 }

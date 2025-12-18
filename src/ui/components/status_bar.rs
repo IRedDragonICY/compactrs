@@ -154,9 +154,11 @@ impl Component for StatusBar {
             let header_height = 25;
             let progress_height = 25;
             let btn_height = 30;
+            let lbl_height = 18;  // Space for labels above dropdowns
 
             // Calculate ListView height to determine where progress bar goes
-            let list_height = height - header_height - progress_height - btn_height - (padding * 5);
+            // Account for label height above action buttons
+            let list_height = height - header_height - progress_height - btn_height - lbl_height - (padding * 5);
 
             // Cache values for potential future use
             self.x = padding;

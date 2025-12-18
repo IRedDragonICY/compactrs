@@ -21,7 +21,9 @@ pub struct ActionPanelIds {
     pub btn_folder: u16,
     pub btn_remove: u16,
     pub combo_action_mode: u16,
+    pub lbl_action_mode: u16,
     pub combo_algo: u16,
+    pub lbl_algo: u16,
     pub chk_force: u16,
     pub btn_process: u16,
     pub btn_cancel: u16,
@@ -36,7 +38,9 @@ pub struct ActionPanel {
     hwnd_files: HWND,
     hwnd_folder: HWND,
     hwnd_remove: HWND,
+    hwnd_lbl_action_mode: HWND,
     hwnd_action_mode: HWND,
+    hwnd_lbl_algo: HWND,
     hwnd_combo: HWND,
     hwnd_force: HWND,
     hwnd_process: HWND,
@@ -53,7 +57,9 @@ impl ActionPanel {
             hwnd_files: std::ptr::null_mut(),
             hwnd_folder: std::ptr::null_mut(),
             hwnd_remove: std::ptr::null_mut(),
+            hwnd_lbl_action_mode: std::ptr::null_mut(),
             hwnd_action_mode: std::ptr::null_mut(),
+            hwnd_lbl_algo: std::ptr::null_mut(),
             hwnd_combo: std::ptr::null_mut(),
             hwnd_force: std::ptr::null_mut(),
             hwnd_process: std::ptr::null_mut(),
@@ -124,7 +130,9 @@ impl ActionPanel {
         SendMessageW(self.hwnd_files, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_folder, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_remove, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_lbl_action_mode, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_action_mode, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_lbl_algo, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_combo, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_force, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_process, WM_SETFONT, wparam, lparam);
@@ -169,6 +177,15 @@ impl Component for ActionPanel {
             .dark_mode(is_dark)
             .build();
 
+        // Create Action Mode Label (title above dropdown)
+        self.hwnd_lbl_action_mode = ControlBuilder::new(parent, self.ids.lbl_action_mode)
+            .label(false)
+            .text("Action")
+            .pos(240, btn_y - 18)
+            .size(100, 16)
+            .dark_mode(is_dark)
+            .build();
+
         // Create Action Mode ComboBox
         self.hwnd_action_mode = ControlBuilder::new(parent, self.ids.combo_action_mode)
             .combobox()
@@ -177,11 +194,20 @@ impl Component for ActionPanel {
             .dark_mode(is_dark)
             .build();
 
+        // Create Algorithm Label (title above dropdown)
+        self.hwnd_lbl_algo = ControlBuilder::new(parent, self.ids.lbl_algo)
+            .label(false)
+            .text("Algorithm")
+            .pos(350, btn_y - 18)
+            .size(100, 16)
+            .dark_mode(is_dark)
+            .build();
+
         // Create Algorithm ComboBox
         self.hwnd_combo = ControlBuilder::new(parent, self.ids.combo_algo)
             .combobox()
             .pos(350, btn_y)
-            .size(110, 200) // Height is dropdown height
+            .size(100, 200) // Height is dropdown height
             .dark_mode(is_dark)
             .build();
 
@@ -226,9 +252,12 @@ impl Component for ActionPanel {
 
             let padding = 10;
             let btn_height = 30;
+            let lbl_height = 16;
+            let lbl_btn_gap = 2;  // Gap between label and button/dropdown
 
-            // Position buttons at bottom of window
+            // Position buttons at bottom of window with extra space for labels above
             let btn_y = height - btn_height - padding;
+            let lbl_y = btn_y - lbl_height - lbl_btn_gap;
 
             // Files button
             SetWindowPos(
@@ -263,6 +292,17 @@ impl Component for ActionPanel {
                 SWP_NOZORDER,
             );
 
+            // Action Mode label (above dropdown)
+            SetWindowPos(
+                self.hwnd_lbl_action_mode,
+                std::ptr::null_mut(),
+                padding + 190,
+                lbl_y,
+                100,
+                lbl_height,
+                SWP_NOZORDER,
+            );
+
             // Action Mode combo
             SetWindowPos(
                 self.hwnd_action_mode,
@@ -271,6 +311,17 @@ impl Component for ActionPanel {
                 btn_y,
                 100,
                 btn_height,
+                SWP_NOZORDER,
+            );
+
+            // Algorithm label (above dropdown)
+            SetWindowPos(
+                self.hwnd_lbl_algo,
+                std::ptr::null_mut(),
+                padding + 295,
+                lbl_y,
+                100,
+                lbl_height,
                 SWP_NOZORDER,
             );
 
@@ -285,13 +336,13 @@ impl Component for ActionPanel {
                 SWP_NOZORDER,
             );
 
-            // Force checkbox
+            // Force checkbox (after algo combo)
             SetWindowPos(
                 self.hwnd_force,
                 std::ptr::null_mut(),
                 padding + 400,
                 btn_y,
-                60,
+                65,
                 btn_height,
                 SWP_NOZORDER,
             );
@@ -300,7 +351,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_process,
                 std::ptr::null_mut(),
-                padding + 465,
+                padding + 470,
                 btn_y,
                 90,
                 btn_height,
@@ -311,7 +362,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_cancel,
                 std::ptr::null_mut(),
-                padding + 560,
+                padding + 565,
                 btn_y,
                 70,
                 btn_height,
@@ -333,6 +384,10 @@ impl Component for ActionPanel {
             // Apply theme to ComboBoxes
             apply_combobox_theme(self.hwnd_action_mode, is_dark);
             apply_combobox_theme(self.hwnd_combo, is_dark);
+
+            // Apply theme to labels
+            crate::ui::theme::apply_theme(self.hwnd_lbl_action_mode, crate::ui::theme::ControlType::GroupBox, is_dark);
+            crate::ui::theme::apply_theme(self.hwnd_lbl_algo, crate::ui::theme::ControlType::GroupBox, is_dark);
         }
     }
 }

@@ -450,9 +450,10 @@ impl Component for FileListView {
             let header_height = 25;
             let progress_height = 25;
             let btn_height = 30;
+            let lbl_height = 18;  // Space for labels above action dropdowns
 
-            // Calculate list height: total height minus header, progress bar, buttons, and padding
-            let list_height = height - header_height - progress_height - btn_height - (padding * 5);
+            // Calculate list height: total height minus header, progress bar, buttons, labels, and padding
+            let list_height = height - header_height - progress_height - btn_height - lbl_height - (padding * 5);
 
             // Position ListView below header
             let list_y = padding + header_height + padding;
