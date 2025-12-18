@@ -1,10 +1,14 @@
 [package]
 name = "compactrs"
+version = "2025.12.19"
 edition = "2024"
 authors = ["Mohammad Farid Hendianto (IRedDragonICY)"]
 description = "High-performance native Windows file compressor using WOF (Windows Overlay Filter)"
 license = "MIT"
 repository = "https://github.com/IRedDragonICY/compactrs"
+readme = "README.md"
+keywords = ["windows", "compression", "wof", "compactos", "utility"]
+categories = ["os::windows-apis", "filesystem", "command-line-utilities"]
 
 [dependencies]
 windows-sys = { version = "0.61.2", features = [
