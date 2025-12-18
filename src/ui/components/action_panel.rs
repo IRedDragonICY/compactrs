@@ -353,7 +353,7 @@ impl Component for ActionPanel {
                 std::ptr::null_mut(),
                 padding + 470,
                 btn_y,
-                90,
+                110, // Increased from 90 to fit "Process Selected"
                 btn_height,
                 SWP_NOZORDER,
             );
@@ -362,7 +362,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_cancel,
                 std::ptr::null_mut(),
-                padding + 565,
+                padding + 590, // Adjusted from 565 to account for wider Process button
                 btn_y,
                 70,
                 btn_height,

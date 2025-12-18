@@ -191,12 +191,22 @@ impl Component for StatusBar {
         }
     }
 
-    unsafe fn on_theme_change(&mut self, is_dark: bool) {
+    unsafe fn on_theme_change(&mut self, _is_dark: bool) {
         unsafe {
             // Apply theme to progress bar
             if self.hwnd_progress != std::ptr::null_mut() {
-                crate::ui::theme::allow_dark_mode_for_window(self.hwnd_progress, is_dark);
-                crate::ui::theme::apply_theme(self.hwnd_progress, crate::ui::theme::ControlType::Window, is_dark);
+                // Do NOT force dark mode on progress bar, as it makes it white/mono.
+                // crate::ui::theme::allow_dark_mode_for_window(self.hwnd_progress, is_dark);
+                // crate::ui::theme::apply_theme(self.hwnd_progress, crate::ui::theme::ControlType::Window, is_dark);
+                
+                // Force Green State (PBST_NORMAL = 1)
+                const PBM_SETSTATE: u32 = 1040;
+                SendMessageW(self.hwnd_progress, PBM_SETSTATE, 1, 0);
+
+                // Force Green Color (PBM_SETBARCOLOR = 1033) - 0x00BBGGRR
+                // Green = 0x0000FF00
+                const PBM_SETBARCOLOR: u32 = 1033;
+                SendMessageW(self.hwnd_progress, PBM_SETBARCOLOR, 0, 0x0000FF00);
             }
         }
     }

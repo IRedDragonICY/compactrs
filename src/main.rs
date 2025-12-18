@@ -4,8 +4,10 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MessageBoxW, TranslateMessage, 
-    MB_ICONERROR, MB_OK, MSG, WM_QUIT, SW_SHOW,
+    MB_ICONERROR, MB_OK, MSG, WM_QUIT, SW_SHOW, FindWindowW, SendMessageW,
+    WM_COPYDATA,
 };
+use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
 use windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW;
 use std::ptr;
@@ -93,7 +95,42 @@ fn is_admin() -> bool {
 }
 
 fn main() {
+    // 0. Single Instance Check (Before Admin Check)
+    unsafe {
+        let class_name = to_wstring("CompactRS_Class");
+        let hwnd_existing = FindWindowW(class_name.as_ptr(), std::ptr::null());
+        
+        if hwnd_existing != std::ptr::null_mut() {
+            let items = parse_cli_args();
+            if !items.is_empty() {
+                for item in items {
+                    let algo_str = match item.algorithm {
+                         WofAlgorithm::Xpress4K => "xpress4k",
+                         WofAlgorithm::Xpress8K => "xpress8k",
+                         WofAlgorithm::Xpress16K => "xpress16k",
+                         WofAlgorithm::Lzx => "lzx",
+                    };
+                    let action_str = match item.action {
+                        BatchAction::Compress => "compress",
+                        BatchAction::Decompress => "decompress",
+                    };
+                    // Format: PATH|ALGO|ACTION
+                    let payload = format!("{}|{}|{}", item.path, algo_str, action_str);
+                    let payload_w = to_wstring(&payload);
+                    let cds = COPYDATASTRUCT {
+                        dwData: 0xB00B,
+                        cbData: (payload_w.len() * 2) as u32,
+                        lpData: payload_w.as_ptr() as *mut _,
+                    };
+                    SendMessageW(hwnd_existing, WM_COPYDATA, 0, &cds as *const _ as isize);
+                }
+            }
+            std::process::exit(0);
+        }
+    }
+
     // 1. Runtime Admin Check
+
     if !is_admin() {
         unsafe {
             // Attempt to relaunch as administrator
@@ -102,10 +139,18 @@ fn main() {
             
             if len > 0 {
                 let operation = to_wstring("runas");
-                // Collect existing arguments to pass them along
-                // Note: This simple reconstruction might not perfectly preserve quotes/escapes for complex args
+                // Collect existing arguments and quote them if necessary to preserve spaces during elevation
                 let args: Vec<String> = std::env::args().skip(1).collect();
-                let args_str = args.join(" ");
+                let args_str = args.iter()
+                    .map(|arg| {
+                        if arg.contains(' ') || arg.contains('\t') || arg.is_empty() {
+                            format!("\"{}\"", arg)
+                        } else {
+                            arg.clone()
+                        }
+                    })
+                    .collect::<Vec<String>>()
+                    .join(" ");
                 let args_wide = to_wstring(&args_str);
 
                 let res = ShellExecuteW(

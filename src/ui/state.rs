@@ -208,6 +208,10 @@ pub struct AppState {
     // Sorting state
     pub sort_column: i32,
     pub sort_ascending: bool,
+
+    // IPC state
+    pub ipc_active: bool,
+    pub pending_ipc_ids: Vec<u32>,
 }
 
 impl AppState {
@@ -230,6 +234,8 @@ impl AppState {
             taskbar: None,
             sort_column: -1,
             sort_ascending: true,
+            ipc_active: false,
+            pending_ipc_ids: Vec::new(),
         }
     }
     

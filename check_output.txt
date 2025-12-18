@@ -1,0 +1,30 @@
+    Checking compactrs v0.0.0 (C:\Users\ireddragonicy\RustroverProjects\compactrs)
+error[E0609]: no field `compression_algorithm` on type `AppConfig`
+    --> src\ui\window.rs:1116:65
+     |
+1116 | ...                   let global_algo = st.config.compression_algorithm;
+     |                                                   ^^^^^^^^^^^^^^^^^^^^^ unknown field
+     |
+     = note: available fields are: `magic`, `version`, `theme`, `default_algo`, `force_compress` ... and 7 others
+
+error[E0308]: mismatched types
+    --> src\ui\window.rs:1146:82
+     |
+1146 | ...                   ctrls.file_list.update_item_text(idx, 7, to_wstring("Starting..."));
+     |                                       ---------------- ^^^ expected `i32`, found `usize`
+     |                                       |
+     |                                       arguments to this method are incorrect
+     |
+note: method defined here
+    --> src\ui\components\file_list.rs:263:12
+     |
+ 263 |     pub fn update_item_text(&self, row: i32, col: i32, text: Vec<u16>) {
+     |            ^^^^^^^^^^^^^^^^        --------
+help: you can convert a `usize` to an `i32` and panic if the converted value doesn't fit
+     |
+1146 |                                                 ctrls.file_list.update_item_text(idx.try_into().unwrap(), 7, to_wstring("Starting..."));
+     |                                                                                     ++++++++++++++++++++
+
+Some errors have detailed explanations: E0308, E0609.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `compactrs` (bin "compactrs") due to 2 previous errors

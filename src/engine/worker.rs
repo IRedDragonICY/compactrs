@@ -443,56 +443,66 @@ pub fn process_file_core(
     main_hwnd: usize,
     tx: &Sender<UiMessage>,
     guard_enabled: bool,
-) -> ProcessResult {
+) -> (ProcessResult, u64) {
     match action {
         BatchAction::Compress => {
+            let mut final_res = ProcessResult::Success; // Default placeholder
+            
             // Check System Critical Path Guard
             if guard_enabled && !force && is_critical_path(path) {
                 let p = to_wstring(path);
                 let msg = concat_wstrings(&[&to_wstring("Skipped (Critical System Path): "), &p]);
                 let _ = tx.send(UiMessage::Log(msg));
-                return ProcessResult::Skipped("System Path".to_string());
+                final_res = ProcessResult::Skipped("System Path".to_string());
             }
 
             // NEW: Smart Skip - Prevent re-compression of already optimal files
-            if !force {
+            else if !force {
                 if let Some(current_algo) = crate::engine::wof::get_wof_algorithm(path) {
                     if current_algo == algo {
                         let p = to_wstring(path);
                         let msg = concat_wstrings(&[&to_wstring("Skipped (Already compressed): "), &p]);
                         let _ = tx.send(UiMessage::Log(msg));
-                        return ProcessResult::Skipped("Already optimal".to_string());
+                        final_res = ProcessResult::Skipped("Already optimal".to_string());
                     }
                 }
             }
+            
+            // Checks...
+            if let ProcessResult::Success = final_res {
+                 // Check extension filter (unless force is enabled)
+                 if !force && should_skip_extension(path) {
+                    let p = to_wstring(path);
+                    let msg = concat_wstrings(&[&to_wstring("Skipped (filtered): "), &p]);
+                    let _ = tx.send(UiMessage::Log(msg));
+                    final_res = ProcessResult::Skipped("Filtered extension".to_string());
+                 }
+            }
 
-            // Check extension filter (unless force is enabled)
-            if !force && should_skip_extension(path) {
-                let p = to_wstring(path);
-                let msg = concat_wstrings(&[&to_wstring("Skipped (filtered): "), &p]);
-                let _ = tx.send(UiMessage::Log(msg));
-                return ProcessResult::Skipped("Filtered extension".to_string());
+            // Attempt compression
+            if let ProcessResult::Success = final_res {
+                match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
+                    Ok(true) => { final_res = ProcessResult::Success; }
+                    Ok(false) => {
+                         // OS driver said compression not beneficial
+                        let p = to_wstring(path);
+                        let msg = concat_wstrings(&[&to_wstring("Skipped (OS: Not Beneficial): "), &p]);
+                        let _ = tx.send(UiMessage::Log(msg));
+                        final_res = ProcessResult::Skipped("Not beneficial".to_string());
+                    }
+                    Err(msg) => {
+                        let _ = tx.send(UiMessage::Error(to_wstring(&msg)));
+                        final_res = ProcessResult::Failed(msg);
+                    }
+                }
             }
             
-            // Attempt compression with lock handling
-            match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
-                Ok(true) => ProcessResult::Success,
-                Ok(false) => {
-                    // OS driver said compression not beneficial
-                    let p = to_wstring(path);
-                    let msg = concat_wstrings(&[&to_wstring("Skipped (OS: Not Beneficial): "), &p]);
-                    let _ = tx.send(UiMessage::Log(msg));
-                    ProcessResult::Skipped("Not beneficial".to_string())
-                }
-                Err(msg) => {
-                    let _ = tx.send(UiMessage::Error(to_wstring(&msg)));
-                    ProcessResult::Failed(msg)
-                }
-            }
+            let size = get_real_file_size(path);
+            (final_res, size)
         }
         BatchAction::Decompress => {
             match uncompress_file(path) {
-                Ok(_) => ProcessResult::Success,
+                Ok(_) => (ProcessResult::Success, get_real_file_size(path)),
                 Err(e) => {
                     let mut s = "Failed ".to_string();
                     s.push_str(path);
@@ -500,7 +510,7 @@ pub fn process_file_core(
                     s.push_str(&e.to_string());
                     let w = to_wstring(&s);
                     let _ = tx.send(UiMessage::Error(w));
-                    ProcessResult::Failed(s)
+                    (ProcessResult::Failed(s), get_real_file_size(path))
                 }
             }
         }
@@ -512,6 +522,7 @@ struct FileTask {
     path: String,
     action: BatchAction,
     row_idx: usize,
+    algorithm: WofAlgorithm,
 }
 
 /// Wrapper for Receiver to enable sharing between threads via Mutex
@@ -530,8 +541,7 @@ impl<T> SharedReceiver<T> {
 }
 
 pub fn batch_process_worker(
-    items: Vec<(String, BatchAction, usize)>, 
-    algo: WofAlgorithm, 
+    items: Vec<(String, BatchAction, usize, WofAlgorithm)>, 
     tx: Sender<UiMessage>, 
     state: Arc<AtomicU8>,
     force: bool,
@@ -546,10 +556,11 @@ pub fn batch_process_worker(
     
     // Track total files per row (row_index -> count)
     let mut row_totals: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
+    let mut row_paths: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
     
     // Single-pass discovery: count files using optimized scanner
     let mut total_files = 0u64;
-    for (path, _, row) in &items {
+    for (path, _, row, _) in &items {
         let row_count = if std::path::Path::new(path).is_file() {
             1u64
         } else {
@@ -558,6 +569,7 @@ pub fn batch_process_worker(
         };
         
         row_totals.insert(*row, row_count);
+        row_paths.insert(*row, path.clone());
         total_files += row_count;
         
         // Initialize row progress
@@ -592,15 +604,17 @@ pub fn batch_process_worker(
     let failed = Arc::new(AtomicU64::new(0));
     
     // Per-row processed counters
-    let max_row = items.iter().map(|(_, _, r)| *r).max().unwrap_or(0);
+    let max_row = items.iter().map(|(_, _, r, _)| *r).max().unwrap_or(0);
     let row_processed_counts: Arc<Vec<AtomicU64>> = Arc::new((0..=max_row).map(|_| AtomicU64::new(0)).collect());
+    let row_disk_sizes: Arc<Vec<AtomicU64>> = Arc::new((0..=max_row).map(|_| AtomicU64::new(0)).collect());
     let row_totals = Arc::new(row_totals);
+    let row_paths = Arc::new(row_paths);
     
     // Producer thread: walks directories and sends tasks
     let state_producer = Arc::clone(&state);
     let items_for_producer = items.clone();
     let producer_handle = std::thread::spawn(move || {
-        for (path, action, row) in items_for_producer {
+        for (path, action, row, algo) in items_for_producer {
             // Check if stopped
             if state_producer.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                 break;
@@ -608,7 +622,7 @@ pub fn batch_process_worker(
             
             if std::path::Path::new(&path).is_file() {
                 // Single file
-                let _ = file_tx.send(FileTask { path, action, row_idx: row });
+                let _ = file_tx.send(FileTask { path, action, row_idx: row, algorithm: algo });
             } else {
                 // Directory - collect files using single-pass optimized scanner
                 let stats = scan_directory_optimized(&path, true, Some(&state_producer));
@@ -620,7 +634,8 @@ pub fn batch_process_worker(
                     let _ = file_tx.send(FileTask { 
                         path: file_path, 
                         action, 
-                        row_idx: row 
+                        row_idx: row,
+                        algorithm: algo,
                     });
                 }
             }
@@ -637,10 +652,11 @@ pub fn batch_process_worker(
             let success_ref = Arc::clone(&success);
             let failed_ref = Arc::clone(&failed);
             let row_counts_ref = Arc::clone(&row_processed_counts);
+            let row_sizes_ref = Arc::clone(&row_disk_sizes);
             let row_totals_ref = Arc::clone(&row_totals);
+            let row_paths_ref = Arc::clone(&row_paths);
             let tx_clone = tx.clone();
             let state_ref = Arc::clone(&state);
-            let algo_copy = algo;
             let force_copy = force;
             let hwnd_val = main_hwnd;
             let guard_enabled_copy = guard_enabled;
@@ -663,9 +679,9 @@ pub fn batch_process_worker(
                     }
 
                     // Use the core processing function
-                    let result = process_file_core(
+                    let (result, size_on_disk) = process_file_core(
                         &task.path, 
-                        algo_copy, 
+                        task.algorithm, 
                         task.action, 
                         force_copy, 
                         hwnd_val, 
@@ -696,7 +712,34 @@ pub fn batch_process_worker(
                              let cur_w = u64_to_wstring(current_row);
                              let tot_w = u64_to_wstring(total_row);
                              let prog_w = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
-                             let _ = tx_clone.send(UiMessage::RowUpdate(task.row_idx as i32, prog_w, to_wstring("Running"), vec![0;1]));
+                             // Accumulate size
+                             if let Some(size_counter) = row_sizes_ref.get(task.row_idx) {
+                                 size_counter.fetch_add(size_on_disk, Ordering::Relaxed);
+                             }
+                             
+                             if current_row == total_row {
+                                 // Row Finished!
+                                 // Send final progress update "N/N"
+                                 let _ = tx_clone.send(UiMessage::RowUpdate(task.row_idx as i32, prog_w, to_wstring("Finishing..."), vec![0;1]));
+
+                                 let final_w = to_wstring("Done");
+                                 // Get total size
+                                 let final_size = if let Some(sc) = row_sizes_ref.get(task.row_idx) {
+                                     sc.load(Ordering::Relaxed)
+                                 } else { 0 };
+                                 let size_w = format_size(final_size);
+                                 
+                                 // Get algo state from original path
+                                 let algo_state = if let Some(p) = row_paths_ref.get(&task.row_idx) {
+                                     detect_path_algorithm(p)
+                                 } else {
+                                     crate::engine::wof::CompressionState::None
+                                 };
+                                 
+                                 let _ = tx_clone.send(UiMessage::ItemFinished(task.row_idx as i32, final_w, size_w, algo_state));
+                             } else {
+                                 let _ = tx_clone.send(UiMessage::RowUpdate(task.row_idx as i32, prog_w, to_wstring("Running"), vec![0;1]));
+                             }
                         }
                     }
                     
@@ -723,18 +766,7 @@ pub fn batch_process_worker(
     }
 
     // Final Report & Cleanup
-    // Update all rows to "Done" and calculate sizes
-    for (path, _, row_idx) in items {
-        let size_after = if std::path::Path::new(&path).is_file() {
-            calculate_path_disk_size(&path)
-        } else {
-            calculate_folder_disk_size(&path)
-        };
-        let size_w = format_size(size_after);
-        
-        let end_state = detect_path_algorithm(&path);
-        let _ = tx.send(UiMessage::ItemFinished(row_idx as i32, to_wstring("Done"), size_w, end_state));
-    }
+    // (Row updates are now handled in real-time inside the threads)
 
     let s = success.load(Ordering::Relaxed);
     let f = failed.load(Ordering::Relaxed);
@@ -813,21 +845,21 @@ pub fn single_item_worker(
         }
 
         // Use the core processing function for single file
-        let result = process_file_core(&path, algo, action, force, main_hwnd, &tx, guard_enabled);
+        let (result, final_size) = process_file_core(&path, algo, action, force, main_hwnd, &tx, guard_enabled);
         
         // Handle result and update UI accordingly
         match result {
             ProcessResult::Success => {
                 success += 1;
-                let compressed_size = get_real_file_size(&path);
-                let disk_w = format_size(compressed_size);
+                let disk_w = format_size(final_size);
                 let final_state = detect_path_algorithm(&path);
                 let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Done"), disk_w, final_state));
             }
             ProcessResult::Skipped(_) => {
                 success += 1;
+                let disk_w = format_size(final_size);
                 let final_state = detect_path_algorithm(&path);
-                let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Skipped"), vec![0;1], final_state));
+                let _ = tx.send(UiMessage::ItemFinished(row, to_wstring("Skipped"), disk_w, final_state));
             }
             ProcessResult::Failed(_) => {
                 failed += 1;
@@ -900,7 +932,7 @@ pub fn single_item_worker(
                         }
                         
                         // Use the core processing function
-                        let result = process_file_core(
+                        let (result, _) = process_file_core(
                             &file_path, 
                             algo_copy, 
                             action_copy, 
