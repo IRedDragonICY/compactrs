@@ -4,7 +4,7 @@ use windows_sys::core::{PCWSTR, HRESULT, GUID};
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, RECT, POINT};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, ShowWindow,
+    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, ShowWindow,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND,
     GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, WM_DROPFILES, MessageBoxW, MB_OK,
@@ -700,12 +700,13 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 let _ = Box::from_raw(ptr as *mut AppState);
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             }
-            PostQuitMessage(0);
-            0
+            // Force explicit process exit to prevent zombie processes.
+            // Bypassing the message loop unwind ensures we don't hang on stubborn dispatch chains.
+            std::process::exit(0);
         }
 
         WM_NCDESTROY => {
-            PostQuitMessage(0);
+            // PostQuitMessage(0); // Moved to WM_DESTROY only
             0
         }
         

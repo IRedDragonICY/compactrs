@@ -119,7 +119,7 @@ fn main() {
 
                 // If ShellExecuteW returns > 32, it succeeded
                 if res as isize > 32 {
-                    return; // Exit this non-admin instance
+                    std::process::exit(0); // Exit this non-admin instance immediately
                 }
             }
 
@@ -134,7 +134,7 @@ fn main() {
                 MB_ICONERROR | MB_OK
             );
         }
-        return;
+        std::process::exit(1);
     }
 
     // Parse CLI arguments before GUI initialization
@@ -163,7 +163,7 @@ fn main() {
         if let Err(e) = ui::window::create_main_window(instance) {
             let msg = to_wstring(&("Failed to create main window: ".to_string() + &e.to_string()));
             MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), to_wstring("Error").as_ptr(), MB_ICONERROR | MB_OK);
-            return;
+            std::process::exit(1);
         }
 
         // Message Loop
@@ -184,5 +184,8 @@ fn main() {
 
         // Clean up COM
         windows_sys::Win32::System::Com::CoUninitialize();
+        
+        // Force process exit to ensure no background threads start
+        std::process::exit(0);
     }
 }

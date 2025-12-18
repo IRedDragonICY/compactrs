@@ -25,9 +25,13 @@ use windows_sys::Win32::UI::Controls::{
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+// Update imports to include cleanup functions
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
-    DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect,
+    DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect, HFONT,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    HICON,
 };
 
 const ABOUT_TITLE: &str = "About CompactRS";
@@ -36,11 +40,7 @@ const LICENSE_URL: &str = "https://github.com/IRedDragonICY/compactrs/blob/main/
 
 struct AboutState {
     is_dark: bool,
-    // dark_brush removed
 }
-
-// Drop trait removed - resources managed globally
-
 
 pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
     let instance = GetModuleHandleW(std::ptr::null());
@@ -112,9 +112,6 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 let new_is_dark = wparam == 1;
                 st.is_dark = new_is_dark;
                 
-                // Brush management handled globally
-
-                
                 // Update DWM title bar using centralized helper
                 crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
                 
@@ -152,22 +149,30 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
             let title_font = CreateFontW(
                 -28, 0, 0, 0, FW_BOLD as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr());
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr()) as HFONT;
             
             let version_font = CreateFontW(
                 -14, 0, 0, 0, FW_LIGHT as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr());
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr()) as HFONT;
             
             let body_font = CreateFontW(
                 -13, 0, 0, 0, FW_NORMAL as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr());
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr()) as HFONT;
             
             let creator_font = CreateFontW(
                 -12, 0, 0, 0, FW_NORMAL as i32, 1, 0, 0, DEFAULT_CHARSET as u32, // Italic
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr());
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr()) as HFONT;
+
+            // Store fonts in state
+            if let Some(st) = state_ptr.as_mut() {
+                st.fonts.push(title_font);
+                st.fonts.push(version_font);
+                st.fonts.push(body_font);
+                st.fonts.push(creator_font);
+            }
 
             // Icon - Centered at top (Large Hero Icon)
             let icon_size = 128;
@@ -182,6 +187,11 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 icon_size, icon_size,
                 LR_DEFAULTCOLOR
             );
+
+            // Store icon in state
+            if let Some(st) = state_ptr.as_mut() {
+                st.icon = Some(hicon);
+            }
             
             let static_cls = to_wstring("STATIC");
             
