@@ -454,6 +454,18 @@ pub fn process_file_core(
                 return ProcessResult::Skipped("System Path".to_string());
             }
 
+            // NEW: Smart Skip - Prevent re-compression of already optimal files
+            if !force {
+                if let Some(current_algo) = crate::engine::wof::get_wof_algorithm(path) {
+                    if current_algo == algo {
+                        let p = to_wstring(path);
+                        let msg = concat_wstrings(&[&to_wstring("Skipped (Already compressed): "), &p]);
+                        let _ = tx.send(UiMessage::Log(msg));
+                        return ProcessResult::Skipped("Already optimal".to_string());
+                    }
+                }
+            }
+
             // Check extension filter (unless force is enabled)
             if !force && should_skip_extension(path) {
                 let p = to_wstring(path);
