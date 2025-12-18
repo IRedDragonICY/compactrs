@@ -4,14 +4,22 @@
 //! reducing boilerplate and centralizing theme application logic.
 
 use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Graphics::Gdi::HFONT;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, WS_CHILD, WS_VISIBLE, WS_TABSTOP, WS_VSCROLL,
-    BS_PUSHBUTTON, BS_AUTOCHECKBOX,
-    CBS_DROPDOWNLIST, CBS_HASSTRINGS, HMENU,
+    CreateWindowExW, SendMessageW, WS_CHILD, WS_VISIBLE, WS_TABSTOP, WS_VSCROLL,
+    BS_PUSHBUTTON, BS_AUTOCHECKBOX, BS_AUTORADIOBUTTON, BS_GROUPBOX,
+    CBS_DROPDOWNLIST, CBS_HASSTRINGS, HMENU, WM_SETFONT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use crate::utils::to_wstring;
-use crate::ui::controls::{apply_button_theme, apply_combobox_theme};
+use crate::ui::theme::{self, ControlType};
+
+// STATIC control style constants (feature-gated in windows-sys)
+const SS_LEFT: u32 = 0x0000;
+const SS_CENTER: u32 = 0x0001;
+const SS_ICON: u32 = 0x0003;
+const SS_REALSIZEIMAGE: u32 = 0x0800;
+const SS_CENTERIMAGE: u32 = 0x0200;
 
 /// Fluent builder for creating various Win32 controls.
 pub struct ControlBuilder {
@@ -26,6 +34,7 @@ pub struct ControlBuilder {
     style: u32,
     ex_style: u32,
     is_dark: bool,
+    custom_font: Option<HFONT>,
 }
 
 impl ControlBuilder {
@@ -43,6 +52,7 @@ impl ControlBuilder {
             style: WS_VISIBLE | WS_CHILD,
             ex_style: 0,
             is_dark: false,
+            custom_font: None,
         }
     }
 
@@ -78,6 +88,12 @@ impl ControlBuilder {
         self
     }
 
+    /// Sets a custom font for this control (overrides default app font).
+    pub fn font(mut self, font: HFONT) -> Self {
+        self.custom_font = Some(font);
+        self
+    }
+
     // --- Preset Methods ---
 
     /// Configures as a push button (default button type).
@@ -104,7 +120,45 @@ impl ControlBuilder {
         self
     }
 
+    /// Configures as a static label.
+    /// Sets class to "STATIC" and adds appropriate alignment style.
+    ///
+    /// # Arguments
+    /// * `align_center` - If true, text is centered; otherwise left-aligned.
+    pub fn label(mut self, align_center: bool) -> Self {
+        self.class_name = "STATIC".to_string();
+        self.style |= if align_center { SS_CENTER } else { SS_LEFT };
+        self
+    }
+
+    /// Configures as a group box.
+    /// Sets class to "BUTTON" and adds `BS_GROUPBOX`.
+    pub fn groupbox(mut self) -> Self {
+        self.class_name = "BUTTON".to_string();
+        self.style |= BS_GROUPBOX as u32;
+        self
+    }
+
+    /// Configures as an icon display (STATIC with SS_ICON).
+    /// Sets class to "STATIC" and adds `SS_ICON | SS_REALSIZEIMAGE | SS_CENTERIMAGE`.
+    pub fn icon_display(mut self) -> Self {
+        self.class_name = "STATIC".to_string();
+        self.style |= SS_ICON | SS_REALSIZEIMAGE | SS_CENTERIMAGE;
+        self
+    }
+
+    /// Configures as a radio button.
+    /// Sets class to "BUTTON" and adds `BS_AUTORADIOBUTTON | WS_TABSTOP`.
+    pub fn radio(mut self) -> Self {
+        self.class_name = "BUTTON".to_string();
+        self.style |= (BS_AUTORADIOBUTTON as u32) | WS_TABSTOP;
+        self
+    }
+
     /// Builds and creates the control.
+    ///
+    /// Automatically applies theming based on the control type and class name,
+    /// and sets the appropriate font.
     pub fn build(self) -> HWND {
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());
@@ -126,14 +180,39 @@ impl ControlBuilder {
                 std::ptr::null(),
             );
 
-            // Auto-apply theme based on class name
-            if self.class_name == "BUTTON" {
-                apply_button_theme(hwnd, self.is_dark);
-            } else if self.class_name == "COMBOBOX" {
-                apply_combobox_theme(hwnd, self.is_dark);
-            }
+            // Determine ControlType based on class_name and style for smart theming
+            let control_type = self.detect_control_type();
+            theme::apply_theme(hwnd, control_type, self.is_dark);
+
+            // Apply font: custom font if specified, otherwise default app font
+            let font = self.custom_font.unwrap_or_else(theme::get_app_font);
+            SendMessageW(hwnd, WM_SETFONT, font as usize, 1);
 
             hwnd
+        }
+    }
+
+    /// Detects the appropriate ControlType based on class name and style flags.
+    fn detect_control_type(&self) -> ControlType {
+        if self.class_name == "STATIC" {
+            // STATIC controls use GroupBox theming (neutral background)
+            ControlType::GroupBox
+        } else if self.class_name == "BUTTON" {
+            // Check style flags to determine button subtype
+            if (self.style & (BS_GROUPBOX as u32)) != 0 {
+                ControlType::GroupBox
+            } else if (self.style & (BS_AUTOCHECKBOX as u32)) != 0 {
+                ControlType::CheckBox
+            } else if (self.style & (BS_AUTORADIOBUTTON as u32)) != 0 {
+                ControlType::RadioButton
+            } else {
+                ControlType::Button
+            }
+        } else if self.class_name == "COMBOBOX" {
+            ControlType::ComboBox
+        } else {
+            // Default fallback
+            ControlType::Button
         }
     }
 }

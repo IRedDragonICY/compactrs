@@ -1,16 +1,16 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::state::AppTheme;
-use crate::ui::builder::ButtonBuilder;
+use crate::ui::builder::ControlBuilder;
 use crate::ui::utils::{get_window_state, to_wstring};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
     CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
     WS_VISIBLE, WM_CREATE, WM_COMMAND, SetWindowLongPtrW, GWLP_USERDATA,
-    WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    BS_AUTORADIOBUTTON, BM_SETCHECK,
-    SendMessageW, PostQuitMessage, WM_CLOSE, BS_GROUPBOX, GetParent, BN_CLICKED, DestroyWindow,
-    FindWindowW, HMENU, CREATESTRUCTW,
+    WS_CAPTION, WS_SYSMENU, WS_POPUP,
+    BM_SETCHECK,
+    SendMessageW, PostQuitMessage, WM_CLOSE, GetParent, BN_CLICKED, DestroyWindow,
+    FindWindowW, CREATESTRUCTW,
     BM_GETCHECK, MessageBoxW, MB_ICONERROR, MB_OK,
     GetWindowRect, WM_SETTEXT, AdjustWindowRect,
 };
@@ -152,55 +152,34 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             let is_dark = (*state_ptr).is_dark;
             crate::ui::theme::set_window_frame_theme(hwnd, is_dark);
             
-            let instance = GetModuleHandleW(std::ptr::null());
-            let btn_cls = to_wstring("BUTTON");
-            let grp_text = to_wstring("App Theme");
+            let _instance = GetModuleHandleW(std::ptr::null());
             
-            // Group Box
-            let grp = CreateWindowExW(
-                0,
-                btn_cls.as_ptr(),
-                grp_text.as_ptr(),
-                WS_VISIBLE | WS_CHILD | BS_GROUPBOX as u32,
-                10, 10, 260, 140,
-                hwnd,
-                IDC_GRP_THEME as isize as HMENU,
-                instance,
-                std::ptr::null()
-            );
-            
-            // Apply theme to group box
-            if let Some(st) = state_ptr.as_ref() {
-                crate::ui::theme::apply_theme(grp, crate::ui::theme::ControlType::GroupBox, st.is_dark);
-            }
+            // Group Box using ControlBuilder
+            let _grp = ControlBuilder::new(hwnd, IDC_GRP_THEME)
+                .groupbox()
+                .text("App Theme")
+                .pos(10, 10)
+                .size(260, 140)
+                .dark_mode(is_dark)
+                .build();
 
-            // Radio Buttons
+            // Radio Buttons using ControlBuilder
             let is_dark_mode = if let Some(st) = state_ptr.as_ref() { st.is_dark } else { false };
+            let theme = if let Some(st) = state_ptr.as_ref() { st.theme } else { AppTheme::System };
+            
+            // Helper to create and configure radio button
             let create_radio = |text: &str, id: u16, y: i32, checked: bool| {
-                let instance = GetModuleHandleW(std::ptr::null());
-                let cls = to_wstring("BUTTON");
-                let txt = to_wstring(text);
-                
-                 let h = CreateWindowExW(
-                    0,
-                    cls.as_ptr(),
-                    txt.as_ptr(),
-                    WS_VISIBLE | WS_CHILD | BS_AUTORADIOBUTTON as u32,
-                    30, y, 200, 25,
-                    hwnd,
-                    id as isize as HMENU,
-                    instance,
-                    std::ptr::null()
-                );
+                let h = ControlBuilder::new(hwnd, id)
+                    .radio()
+                    .text(text)
+                    .pos(30, y)
+                    .size(200, 25)
+                    .dark_mode(is_dark_mode)
+                    .build();
                 if checked {
                     SendMessageW(h, BM_SETCHECK, 1, 0);
                 }
-                // Apply theme to radio button
-                crate::ui::theme::apply_theme(h, crate::ui::theme::ControlType::RadioButton, is_dark_mode);
             };
-            
-            // Determine initial check
-            let theme = if let Some(st) = state_ptr.as_ref() { st.theme } else { AppTheme::System };
             
             create_radio("System Default", IDC_RADIO_SYSTEM, 40, theme == AppTheme::System);
             create_radio("Dark Mode", IDC_RADIO_DARK, 70, theme == AppTheme::Dark);
@@ -237,15 +216,19 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
             }
 
             // Updates Section
-            let _btn_update = ButtonBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
+            let _btn_update = ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
+                .button()
                 .text("Check for Updates")
-                .pos(30, 250).size(150, 25)
+                .pos(30, 250)
+                .size(150, 25)
                 .dark_mode(is_dark_mode)
                 .build();
             
-            let _btn_ti = ButtonBuilder::new(hwnd, IDC_BTN_RESTART_TI)
+            let _btn_ti = ControlBuilder::new(hwnd, IDC_BTN_RESTART_TI)
+                .button()
                 .text("Restart as TrustedInstaller")
-                .pos(30, 320).size(240, 25)
+                .pos(30, 320)
+                .size(240, 25)
                 .dark_mode(is_dark_mode)
                 .build();
             
@@ -258,22 +241,23 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 EnableWindow(btn_ti, 0);
             }
 
-            // Status Label
-            let lbl_status = to_wstring(&("Current Version: ".to_string() + env!("APP_VERSION")));
-            let h_lbl = CreateWindowExW(
-                0, to_wstring("STATIC").as_ptr(), lbl_status.as_ptr(),
-                WS_VISIBLE | WS_CHILD,
-                30, 280, 240, 40, // Increased height to 40 for wrapping
-                hwnd, IDC_LBL_UPDATE_STATUS as isize as HMENU, instance, std::ptr::null()
-            );
-            if let Some(st) = state_ptr.as_ref() {
-                // Use GroupBox theme for static text as it's usually transparent/neutral
-                crate::ui::theme::apply_theme(h_lbl, crate::ui::theme::ControlType::GroupBox, st.is_dark);
-            }
+            // Status Label using ControlBuilder
+            let _h_lbl = ControlBuilder::new(hwnd, IDC_LBL_UPDATE_STATUS)
+                .label(false) // left-aligned
+                .text(&("Current Version: ".to_string() + env!("APP_VERSION")))
+                .pos(30, 280)
+                .size(240, 40)
+                .dark_mode(is_dark)
+                .build();
 
-            // Buttons
-            let _close_btn = ButtonBuilder::new(hwnd, IDC_BTN_CANCEL)
-                .text("Close").pos(190, 250).size(80, 25).dark_mode(is_dark_mode).build();
+            // Close Button
+            let _close_btn = ControlBuilder::new(hwnd, IDC_BTN_CANCEL)
+                .button()
+                .text("Close")
+                .pos(190, 250)
+                .size(80, 25)
+                .dark_mode(is_dark_mode)
+                .build();
 
             0
         },
@@ -291,30 +275,30 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                 match &st.update_status {
                     UpdateStatus::Available(ver, _) => {
                          let txt = to_wstring("Download and Restart");
-                         SendMessageW(h_btn, starts_with_wm_settext(), 0, txt.as_ptr() as LPARAM);
+                         SendMessageW(h_btn, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
                          
                          let status_txt = to_wstring(&format!("New version {} available!", ver));
-                         SendMessageW(h_lbl, starts_with_wm_settext(), 0, status_txt.as_ptr() as LPARAM);
+                         SendMessageW(h_lbl, WM_SETTEXT, 0, status_txt.as_ptr() as LPARAM);
                          
                          // Re-enable button so user can click it
                          windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
                     },
                     UpdateStatus::UpToDate => {
                          let txt = to_wstring("Check for Updates");
-                         SendMessageW(h_btn, starts_with_wm_settext(), 0, txt.as_ptr() as LPARAM);
+                         SendMessageW(h_btn, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
                          
                          let status_txt = to_wstring("You are up to date.");
-                         SendMessageW(h_lbl, starts_with_wm_settext(), 0, status_txt.as_ptr() as LPARAM);
+                         SendMessageW(h_lbl, WM_SETTEXT, 0, status_txt.as_ptr() as LPARAM);
                          
                          // Re-enable button
                          windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
                     },
                     UpdateStatus::Error(e) => {
                          let txt = to_wstring("Check for Updates");
-                         SendMessageW(h_btn, starts_with_wm_settext(), 0, txt.as_ptr() as LPARAM);
+                         SendMessageW(h_btn, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
                          
                          let status_txt = to_wstring(&format!("Error: {}", e));
-                         SendMessageW(h_lbl, starts_with_wm_settext(), 0, status_txt.as_ptr() as LPARAM);
+                         SendMessageW(h_lbl, WM_SETTEXT, 0, status_txt.as_ptr() as LPARAM);
                          
                          windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
                     },
@@ -539,10 +523,7 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
                                       windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 0); // Disable button
                                       let h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
                                       let loading = to_wstring("Checking for updates...");
-                                      SendMessageW(h_lbl, starts_with_wm_settext(), 0, loading.as_ptr() as LPARAM);
-
-                                      let loading = to_wstring("Checking for updates...");
-                                      SendMessageW(h_lbl, starts_with_wm_settext(), 0, loading.as_ptr() as LPARAM);
+                                      SendMessageW(h_lbl, WM_SETTEXT, 0, loading.as_ptr() as LPARAM);
 
                                       let clone_hwnd_ptr = hwnd as usize;
                                       std::thread::spawn(move || {
@@ -594,6 +575,3 @@ unsafe extern "system" fn settings_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
-
-
-fn starts_with_wm_settext() -> u32 { WM_SETTEXT }

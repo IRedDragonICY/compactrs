@@ -1,10 +1,11 @@
 #![allow(unsafe_op_in_unsafe_fn)]
+use crate::ui::builder::ControlBuilder;
 use crate::ui::utils::get_window_state;
 use crate::utils::to_wstring;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, SendMessageW,
-    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW, WM_SETFONT,
+    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
     WS_VISIBLE, WM_CREATE,
     WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
     PostQuitMessage, WM_CLOSE, DestroyWindow, 
@@ -14,10 +15,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::Win32::Foundation::RECT;
 
-// Constants missing from windows-sys imports or feature gated
-const SS_CENTER: u32 = 0x1;
-const SS_ICON: u32 = 0x3;
-const SS_REALSIZEIMAGE: u32 = 0x800;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Controls::{
     NMHDR, NM_CLICK, NM_RETURN, NMLINK, WC_LINK, ICC_LINK_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx,
@@ -25,7 +22,6 @@ use windows_sys::Win32::UI::Controls::{
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-// Update imports to include cleanup functions
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect, HFONT,
@@ -164,121 +160,74 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
                 (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr()) as HFONT;
 
-
-
             // Icon - Centered at top (Large Hero Icon)
             let icon_size = 128;
             let icon_x = (450 - icon_size) / 2;
             
-            // Note: For the about dialog we want a larger icon display
-            // so we load at specific size using LR_DEFAULTCOLOR
+            // Load large icon for about dialog
             let hicon = LoadImageW(
-                instance, // Use instance instead of HINSTANCE struct
+                instance,
                 1 as *const u16, // Win32 MAKEINTRESOURCE(1)
                 IMAGE_ICON,
                 icon_size, icon_size,
                 LR_DEFAULTCOLOR
             );
 
-
-            
-            let static_cls = to_wstring("STATIC");
-            
-            let icon_static = CreateWindowExW(
-                0,
-                static_cls.as_ptr(),
-                std::ptr::null(),
-                WS_VISIBLE | WS_CHILD | SS_ICON | SS_REALSIZEIMAGE | SS_CENTER,
-                icon_x, 20, icon_size, icon_size,
-                hwnd,
-                std::ptr::null_mut(), // ID 0 for static
-                instance,
-                std::ptr::null()
-            );
+            // Icon display using ControlBuilder
+            let icon_static = ControlBuilder::new(hwnd, 0)
+                .icon_display()
+                .pos(icon_x, 20)
+                .size(icon_size, icon_size)
+                .dark_mode(is_dark_mode)
+                .build();
             
             // Set the icon image
             SendMessageW(icon_static, STM_SETICON, hicon as WPARAM, 0);
-            
-            if is_dark_mode {
-                crate::ui::theme::apply_theme(icon_static, crate::ui::theme::ControlType::Window, true);
-            }
 
-            // App Name - Large bold title
-            let app_name_text = to_wstring("CompactRS");
-            let app_name = CreateWindowExW(
-                0,
-                static_cls.as_ptr(),
-                app_name_text.as_ptr(),
-                WS_VISIBLE | WS_CHILD | SS_CENTER,
-                margin, 160, content_width, 40,
-                hwnd,
-                std::ptr::null_mut(),
-                instance,
-                std::ptr::null()
-            );
-            SendMessageW(app_name, WM_SETFONT, title_font as WPARAM, 1);
-            if is_dark_mode {
-                crate::ui::theme::apply_theme(app_name, crate::ui::theme::ControlType::Window, true);
-            }
+            // App Name - Large bold title using ControlBuilder
+            let _app_name = ControlBuilder::new(hwnd, 0)
+                .label(true) // center-aligned
+                .text("CompactRS")
+                .pos(margin, 160)
+                .size(content_width, 40)
+                .font(title_font)
+                .dark_mode(is_dark_mode)
+                .build();
 
-            // Version - Lighter font
+            // Version - Lighter font using ControlBuilder
             let ver_string = format!("Version {}", env!("APP_VERSION"));
-            let ver_text = to_wstring(&ver_string);
-            let version = CreateWindowExW(
-                0,
-                static_cls.as_ptr(),
-                ver_text.as_ptr(),
-                WS_VISIBLE | WS_CHILD | SS_CENTER,
-                margin, 205, content_width, 20,
-                hwnd,
-                std::ptr::null_mut(),
-                instance,
-                std::ptr::null()
-            );
-            SendMessageW(version, WM_SETFONT, version_font as WPARAM, 1);
-            if is_dark_mode {
-                crate::ui::theme::apply_theme(version, crate::ui::theme::ControlType::Window, true);
-            }
+            let _version = ControlBuilder::new(hwnd, 0)
+                .label(true)
+                .text(&ver_string)
+                .pos(margin, 205)
+                .size(content_width, 20)
+                .font(version_font)
+                .dark_mode(is_dark_mode)
+                .build();
 
-            // Description - Regular body text
-            let desc_text = to_wstring("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary.");
-            let desc = CreateWindowExW(
-                0,
-                static_cls.as_ptr(),
-                desc_text.as_ptr(),
-                WS_VISIBLE | WS_CHILD | SS_CENTER,
-                margin, 240, content_width, 130,
-                hwnd,
-                std::ptr::null_mut(),
-                instance,
-                std::ptr::null()
-            );
-            SendMessageW(desc, WM_SETFONT, body_font as WPARAM, 1);
-            if is_dark_mode {
-                crate::ui::theme::apply_theme(desc, crate::ui::theme::ControlType::Window, true);
-            }
+            // Description - Regular body text using ControlBuilder
+            let _desc = ControlBuilder::new(hwnd, 0)
+                .label(true)
+                .text("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary.")
+                .pos(margin, 240)
+                .size(content_width, 130)
+                .font(body_font)
+                .dark_mode(is_dark_mode)
+                .build();
 
-            // Created by - Italic style
-            let creator_text = to_wstring("Created by IRedDragonICY\n(Mohammad Farid Hendianto)");
-            let creator = CreateWindowExW(
-                0,
-                static_cls.as_ptr(),
-                creator_text.as_ptr(),
-                WS_VISIBLE | WS_CHILD | SS_CENTER,
-                margin, 385, content_width, 40,
-                hwnd,
-                std::ptr::null_mut(),
-                instance,
-                std::ptr::null()
-            );
-            SendMessageW(creator, WM_SETFONT, creator_font as WPARAM, 1);
-            if is_dark_mode {
-                crate::ui::theme::apply_theme(creator, crate::ui::theme::ControlType::Window, true);
-            }
+            // Created by - Italic style using ControlBuilder
+            let _creator = ControlBuilder::new(hwnd, 0)
+                .label(true)
+                .text("Created by IRedDragonICY\n(Mohammad Farid Hendianto)")
+                .pos(margin, 385)
+                .size(content_width, 40)
+                .font(creator_font)
+                .dark_mode(is_dark_mode)
+                .build();
 
-            // GitHub Link (SysLink) - Centered
+            // GitHub Link (SysLink) - Centered (still raw CreateWindowExW as it's a special control)
             let link_text = to_wstring("<a href=\"https://github.com/IRedDragonICY/compactrs\">GitHub</a>  •  <a href=\"https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE\">License</a>");
-            let link_cls = WC_LINK; // Win32 constant in windows-sys
+            let link_cls = WC_LINK;
             let link = CreateWindowExW(
                 0,
                 link_cls,
@@ -290,7 +239,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 instance,
                 std::ptr::null()
             );
-            SendMessageW(link, WM_SETFONT, body_font as WPARAM, 1);
+            SendMessageW(link, windows_sys::Win32::UI::WindowsAndMessaging::WM_SETFONT, body_font as WPARAM, 1);
             if is_dark_mode {
                 crate::ui::theme::apply_theme(link, crate::ui::theme::ControlType::Window, true);
             }
