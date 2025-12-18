@@ -16,7 +16,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, WM_CLOSE, WM_NCDESTROY, DestroyWindow,
     KillTimer,
 };
-use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
+use windows_sys::Win32::System::DataExchange::{
+    COPYDATASTRUCT, OpenClipboard, GetClipboardData, CloseClipboard, IsClipboardFormatAvailable,
+};
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::Foundation::{TRUE, FALSE};
 use windows_sys::Win32::UI::Shell::{
@@ -382,6 +384,30 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             0
         }
         
+        // WM_KEYDOWN: Handle Ctrl+V for Paste
+        0x0100 => { // WM_KEYDOWN
+            let vk = wparam as u16;
+            if vk == 0x56 { // 'V'
+                 let ctrl_state = GetKeyState(VK_CONTROL as i32) as u16;
+                 if (ctrl_state & 0x8000) != 0 {
+                      // Ctrl + V detected
+                      // 15 = CF_HDROP
+                      if IsClipboardFormatAvailable(15) != 0 {
+                          if OpenClipboard(hwnd) != 0 {
+                               let hdrop = GetClipboardData(15) as HDROP;
+                               if !hdrop.is_null() {
+                                   if let Some(st) = get_state() {
+                                       process_hdrop(hwnd, hdrop, st);
+                                   }
+                               }
+                               CloseClipboard();
+                          }
+                      }
+                 }
+            }
+            0
+        }
+
         WM_COMMAND => {
             let id = (wparam & 0xFFFF) as u16;
             match id {
@@ -860,48 +886,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         
         WM_DROPFILES => {
             let hdrop = wparam as HDROP;
-            let count = DragQueryFileW(hdrop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
-            let mut paths = Vec::new();
-            let mut buffer = [0u16; 1024];
-            
-            for i in 0..count {
-                let len = DragQueryFileW(hdrop, i, buffer.as_mut_ptr(), 1024);
-                if len > 0 {
-                    let s = String::from_utf16_lossy(&buffer[..len as usize]);
-                    paths.push(s);
-                }
+            if let Some(st) = get_state() {
+                process_hdrop(hwnd, hdrop, st);
             }
             DragFinish(hdrop);
-            
-            if let Some(st) = get_state() {
-                if let Some(ctrls) = &st.controls {
-                    let w_msg = to_wstring("Analyzing dropped files...");
-                    SetWindowTextW(ctrls.status_bar.label_hwnd(), w_msg.as_ptr());
-                }
-                let mut items_to_analyze = Vec::new();
-                for path in paths {
-                    if !st.batch_items.iter().any(|item| item.path == path) {
-                        let id = st.add_batch_item(path.clone());
-                        if let Some(ctrls) = &st.controls {
-                             if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == id) {
-                                 // "Calculating..." uses Vec<u16>
-                                 ctrls.file_list.add_item(id, batch_item, to_wstring("Calculating..."), to_wstring("Calculating..."), CompressionState::None);
-                             }
-                        }
-                        items_to_analyze.push((id, path));
-                    }
-                }
-                let tx = st.tx.clone();
-                thread::spawn(move || {
-                    for (id, path) in items_to_analyze {
-                         let logical = calculate_path_logical_size(&path);
-                         let disk = calculate_path_disk_size(&path);
-                         let algo = detect_path_algorithm(&path);
-                         let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, algo));
-                    }
-                    let _ = tx.send(UiMessage::Status(to_wstring("Ready.")));
-                });
-            }
             0
         }
         
@@ -1015,6 +1003,23 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                      }
                                  }
                              }
+                        }
+                    }
+                    // Handle Ctrl + V (Paste)
+                    else if vk == 0x56 { // 'V' key
+                        let ctrl_state = GetKeyState(VK_CONTROL as i32) as u16;
+                        if (ctrl_state & 0x8000) != 0 {
+                            if IsClipboardFormatAvailable(15) != 0 {
+                                if OpenClipboard(hwnd) != 0 {
+                                     let hdrop = GetClipboardData(15) as HDROP;
+                                     if !hdrop.is_null() {
+                                         if let Some(st) = get_state() {
+                                             process_hdrop(hwnd, hdrop, st);
+                                         }
+                                     }
+                                     CloseClipboard();
+                                }
+                            }
                         }
                     }
                 }
@@ -1395,4 +1400,50 @@ unsafe fn pick_folder() -> Result<String, HRESULT> {
     (vtbl.release)(p_dialog);
 
     Ok(path)
+}
+
+/// Helper function to process HDROP handle (extract paths and add to batch)
+/// Used by both WM_DROPFILES and Ctrl+V (Clipboard)
+unsafe fn process_hdrop(_hwnd: HWND, hdrop: HDROP, st: &mut AppState) {
+    let count = DragQueryFileW(hdrop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
+    let mut paths = Vec::new();
+    let mut buffer = [0u16; 1024];
+    
+    for i in 0..count {
+        let len = DragQueryFileW(hdrop, i, buffer.as_mut_ptr(), 1024);
+        if len > 0 {
+            let s = String::from_utf16_lossy(&buffer[..len as usize]);
+            paths.push(s);
+        }
+    }
+    
+    if let Some(ctrls) = &st.controls {
+        let w_msg = to_wstring("Analyzing dropped files...");
+        SetWindowTextW(ctrls.status_bar.label_hwnd(), w_msg.as_ptr());
+    }
+    let mut items_to_analyze = Vec::new();
+    for path in paths {
+        if !st.batch_items.iter().any(|item| item.path == path) {
+            let id = st.add_batch_item(path.clone());
+            if let Some(ctrls) = &st.controls {
+                 if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == id) {
+                     ctrls.file_list.add_item(id, batch_item, to_wstring("Calculating..."), to_wstring("Calculating..."), CompressionState::None);
+                 }
+            }
+            items_to_analyze.push((id, path));
+        }
+    }
+    
+    if items_to_analyze.is_empty() { return; }
+
+    let tx = st.tx.clone();
+    thread::spawn(move || {
+        for (id, path) in items_to_analyze {
+             let logical = calculate_path_logical_size(&path);
+             let disk = calculate_path_disk_size(&path);
+             let algo = detect_path_algorithm(&path);
+             let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, algo));
+        }
+        let _ = tx.send(UiMessage::Status(to_wstring("Ready.")));
+    });
 }
