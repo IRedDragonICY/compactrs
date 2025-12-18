@@ -1099,6 +1099,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     let _ = AppendMenuW(menu, MF_STRING, 1004, to_wstring("Remove").as_ptr());
                                 }
 
+                                // Add "Open File Location"
+                                let _ = AppendMenuW(menu, MF_STRING, 1006, to_wstring("Open File Location").as_ptr());
+
                                 let _cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, std::ptr::null());
                                 DestroyMenu(menu);
                                 
@@ -1142,6 +1145,25 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                         thread::spawn(move || {
                                             batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
                                         });
+                                    }
+                                } else if _cmd == 1006 {
+                                    // Open file location logic
+                                    if let Some(&first_idx) = selected.first() {
+                                        if let Some(item) = st.batch_items.get(first_idx as usize) {
+                                            let select_prefix = to_wstring("/select,\"");
+                                            let path_w = to_wstring(&item.path);
+                                            let suffix = to_wstring("\"");
+                                            let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
+                                            
+                                            ShellExecuteW(
+                                                std::ptr::null_mut(),
+                                                to_wstring("open").as_ptr(),
+                                                to_wstring("explorer.exe").as_ptr(),
+                                                args.as_ptr(),
+                                                std::ptr::null(),
+                                                SW_SHOWNORMAL
+                                            );
+                                        }
                                     }
                                 }
                             }
