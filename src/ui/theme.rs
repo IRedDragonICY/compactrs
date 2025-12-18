@@ -51,6 +51,7 @@ pub const COLOR_HEADER_TEXT_DARK: u32 = 0x00FFFFFF;
 pub enum ControlType {
     Window,
     Button,
+    AccentButton, // Windows 11 Fluent blue accent button
     List,
     CheckBox,
     ComboBox,
@@ -94,6 +95,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
         match control_type {
             ControlType::Window => ("DarkMode_Explorer", None),
             ControlType::Button => ("DarkMode_Explorer", None),
+            ControlType::AccentButton => ("DarkMode_Explorer", None),
             ControlType::List => ("DarkMode_Explorer", None), 
             ControlType::CheckBox => ("DarkMode_Explorer", None),
             ControlType::ComboBox => ("DarkMode_CFD", None),
@@ -108,6 +110,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
         match control_type {
             ControlType::Window => ("Explorer", None),
             ControlType::Button => ("Explorer", None),
+            ControlType::AccentButton => ("Explorer", None),
             ControlType::List => ("Explorer", None),
             ControlType::CheckBox => ("Explorer", None),
             ControlType::ComboBox => ("Explorer", None),

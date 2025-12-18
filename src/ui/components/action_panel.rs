@@ -13,13 +13,14 @@ use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
-use crate::ui::controls::{apply_button_theme, apply_combobox_theme};
+use crate::ui::controls::{apply_button_theme, apply_combobox_theme, apply_accent_button_theme};
 
 /// Configuration for ActionPanel control IDs.
 pub struct ActionPanelIds {
     pub btn_files: u16,
     pub btn_folder: u16,
     pub btn_remove: u16,
+    pub lbl_input: u16,
     pub combo_action_mode: u16,
     pub lbl_action_mode: u16,
     pub combo_algo: u16,
@@ -35,6 +36,7 @@ pub struct ActionPanelIds {
 /// Positioned at the very bottom of the window with horizontal button arrangement:
 /// [Files] [Folder] [Remove] [Action Mode ▼] [Algorithm ▼] [☐ Force] [Process All] [Cancel]
 pub struct ActionPanel {
+    hwnd_lbl_input: HWND,
     hwnd_files: HWND,
     hwnd_folder: HWND,
     hwnd_remove: HWND,
@@ -54,6 +56,7 @@ impl ActionPanel {
     /// Call `create()` to actually create the Win32 controls.
     pub fn new(ids: ActionPanelIds) -> Self {
         Self {
+            hwnd_lbl_input: std::ptr::null_mut(),
             hwnd_files: std::ptr::null_mut(),
             hwnd_folder: std::ptr::null_mut(),
             hwnd_remove: std::ptr::null_mut(),
@@ -127,6 +130,7 @@ impl ActionPanel {
         let wparam = hfont as usize;
         let lparam = 1; // Redraw
         
+        SendMessageW(self.hwnd_lbl_input, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_files, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_folder, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_remove, WM_SETFONT, wparam, lparam);
@@ -149,6 +153,15 @@ impl Component for ActionPanel {
 
         // Check system dark mode for initial theme
         let is_dark = crate::ui::theme::is_system_dark_mode();
+
+        // Create Input Label (title above Files/Folder/Remove buttons)
+        self.hwnd_lbl_input = ControlBuilder::new(parent, self.ids.lbl_input)
+            .label(false)
+            .text("Input")
+            .pos(10, btn_y - 18)
+            .size(175, 16)
+            .dark_mode(is_dark)
+            .build();
 
         // Create Files button
         self.hwnd_files = ControlBuilder::new(parent, self.ids.btn_files)
@@ -220,7 +233,7 @@ impl Component for ActionPanel {
             .dark_mode(is_dark)
             .build();
 
-        // Create Process All button
+        // Create Process All button with Windows 11 Fluent blue accent
         self.hwnd_process = ControlBuilder::new(parent, self.ids.btn_process)
             .button()
             .text("Process All")
@@ -228,6 +241,8 @@ impl Component for ActionPanel {
             .size(100, btn_h)
             .dark_mode(is_dark)
             .build();
+        // Apply accent button style for modern Windows 11 look
+        apply_accent_button_theme(self.hwnd_process, is_dark);
 
         // Create Cancel button
         self.hwnd_cancel = ControlBuilder::new(parent, self.ids.btn_cancel)
@@ -258,6 +273,17 @@ impl Component for ActionPanel {
             // Position buttons at bottom of window with extra space for labels above
             let btn_y = height - btn_height - padding;
             let lbl_y = btn_y - lbl_height - lbl_btn_gap;
+
+            // Input label (above Files/Folder/Remove buttons)
+            SetWindowPos(
+                self.hwnd_lbl_input,
+                std::ptr::null_mut(),
+                padding,
+                lbl_y,
+                175,
+                lbl_height,
+                SWP_NOZORDER,
+            );
 
             // Files button
             SetWindowPos(
@@ -377,7 +403,7 @@ impl Component for ActionPanel {
             apply_button_theme(self.hwnd_files, is_dark);
             apply_button_theme(self.hwnd_folder, is_dark);
             apply_button_theme(self.hwnd_remove, is_dark);
-            apply_button_theme(self.hwnd_process, is_dark);
+            apply_accent_button_theme(self.hwnd_process, is_dark);
             apply_button_theme(self.hwnd_cancel, is_dark);
             apply_button_theme(self.hwnd_force, is_dark); // Checkbox uses button theme
 
@@ -386,6 +412,7 @@ impl Component for ActionPanel {
             apply_combobox_theme(self.hwnd_combo, is_dark);
 
             // Apply theme to labels
+            crate::ui::theme::apply_theme(self.hwnd_lbl_input, crate::ui::theme::ControlType::GroupBox, is_dark);
             crate::ui::theme::apply_theme(self.hwnd_lbl_action_mode, crate::ui::theme::ControlType::GroupBox, is_dark);
             crate::ui::theme::apply_theme(self.hwnd_lbl_algo, crate::ui::theme::ControlType::GroupBox, is_dark);
         }

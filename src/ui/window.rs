@@ -43,7 +43,7 @@ use crate::ui::controls::{
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST,
     IDC_BTN_ADD_FOLDER, IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES,
     IDC_BTN_SETTINGS, IDC_BTN_ABOUT, IDC_BTN_CONSOLE, IDC_CHK_FORCE, IDC_COMBO_ACTION_MODE,
-    IDC_LBL_ACTION_MODE, IDC_LBL_ALGO,
+    IDC_LBL_ACTION_MODE, IDC_LBL_ALGO, IDC_LBL_INPUT,
 };
 use crate::ui::components::{
     Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
@@ -185,6 +185,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
     if let Some(result) = theme::handle_standard_colors(hwnd, msg, wparam, is_dark) {
         return result;
     }
+    
+    // Handle WM_DRAWITEM for owner-drawn accent button
+    const WM_DRAWITEM: u32 = 0x002B;
+    if msg == WM_DRAWITEM {
+        use windows_sys::Win32::UI::Controls::DRAWITEMSTRUCT;
+        let dis = &*(lparam as *const DRAWITEMSTRUCT);
+        // Check if this is our Process button (IDC_BTN_PROCESS_ALL = 113)
+        if dis.CtlID == IDC_BTN_PROCESS_ALL as u32 {
+            crate::ui::controls::draw_accent_button(lparam);
+            return 1; // TRUE - we handled it
+        }
+    }
 
     match msg {
         WM_CREATE => {
@@ -207,6 +219,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 btn_files: IDC_BTN_ADD_FILES,
                 btn_folder: IDC_BTN_ADD_FOLDER,
                 btn_remove: IDC_BTN_REMOVE,
+                lbl_input: IDC_LBL_INPUT,
                 combo_action_mode: IDC_COMBO_ACTION_MODE,
                 lbl_action_mode: IDC_LBL_ACTION_MODE,
                 combo_algo: IDC_COMBO_ALGO,
