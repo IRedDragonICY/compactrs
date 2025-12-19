@@ -7,7 +7,7 @@
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowPos, SendMessageW, CreateWindowExW, WS_VISIBLE, WS_CHILD, WS_BORDER, WM_NOTIFY,
-    SWP_NOZORDER, HMENU,
+    SWP_NOZORDER, HMENU, GetClientRect,
 };
 use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, SetBkMode, SetTextColor, TRANSPARENT};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -18,7 +18,8 @@ use windows_sys::Win32::UI::Controls::{
     LVCOLUMNW, LVIF_PARAM, LVIF_TEXT, LVITEMW, LVNI_SELECTED, LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, NM_CUSTOMDRAW, NMCUSTOMDRAW,
     CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
-    LVM_GETITEMCOUNT, LVM_SETITEMSTATE, LVIS_SELECTED, LVM_SORTITEMS,
+    LVM_GETITEMCOUNT, LVM_SETITEMSTATE, LVIS_SELECTED, LVM_SORTITEMS, LVM_SETCOLUMNWIDTH,
+    HDN_BEGINTRACKW, HDN_DIVIDERDBLCLICKW,
 };
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 
@@ -26,6 +27,23 @@ use super::base::Component;
 use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::ui::state::BatchItem;
 use crate::utils::to_wstring;
+
+const DEFAULT_PATH_WIDTH: i32 = 250;
+
+/// Define columns: (Name, Width)
+const COLUMN_DEFS: &[(&str, i32)] = &[
+    ("Path", DEFAULT_PATH_WIDTH),
+    ("Current", 70),
+    ("Algorithm", 70),
+    ("Action", 70),
+    ("Size", 75),
+    ("Est. Size", 75),
+    ("On Disk", 75),
+    ("Ratio", 60),
+    ("Progress", 70),
+    ("Status", 80),
+    ("▶ Start", 60),
+];
 
 /// Column indices for the FileListView
 pub mod columns {
@@ -113,22 +131,7 @@ impl FileListView {
 
     /// Sets up the ListView columns.
     fn setup_columns(&self) {
-        // Columns: Path | Current | Algo | Action | Size | Est. Size | On Disk | Progress | Status | ▶ Start
-        let columns = [
-            ("Path", 250),
-            ("Current", 70),
-            ("Algorithm", 70),
-            ("Action", 70),
-            ("Size", 75),
-            ("Est. Size", 75),
-            ("On Disk", 75),
-            ("Ratio", 60),
-            ("Progress", 70),
-            ("Status", 80),
-            ("▶ Start", 60),
-        ];
-
-        for (i, (name, width)) in columns.iter().enumerate() {
+        for (i, (name, width)) in COLUMN_DEFS.iter().enumerate() {
             let name_wide = to_wstring(name);
             let col = LVCOLUMNW {
                 mask: LVCF_WIDTH | LVCF_TEXT | LVCF_FMT,
@@ -600,15 +603,45 @@ impl Component for FileListView {
 
             // Position ListView below header
             let list_y = padding + header_height + padding;
+            let list_width = width - padding * 2;
 
             SetWindowPos(
                 self.hwnd,
                 std::ptr::null_mut(),
                 padding,
                 list_y,
-                width - padding * 2,
+                list_width,
                 list_height,
                 SWP_NOZORDER,
+            );
+
+            // --- Flex Layout Logic ---
+            // Calculate total width of fixed columns (indices 1..end)
+            // Skip the first column (Path)
+            let mut fixed_width = 0;
+            for i in 1..COLUMN_DEFS.len() {
+                fixed_width += COLUMN_DEFS[i].1;
+            }
+
+            // Get exact client width (excludes scrollbar/borders if present)
+            let mut rect: RECT = std::mem::zeroed();
+            GetClientRect(self.hwnd, &mut rect);
+            let list_inner_width = rect.right - rect.left;
+
+            // Calculate new width for Path column (Column 0)
+            let mut new_path_width = list_inner_width - fixed_width;
+
+            // Enforce minimum width
+            if new_path_width < 100 {
+                new_path_width = 100;
+            }
+
+            // Apply the new width to Column 0
+            SendMessageW(
+                self.hwnd,
+                LVM_SETCOLUMNWIDTH,
+                0, // Index of Path column
+                new_path_width as isize,
             );
         }
     }
@@ -636,11 +669,17 @@ unsafe extern "system" fn listview_subclass_proc(
     // SAFETY: dwrefdata contains the main window HWND passed during subclass setup.
     let main_hwnd = dwrefdata as HWND;
 
-    if umsg == WM_NOTIFY && crate::ui::theme::is_app_dark_mode(main_hwnd) {
+    if umsg == WM_NOTIFY {
         // SAFETY: lparam points to NMHDR struct provided by the system.
         let nmhdr = &*(lparam as *const NMHDR);
 
-        if nmhdr.code == NM_CUSTOMDRAW {
+        // Block manual column resizing
+        if nmhdr.code == HDN_BEGINTRACKW || nmhdr.code == HDN_DIVIDERDBLCLICKW {
+            return 1; // Prevent resizing
+        }
+
+        if crate::ui::theme::is_app_dark_mode(main_hwnd) {
+            if nmhdr.code == NM_CUSTOMDRAW {
             // SAFETY: For NM_CUSTOMDRAW, lparam points to NMCUSTOMDRAW struct.
             let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
 
@@ -656,6 +695,7 @@ unsafe extern "system" fn listview_subclass_proc(
                 return CDRF_NEWFONT as LRESULT;
             }
         }
+    }
     }
 
     // SAFETY: DefSubclassProc is called with valid parameters.
