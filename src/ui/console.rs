@@ -1,7 +1,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::controls::apply_button_theme;
 use crate::ui::builder::ButtonBuilder;
-use crate::ui::utils::{get_window_state, to_wstring};
+use crate::ui::framework::get_window_state;
+use crate::utils::to_wstring;
 use crate::ui::framework::{Window, WindowHandler};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
@@ -56,7 +57,7 @@ pub unsafe fn show_console_window(parent: HWND, initial_logs: &[Vec<u16>], is_da
     let instance = GetModuleHandleW(std::ptr::null());
     
     // Load App Icon using centralized helper
-    let icon = crate::ui::utils::load_app_icon(instance);
+    let icon = crate::ui::framework::load_app_icon(instance);
     let bg_brush = (COLOR_WINDOW + 1) as HBRUSH;
     
     // CRITICAL: Modeless window state must persist after function returns.

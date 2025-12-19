@@ -1,7 +1,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::state::AppTheme;
 use crate::ui::builder::ControlBuilder;
-use crate::ui::utils::to_wstring;
+use crate::utils::to_wstring;
 use crate::ui::framework::{Window, WindowHandler};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -70,7 +70,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     }
     
     // Load App Icon using centralized helper
-    let icon = crate::ui::utils::load_app_icon(instance);
+    let icon = crate::ui::framework::load_app_icon(instance);
     
     let mut rect: RECT = std::mem::zeroed();
     GetWindowRect(parent, &mut rect);
@@ -115,7 +115,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
 
     if hwnd != std::ptr::null_mut() {
         // Message loop
-        crate::ui::utils::run_message_loop();
+        crate::ui::framework::run_message_loop();
     }
     
     (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard)

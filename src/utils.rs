@@ -1,4 +1,6 @@
 /* --- src/utils.rs --- */
+use windows_sys::Win32::UI::Shell::StrFormatByteSizeW;
+
 
 /// Convert a Rust string to a null-terminated UTF-16 vector.
 pub fn to_wstring(value: &str) -> Vec<u16> {
@@ -59,4 +61,27 @@ pub fn concat_wstrings(parts: &[&[u16]]) -> Vec<u16> {
     }
     res.push(0);
     res
+}
+
+/// Formats a byte size into a human-readable string using the Windows Shell API.
+pub fn format_size(bytes: u64) -> Vec<u16> {
+    let mut buffer: [u16; 32] = [0; 32];
+    
+    unsafe {
+        let size_i64 = if bytes > i64::MAX as u64 {
+            i64::MAX
+        } else {
+            bytes as i64
+        };
+        
+        let ptr = StrFormatByteSizeW(size_i64, buffer.as_mut_ptr(), buffer.len() as u32);
+        
+        if ptr.is_null() {
+            return vec![0];
+        }
+
+        // Buffer is filled with null-terminated string
+        let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+        buffer[..=len].to_vec() // Include null terminator
+    }
 }

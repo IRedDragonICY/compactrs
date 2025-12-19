@@ -63,7 +63,8 @@ use crate::engine::worker::{
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm,
 };
 use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
-use crate::ui::utils::{format_size, load_app_icon};
+use crate::utils::format_size;
+use crate::ui::framework::load_app_icon;
 use crate::config::AppConfig;
 use crate::ui::framework::{Window, WindowHandler};
 

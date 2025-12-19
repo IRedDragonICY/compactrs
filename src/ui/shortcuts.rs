@@ -53,12 +53,12 @@ pub unsafe fn show_shortcuts_modal(parent: HWND, is_dark: bool) {
         0, // ex_style
         x, y, width, height,
         parent,
-        crate::ui::utils::load_app_icon(instance),
+        crate::ui::framework::load_app_icon(instance),
         crate::ui::theme::get_background_brush(is_dark)
     ).unwrap_or(std::ptr::null_mut());
     
     if _hwnd != std::ptr::null_mut() {
-        crate::ui::utils::run_message_loop();
+        crate::ui::framework::run_message_loop();
     }
 }
 

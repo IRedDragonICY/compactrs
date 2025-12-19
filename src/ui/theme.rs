@@ -315,7 +315,7 @@ pub unsafe fn is_system_dark_mode() -> bool {
 
 pub unsafe fn is_app_dark_mode(hwnd: HWND) -> bool {
     use crate::ui::state::AppState;
-    use crate::ui::utils::get_window_state;
+    use crate::ui::framework::get_window_state;
 
     if let Some(st) = get_window_state::<AppState>(hwnd) {
         crate::ui::theme::resolve_mode(st.theme)

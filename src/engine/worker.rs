@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, Ordering}};
 use std::sync::mpsc::{Sender, sync_channel, Receiver};
-use crate::ui::utils::format_size;
+use crate::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
 use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm, smart_compress};
 use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};

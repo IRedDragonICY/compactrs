@@ -1,6 +1,6 @@
 use crate::ui::builder::ButtonBuilder;
 use crate::ui::theme;
-use crate::ui::utils::get_window_state;
+use crate::ui::framework::get_window_state;
 use crate::utils::to_wstring;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -81,7 +81,7 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
     EnableWindow(parent, 0);
     
     // Message Loop
-    crate::ui::utils::run_message_loop();
+    crate::ui::framework::run_message_loop();
     
     EnableWindow(parent, 1);
     

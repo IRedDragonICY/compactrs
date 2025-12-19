@@ -1,14 +1,14 @@
 use std::ffi::c_void;
 use std::marker::PhantomData;
-use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, HINSTANCE};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::Graphics::Gdi::HBRUSH;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, GetWindowLongPtrW, LoadCursorW, RegisterClassW, SetWindowLongPtrW,
     CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, IDC_ARROW, WM_CREATE, WM_NCCREATE, WNDCLASSW,
-    CREATESTRUCTW, HICON,
+    CREATESTRUCTW, HICON, LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED,
 };
-use crate::ui::utils::to_wstring;
+use crate::utils::to_wstring;
 
 /// Trait to encapsulate window logic.
 /// Implement this for the state struct that drives the window.
@@ -162,4 +162,52 @@ unsafe extern "system" fn wnd_proc<T: WindowHandler>(
 
     // 4. Default processing
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// Safely retrieves a mutable reference to window state from GWLP_USERDATA.
+#[inline]
+pub unsafe fn get_window_state<'a, T>(hwnd: HWND) -> Option<&'a mut T> { unsafe {
+    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    if ptr == 0 {
+        None
+    } else {
+        Some(&mut *(ptr as *mut T))
+    }
+}}
+
+/// Loads the application icon from resources.
+#[inline]
+pub unsafe fn load_app_icon(instance: HINSTANCE) -> HICON { unsafe {
+    LoadImageW(
+        instance,
+        // Helper: Convert integer resource ID (1) to *const u16 using MAKEINTRESOURCE logic
+        // But since we can't use MAKEINTRESOURCE macro directly easily, we just cast 1 to pointer
+        1 as *const u16, 
+        IMAGE_ICON,
+        0, 0,
+        LR_DEFAULTSIZE | LR_SHARED,
+    )
+}}
+
+/// Runs the standard Windows message loop.
+/// 
+/// Application modal windows often restart a message loop to block the caller
+/// until the window is closed. This helper consolidates that logic.
+/// 
+/// # Safety
+/// This function calls unsafe Win32 APIs.
+pub unsafe fn run_message_loop() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetMessageW, TranslateMessage, DispatchMessageW, MSG
+    };
+    
+    let mut msg: MSG = unsafe { std::mem::zeroed() };
+    // Crucial: Check strictly > 0. GetMessage returns -1 on error!
+    // We can filter for specific messages if we want, but usually 0,0 is all.
+    while unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) } > 0 {
+        unsafe {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
 }
