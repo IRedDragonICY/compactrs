@@ -1,9 +1,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::controls::apply_button_theme;
 use crate::ui::builder::ButtonBuilder;
-use crate::ui::framework::get_window_state;
+use crate::ui::framework::{get_window_state, WindowHandler, WindowBuilder, WindowAlignment};
 use crate::utils::to_wstring;
-use crate::ui::framework::{Window, WindowHandler};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 
@@ -54,10 +53,6 @@ pub unsafe fn show_console_window(parent: HWND, initial_logs: &[Vec<u16>], is_da
         return;
     }
 
-    let instance = GetModuleHandleW(std::ptr::null());
-    
-    // Load App Icon using centralized helper
-    let icon = crate::ui::framework::load_app_icon(instance);
     let bg_brush = (COLOR_WINDOW + 1) as HBRUSH;
     
     // CRITICAL: Modeless window state must persist after function returns.
@@ -73,23 +68,20 @@ pub unsafe fn show_console_window(parent: HWND, initial_logs: &[Vec<u16>], is_da
     // Leak to get a 'static mutable reference
     let state_ref = Box::leak(state);
 
-    let hwnd = Window::<ConsoleState>::create(
-        state_ref,
-        "CompactRS_Console",
-        CONSOLE_TITLE,
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        0,
-        CW_USEDEFAULT, CW_USEDEFAULT, 600, 400,
-        parent, // Use the passed parent
-        icon,
-        bg_brush
-    ).unwrap_or(std::ptr::null_mut());
-    
-    if hwnd != std::ptr::null_mut() {
-        CONSOLE_HWND = Some(hwnd);
-        // Populate initial logs
-        for log in initial_logs {
-             append_log_msg(log.clone());
+    let hwnd_res = WindowBuilder::new(state_ref, "CompactRS_Console", CONSOLE_TITLE)
+        .style(WS_OVERLAPPEDWINDOW | WS_VISIBLE)
+        .size(600, 400)
+        .align(WindowAlignment::Manual(CW_USEDEFAULT, CW_USEDEFAULT))
+        .background(bg_brush)
+        .build(parent); // Note: Parent for modeless usually 0 or main, but we can pass it.
+        
+    if let Ok(hwnd) = hwnd_res {
+        if hwnd != std::ptr::null_mut() {
+            CONSOLE_HWND = Some(hwnd);
+            // Populate initial logs
+            for log in initial_logs {
+                 append_log_msg(log.clone());
+            }
         }
     }
 }
@@ -120,6 +112,14 @@ impl ConsoleState {
 }
 
 impl WindowHandler for ConsoleState {
+    fn is_dark_mode(&self) -> bool {
+        self.is_dark
+    }
+
+    fn is_modal(&self) -> bool {
+        false
+    }
+
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
              let instance = GetModuleHandleW(std::ptr::null());
@@ -157,11 +157,6 @@ impl WindowHandler for ConsoleState {
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
-             // Centralized handler for theme-related messages
-            if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, self.is_dark) {
-                return Some(result);
-            }
-
             match msg {
                 WM_SIZE => {
                     let width = (lparam & 0xFFFF) as i32;
@@ -219,34 +214,16 @@ impl WindowHandler for ConsoleState {
                 },
                 WM_DESTROY => {
                     CONSOLE_HWND = None;
-                    
-                    // Reconstruct Box to drop it (memory management)
-                    // Since this is a modeless window, we are responsible for freeing the state.
-                    // We can't do it here easily because `self` is &mut.
-                    // Actually, if we constructed it via Box::into_raw, we should Box::from_raw somewhere.
-                    // But `framework.rs` logic just casts GWLP to &mut T.
-                    // If we drop it here, `framework.rs` might try to access it after?
-                    // framework.rs: `state.on_message` returns. Then `DefWindowProc`.
-                    // WM_DESTROY is usually the last message handled by the window proc for logic.
-                    // 
-                    // However, `WM_NCDESTROY` is the *actual* last one.
-                    //
-                    // To be safe and avoid complex memory gymnastics in this rapid refactor,
-                    // we can accept a small leak (sizeof ConsoleState) for the life of the app (singleton),
-                    // OR we can rely on `GLOBAL` state which works for Singletons.
-                    //
-                    // Given the goal is "Zero-Cost Window Abstraction", manual memory management is expected.
-                    // For now, I will NOT drop the Box here to prevent Use-After-Free if framework accesses it.
-                    // Since it's a Singleton that likely stays open or re-opens, leaking one instance is acceptable for this step.
-                    // A proper solution requires `WM_NCDESTROY` handling in framework.
-                    
+                    // Note: Default handler in framework does NOT PostQuitMessage because is_modal() is false.
                     Some(0)
                 },
                 WM_CTLCOLOREDIT => {
-                    if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, self.is_dark) {
-                        return Some(result);
-                    }
-                    None
+                     // We still need to handle this manually for Edit control specifically, 
+                     // or framework default theme handler might not cover EDIT background correctly if it's special?
+                     // Framework default calls crate::ui::theme::handle_standard_colors.
+                     // That function handles WM_CTLCOLOREDIT.
+                     // So we can return None to let default handle it!
+                     None
                 },
                 // WM_APP + 2: Theme change broadcast
                 0x8002 => {

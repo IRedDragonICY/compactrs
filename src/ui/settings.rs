@@ -2,21 +2,20 @@
 use crate::ui::state::AppTheme;
 use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
-use crate::ui::framework::{Window, WindowHandler};
+use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE, WM_COMMAND,
     WS_CAPTION, WS_SYSMENU, WS_POPUP,
     BM_SETCHECK,
-    SendMessageW, PostQuitMessage, WM_CLOSE, GetParent, BN_CLICKED, DestroyWindow, WM_DESTROY,
+    SendMessageW, BN_CLICKED, DestroyWindow,
     FindWindowW,
     BM_GETCHECK, MessageBoxW, MB_ICONERROR, MB_OK,
-    GetWindowRect, WM_SETTEXT, AdjustWindowRect,
+    WM_SETTEXT,
     ShowWindow, SetForegroundWindow, SW_RESTORE,
     MB_YESNO, MB_ICONWARNING, IDYES
 };
-use windows_sys::Win32::Foundation::RECT;
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 
 const SETTINGS_TITLE: &str = "Settings";
@@ -59,7 +58,6 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 
 // Main settings modal function with proper data passing
 pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool) -> (Option<AppTheme>, bool, bool, bool) {
-    let instance = GetModuleHandleW(std::ptr::null());
     // Check if window already exists
     let class_name = to_wstring("CompactRS_Settings");
     let existing_hwnd = FindWindowW(class_name.as_ptr(), std::ptr::null());
@@ -69,26 +67,6 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         return (None, enable_force_stop, enable_context_menu, enable_system_guard);
     }
     
-    // Load App Icon using centralized helper
-    let icon = crate::ui::framework::load_app_icon(instance);
-    
-    let mut rect: RECT = std::mem::zeroed();
-    GetWindowRect(parent, &mut rect);
-    let p_width = rect.right - rect.left;
-    let p_height = rect.bottom - rect.top;
-
-    // Calculate required window size for desired client area
-    // Increased height to 400 to accommodate TI button
-    let mut client_rect = RECT { left: 0, top: 0, right: 300, bottom: 400 };
-    // AdjustWindowRect calculates the required window size based on client size + styles
-    AdjustWindowRect(&mut client_rect, WS_POPUP | WS_CAPTION | WS_SYSMENU, 0);
-    
-    let width = client_rect.right - client_rect.left;
-    let height = client_rect.bottom - client_rect.top;
-
-    let x = rect.left + (p_width - width) / 2;
-    let y = rect.top + (p_height - height) / 2;
-
     let mut state = SettingsState {
         theme: current_theme,
         result: None,
@@ -101,27 +79,24 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
 
     let bg_brush = crate::ui::theme::get_background_brush(is_dark);
 
-    let hwnd = Window::<SettingsState>::create(
-        &mut state,
-        "CompactRS_Settings",
-        SETTINGS_TITLE,
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        0,
-        x, y, width, height,
-        parent,
-        icon,
-        bg_brush
-    ).unwrap_or(std::ptr::null_mut());
-
-    if hwnd != std::ptr::null_mut() {
-        // Message loop
-        crate::ui::framework::run_message_loop();
-    }
+    // Use Builder to create and show modal
+    show_modal(
+        WindowBuilder::new(&mut state, "CompactRS_Settings", SETTINGS_TITLE)
+            .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
+            .size(300, 400)
+            .align(WindowAlignment::CenterOnParent)
+            .background(bg_brush), // Optional, builder handles it if passed
+        parent
+    );
     
     (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard)
 }
 
 impl WindowHandler for SettingsState {
+    fn is_dark_mode(&self) -> bool {
+        self.is_dark
+    }
+
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
             // Apply DWM title bar color using centralized helper
@@ -237,11 +212,6 @@ impl WindowHandler for SettingsState {
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
-            // Centralized handler for theme-related messages
-            if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, self.is_dark) {
-                return Some(result);
-            }
-
             match msg {
                 WM_APP_UPDATE_CHECK_RESULT => {
                     let status_ptr = lparam as *mut UpdateStatus;
@@ -341,6 +311,7 @@ impl WindowHandler for SettingsState {
                                     InvalidateRect(hwnd, std::ptr::null(), 1);
                                  
                                  // Notify Parent Immediately (WM_APP + 1)
+                                 use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
                                  let parent = GetParent(hwnd);
                                  if parent != std::ptr::null_mut() {
                                      let theme_val = match theme {
@@ -381,6 +352,7 @@ impl WindowHandler for SettingsState {
                                    }
                                    
                                    // Notify Parent immediately (WM_APP + 3)
+                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
                                    let parent = GetParent(hwnd);
                                    if parent != std::ptr::null_mut() {
                                        let val = if checked { 1 } else { 0 };
@@ -422,6 +394,7 @@ impl WindowHandler for SettingsState {
                                    }
                                    
                                    // Notify Parent immediately (WM_APP + 5)
+                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
                                    let parent = GetParent(hwnd);
                                    if parent != std::ptr::null_mut() {
                                        let val = if self.enable_context_menu { 1 } else { 0 };
@@ -439,6 +412,7 @@ impl WindowHandler for SettingsState {
                                    }
                                    
                                    // Notify Parent immediately (WM_APP + 6)
+                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
                                    let parent = GetParent(hwnd);
                                    if parent != std::ptr::null_mut() {
                                        let val = if checked { 1 } else { 0 };
@@ -523,18 +497,6 @@ impl WindowHandler for SettingsState {
                      }
                      Some(0)
                 },
-                
-                WM_CLOSE => {
-                    DestroyWindow(hwnd);
-                    Some(0)
-                },
-                
-                WM_DESTROY => {
-                    // Do NOT free GWLP_USERDATA here because it points to stack memory of caller
-                    PostQuitMessage(0);
-                    Some(0)
-                },
-                
                 _ => None,
             }
         }

@@ -1,18 +1,16 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
-use crate::ui::framework::{Window, WindowHandler};
+use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    WM_CLOSE, DestroyWindow, CreateWindowExW, 
+    CreateWindowExW, 
     WS_VISIBLE, WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    PostQuitMessage, WM_DESTROY,
     WM_NOTIFY,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
-    GetWindowRect, WS_TABSTOP,
+    WS_TABSTOP,
     ShowWindow, SetForegroundWindow, SW_RESTORE, WM_SETFONT, SendMessageW,
 };
-use windows_sys::Win32::Foundation::RECT;
 
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Controls::{
@@ -34,7 +32,6 @@ struct AboutState {
 }
 
 pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
-    let instance = GetModuleHandleW(std::ptr::null());
     let class_name = to_wstring("CompactRS_About");
 
     // Check if window already exists
@@ -44,45 +41,26 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
         SetForegroundWindow(existing_hwnd);
         return;
     }
-    
-    // Load App Icon
-    let icon = crate::ui::framework::load_app_icon(instance);
-    
-    // Calculate center position
-    let mut rect: RECT = std::mem::zeroed();
-    GetWindowRect(parent, &mut rect);
-    let p_width = rect.right - rect.left;
-    let p_height = rect.bottom - rect.top;
-    let width = 450;  // Wider for better text display
-    let height = 500; // Reduced height (no OK button)
-    let x = rect.left + (p_width - width) / 2;
-    let y = rect.top + (p_height - height) / 2;
 
-    let mut state = AboutState {
-        is_dark,
-    };
+    let mut state = AboutState { is_dark };
     
     let bg_brush = crate::ui::theme::get_background_brush(is_dark);
 
-    let hwnd = Window::<AboutState>::create(
-        &mut state,
-        "CompactRS_About",
-        ABOUT_TITLE,
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        0,
-        x, y, width, height,
-        parent,
-        icon,
-        bg_brush
-    ).unwrap_or(std::ptr::null_mut());
-
-    if hwnd != std::ptr::null_mut() {
-        // Message loop
-        crate::ui::framework::run_message_loop();
-    }
+    show_modal(
+        WindowBuilder::new(&mut state, "CompactRS_About", ABOUT_TITLE)
+            .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
+            .size(450, 500)
+            .align(WindowAlignment::CenterOnParent)
+            .background(bg_brush),
+        parent
+    );
 }
 
 impl WindowHandler for AboutState {
+    fn is_dark_mode(&self) -> bool {
+        self.is_dark
+    }
+
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
             // Apply DWM title bar color using centralized helper
@@ -212,11 +190,6 @@ impl WindowHandler for AboutState {
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
-            // Centralized handler for theme-related messages
-            if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, self.is_dark) {
-                return Some(result);
-            }
-
             match msg {
                 // WM_APP + 2: Theme change broadcast from Settings
                 0x8002 => {
@@ -244,24 +217,13 @@ impl WindowHandler for AboutState {
                          
                          // Open URL
                          if item.iLink == 0 {
-                              ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), github.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                               ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), github.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
                          } else if item.iLink == 1 {
-                              ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), license.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                               ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), license.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
                          }
                     }
                     Some(0)
                 },
-
-                 WM_CLOSE => {
-                    DestroyWindow(hwnd);
-                    Some(0)
-                },
-                
-                WM_DESTROY => {
-                    PostQuitMessage(0);
-                    Some(0)
-                },
-
                 _ => None,
             }
         }

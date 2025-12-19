@@ -1,14 +1,11 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
-use crate::ui::framework::{Window, WindowHandler};
+use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
 use crate::utils::to_wstring;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    WM_DESTROY,
-    GetWindowRect,
 };
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH, FF_DONTCARE, HFONT,
@@ -21,48 +18,24 @@ struct ShortcutsState {
 }
 
 pub unsafe fn show_shortcuts_modal(parent: HWND, is_dark: bool) {
-    let instance = GetModuleHandleW(std::ptr::null());
-    
-    // Calculate center
-    let mut rect: RECT = std::mem::zeroed();
-    GetWindowRect(parent, &mut rect);
-    let p_width = rect.right - rect.left;
-    let p_height = rect.bottom - rect.top;
-    let width = 500;
-    let height = 320;
-    let x = rect.left + (p_width - width) / 2;
-    let y = rect.top + (p_height - height) / 2;
-
     let mut state = ShortcutsState { is_dark };
-    
-     // Check if window already exists mechanism is implicitly handled by the framework if we use a singleton pattern,
-    // but here we are creating a unique modal-like (popup) window.
-    // The previous implementation used FindWindowW on class name.
-    // Since we are changing to a generic class name potentially, or we need to ensure unique class.
-    // However, `Window::<T>::create` registers a unique class based on T usually? NO, it uses the passed class name.
-    // We will use a unique class name.
-    
-    let class_name = "CompactRS_Shortcuts";
+    let bg_brush = crate::ui::theme::get_background_brush(is_dark);
 
-    // Use the framework to create the window
-    let _hwnd = Window::<ShortcutsState>::create(
-        &mut state,
-        class_name,
-        SHORTCUTS_TITLE,
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        0, // ex_style
-        x, y, width, height,
-        parent,
-        crate::ui::framework::load_app_icon(instance),
-        crate::ui::theme::get_background_brush(is_dark)
-    ).unwrap_or(std::ptr::null_mut());
-    
-    if _hwnd != std::ptr::null_mut() {
-        crate::ui::framework::run_message_loop();
-    }
+    show_modal(
+        WindowBuilder::new(&mut state, "CompactRS_Shortcuts", SHORTCUTS_TITLE)
+            .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
+            .size(500, 320)
+            .align(WindowAlignment::CenterOnParent)
+            .background(bg_brush),
+        parent
+    );
 }
 
 impl WindowHandler for ShortcutsState {
+    fn is_dark_mode(&self) -> bool {
+        self.is_dark
+    }
+
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
              let is_dark_mode = self.is_dark;
@@ -126,19 +99,8 @@ impl WindowHandler for ShortcutsState {
         0
     }
 
-    fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
-        unsafe {
-             if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, self.is_dark) {
-                return Some(result);
-            }
-
-            match msg {
-                WM_DESTROY => {
-                    windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
-                    Some(0)
-                },
-                _ => None
-            }
-        }
+    fn on_message(&mut self, _hwnd: HWND, _msg: u32, _wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
+        // No custom message handling needed, framework handles Theme and Close/Destroy
+        None
     }
 }

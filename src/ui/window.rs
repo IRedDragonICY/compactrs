@@ -10,8 +10,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     MB_ICONINFORMATION, WM_NOTIFY, BM_GETCHECK, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
     WM_CONTEXTMENU, TrackPopupMenu, CreatePopupMenu, AppendMenuW, MF_STRING, TPM_RETURNCMD, TPM_LEFTALIGN,
-    DestroyMenu, GetCursorPos, WM_SETTINGCHANGE, SW_SHOWNORMAL, SetForegroundWindow,
-    GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, WM_CLOSE, WM_DESTROY, DestroyWindow,
+    GetCursorPos, WM_SETTINGCHANGE, SW_SHOWNORMAL, SetForegroundWindow,
+    GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, WM_DESTROY, DestroyMenu,
     KillTimer,
 };
 use windows_sys::core::{GUID, PCWSTR};
@@ -66,7 +66,7 @@ use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings, reveal_path_in_e
 use crate::utils::format_size;
 use crate::ui::framework::load_app_icon;
 use crate::config::AppConfig;
-use crate::ui::framework::{Window, WindowHandler};
+use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment};
 
 const WINDOW_CLASS_NAME: &str = "CompactRS_Class";
 const WINDOW_TITLE: &str = "CompactRS";
@@ -112,17 +112,13 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         let state = Box::new(AppState::new());
         let state_ref = Box::leak(state);
 
-        let hwnd = Window::<AppState>::create(
-            state_ref,
-            WINDOW_CLASS_NAME,
-            &title_str,
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            0,
-            win_x, win_y, win_width, win_height,
-            std::ptr::null_mut(),
-            icon,
-            bg_brush
-        )?;
+        let hwnd = WindowBuilder::new(state_ref, WINDOW_CLASS_NAME, &title_str)
+            .style(WS_OVERLAPPEDWINDOW | WS_VISIBLE)
+            .size(win_width, win_height)
+            .align(WindowAlignment::Manual(win_x, win_y))
+            .icon(icon)
+            .background(bg_brush)
+            .build(std::ptr::null_mut())?;
 
         // Apply initial theme
         // Note: on_create already applied theme, but resolve_mode calls might vary.
@@ -151,6 +147,10 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
 }
 
 impl WindowHandler for AppState {
+    fn is_dark_mode(&self) -> bool {
+        theme::resolve_mode(self.theme)
+    }
+
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
              // Taskbar creation
@@ -288,13 +288,7 @@ impl WindowHandler for AppState {
     }
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
-        let is_dark = theme::resolve_mode(self.theme);
-        
         unsafe {
-            // Theme colors
-            if let Some(result) = theme::handle_standard_colors(hwnd, msg, wparam, is_dark) {
-                return Some(result);
-            }
             
             // WM_DRAWITEM
             const WM_DRAWITEM: u32 = 0x002B;
@@ -357,10 +351,6 @@ impl WindowHandler for AppState {
                 WM_COMMAND => Some(handle_command(self, hwnd, wparam, lparam)),
                 WM_TIMER => Some(handle_timer(self, hwnd, wparam)),
                 WM_SIZE => Some(handle_size(self, hwnd)),
-                WM_CLOSE => {
-                    DestroyWindow(hwnd);
-                    Some(0)
-                },
                 WM_DESTROY => {
                     handle_destroy(self, hwnd);
                     Some(0)

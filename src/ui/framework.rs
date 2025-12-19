@@ -1,14 +1,26 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 use std::ffi::c_void;
 use std::marker::PhantomData;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, HINSTANCE};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, HINSTANCE, RECT};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::Graphics::Gdi::HBRUSH;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, GetWindowLongPtrW, LoadCursorW, RegisterClassW, SetWindowLongPtrW,
     CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, IDC_ARROW, WM_CREATE, WM_NCCREATE, WNDCLASSW,
     CREATESTRUCTW, HICON, LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED,
+    GetWindowRect, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
+    WM_CLOSE, WM_DESTROY, DestroyWindow, PostQuitMessage,
+    MSG, GetMessageW, TranslateMessage, DispatchMessageW,
+    WS_VISIBLE, WS_OVERLAPPEDWINDOW,
 };
 use crate::utils::to_wstring;
+
+/// Defines how the window should be positioned.
+pub enum WindowAlignment {
+    CenterOnParent,
+    CenterOnScreen,
+    Manual(i32, i32),
+}
 
 /// Trait to encapsulate window logic.
 /// Implement this for the state struct that drives the window.
@@ -22,30 +34,142 @@ pub trait WindowHandler: Sized {
 
     /// Main message handler.
     /// Return Some(result) if you handled the message.
-    /// Return None to let the default window procedure (DefWindowProc) handle it.
+    /// Return None to let the framework handle default behavior (Theme, Close, Destroy) or DefWindowProc.
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT>;
+
+    /// Indicates if this window is modal.
+    /// If true, the default WM_DESTROY handler will call PostQuitMessage(0).
+    /// Default: true.
+    fn is_modal(&self) -> bool {
+        true
+    }
+
+    /// Indicates if the window should use dark mode for the default theme handler.
+    /// Default: false.
+    fn is_dark_mode(&self) -> bool {
+        false
+    }
+}
+
+/// Builder for creating windows.
+pub struct WindowBuilder<'a, T: WindowHandler> {
+    state: &'a mut T,
+    class_name: String,
+    title: String,
+    style: u32,
+    ex_style: u32,
+    width: i32,
+    height: i32,
+    alignment: WindowAlignment,
+    icon: Option<HICON>,
+    background: Option<HBRUSH>,
+}
+
+impl<'a, T: WindowHandler> WindowBuilder<'a, T> {
+    pub fn new(state: &'a mut T, class_name: &str, title: &str) -> Self {
+        Self {
+            state,
+            class_name: class_name.to_string(),
+            title: title.to_string(),
+            style: WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            ex_style: 0,
+            width: 800,
+            height: 600,
+            alignment: WindowAlignment::CenterOnScreen,
+            icon: None,
+            background: None,
+        }
+    }
+
+    pub fn style(mut self, style: u32) -> Self {
+        self.style = style;
+        self
+    }
+
+    pub fn ex_style(mut self, ex_style: u32) -> Self {
+        self.ex_style = ex_style;
+        self
+    }
+
+    pub fn size(mut self, width: i32, height: i32) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
+    pub fn align(mut self, alignment: WindowAlignment) -> Self {
+        self.alignment = alignment;
+        self
+    }
+
+    pub fn icon(mut self, icon: HICON) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    pub fn background(mut self, brush: HBRUSH) -> Self {
+        self.background = Some(brush);
+        self
+    }
+
+    /// Builds and creates the window.
+    pub unsafe fn build(self, parent: HWND) -> Result<HWND, String> {
+        let instance = GetModuleHandleW(std::ptr::null());
+        
+        // Resolve Icon
+        let icon = self.icon.unwrap_or_else(|| load_app_icon(instance));
+        
+        // Resolve Geometry
+        let (x, y) = match self.alignment {
+            WindowAlignment::Manual(x, y) => (x, y),
+            WindowAlignment::CenterOnScreen => {
+                let screen_w = GetSystemMetrics(SM_CXSCREEN);
+                let screen_h = GetSystemMetrics(SM_CYSCREEN);
+                ((screen_w - self.width) / 2, (screen_h - self.height) / 2)
+            },
+            WindowAlignment::CenterOnParent => {
+                if parent != std::ptr::null_mut() {
+                    let mut rect: RECT = std::mem::zeroed();
+                    GetWindowRect(parent, &mut rect);
+                    let p_width = rect.right - rect.left;
+                    let p_height = rect.bottom - rect.top;
+                    (rect.left + (p_width - self.width) / 2, rect.top + (p_height - self.height) / 2)
+                } else {
+                    // Fallback to center screen if no parent
+                    let screen_w = GetSystemMetrics(SM_CXSCREEN);
+                    let screen_h = GetSystemMetrics(SM_CYSCREEN);
+                    ((screen_w - self.width) / 2, (screen_h - self.height) / 2)
+                }
+            }
+        };
+
+        // Resolve Background (if None, use 0/null or default? Let's use 0 to let DefWindowProc or custom paint handle it, unless specified)
+        // Actually, existing code used check for is_dark and passed brush. 
+        // We will respect what user passed.
+        let background_brush = self.background.unwrap_or(std::ptr::null_mut());
+
+        Window::<T>::create_internal(
+            self.state,
+            &self.class_name,
+            &self.title,
+            self.style,
+            self.ex_style,
+            x, y, self.width, self.height,
+            parent,
+            icon,
+            background_brush
+        )
+    }
 }
 
 /// Generic Window wrapper.
-/// T is the state struct that implements WindowHandler.
 pub struct Window<T: WindowHandler> {
     _marker: PhantomData<T>,
 }
 
 impl<T: WindowHandler> Window<T> {
-    /// Creates a new window.
-    /// 
-    /// # Arguments
-    /// * `state` - Mutable reference to the state object. Must live as long as the window.
-    /// * `class_name` - Unique class name for the window.
-    /// * `title` - Window title.
-    /// * `style` - Window styles (e.g., WS_OVERLAPPEDWINDOW).
-    /// * `ex_style` - Extended window styles.
-    /// * `x`, `y`, `width`, `height` - Position and size.
-    /// * `parent` - Parent window handle (can be 0/null).
-    /// * `icon` - Handle to the icon (can be 0).
-    /// * `background` - Handle to the background brush (can be 0).
-    pub unsafe fn create(
+    /// Internal create function used by Builder.
+    unsafe fn create_internal(
         state: &mut T,
         class_name: &str,
         title: &str,
@@ -59,7 +183,7 @@ impl<T: WindowHandler> Window<T> {
         icon: HICON,
         background: HBRUSH,
     ) -> Result<HWND, String> {
-        let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
+        let instance = GetModuleHandleW(std::ptr::null());
         let class_name_w = to_wstring(class_name);
         let title_w = to_wstring(title);
 
@@ -100,7 +224,6 @@ impl<T: WindowHandler> Window<T> {
 }
 
 /// Generic Static Window Procedure.
-/// Handles bootstrapping the generic state T from `GWLP_USERDATA`.
 unsafe extern "system" fn wnd_proc<T: WindowHandler>(
     hwnd: HWND, 
     msg: u32, 
@@ -146,14 +269,35 @@ unsafe extern "system" fn wnd_proc<T: WindowHandler>(
                 
                 match result {
                     Ok(res) => {
+                        // If handled, return result
                         if let Some(r) = res {
                             return r;
+                        }
+
+                        // === Default Framework Handling ===
+                        
+                        // 1. Theme Handling (WM_CTLCOLOR*)
+                        let is_dark = state.is_dark_mode();
+                        if let Some(theme_res) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, is_dark) {
+                            return theme_res;
+                        }
+
+                        // 2. Standard Close/Destroy
+                        if msg == WM_CLOSE {
+                            DestroyWindow(hwnd);
+                            return 0;
+                        }
+
+                        if msg == WM_DESTROY {
+                            // Only PostQuitMessage if modal
+                            if state.is_modal() {
+                                PostQuitMessage(0);
+                            }
+                            return 0;
                         }
                     },
                     Err(_) => {
                         eprintln!("Panic in on_message: msg={}", msg);
-                        // Fallthrough to DefWindowProc might be dangerous if state is corrupted,
-                        // but better than immediate abort.
                     }
                 }
             }
@@ -180,8 +324,6 @@ pub unsafe fn get_window_state<'a, T>(hwnd: HWND) -> Option<&'a mut T> { unsafe 
 pub unsafe fn load_app_icon(instance: HINSTANCE) -> HICON { unsafe {
     LoadImageW(
         instance,
-        // Helper: Convert integer resource ID (1) to *const u16 using MAKEINTRESOURCE logic
-        // But since we can't use MAKEINTRESOURCE macro directly easily, we just cast 1 to pointer
         1 as *const u16, 
         IMAGE_ICON,
         0, 0,
@@ -190,24 +332,26 @@ pub unsafe fn load_app_icon(instance: HINSTANCE) -> HICON { unsafe {
 }}
 
 /// Runs the standard Windows message loop.
-/// 
-/// Application modal windows often restart a message loop to block the caller
-/// until the window is closed. This helper consolidates that logic.
-/// 
-/// # Safety
-/// This function calls unsafe Win32 APIs.
 pub unsafe fn run_message_loop() {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetMessageW, TranslateMessage, DispatchMessageW, MSG
-    };
-    
     let mut msg: MSG = unsafe { std::mem::zeroed() };
-    // Crucial: Check strictly > 0. GetMessage returns -1 on error!
-    // We can filter for specific messages if we want, but usually 0,0 is all.
     while unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) } > 0 {
         unsafe {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+        }
+    }
+}
+
+/// Helper method to show a modal window.
+/// Creates the window using the builder and runs the message loop.
+pub unsafe fn show_modal<T: WindowHandler>(
+    builder: WindowBuilder<T>,
+    parent: HWND
+) {
+    let hwnd_res = builder.build(parent);
+    if let Ok(hwnd) = hwnd_res {
+        if hwnd != std::ptr::null_mut() {
+            run_message_loop();
         }
     }
 }
