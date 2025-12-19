@@ -10,5 +10,6 @@ pub mod shortcuts;
 pub mod console;
 pub mod utils;
 pub mod builder;
+pub mod framework;
 
 pub mod taskbar;

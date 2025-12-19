@@ -1,24 +1,22 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
-use crate::ui::utils::get_window_state;
-use crate::utils::to_wstring;
+use crate::ui::utils::to_wstring;
+use crate::ui::framework::{Window, WindowHandler};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, SendMessageW,
-    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
-    WS_VISIBLE, WM_CREATE,
-    WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    PostQuitMessage, WM_CLOSE, DestroyWindow, 
-    WM_NOTIFY, SetWindowLongPtrW, GWLP_USERDATA,
+    WM_CLOSE, DestroyWindow, CreateWindowExW, 
+    WS_VISIBLE, WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
+    PostQuitMessage, WM_DESTROY,
+    WM_NOTIFY,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
-    GetWindowRect, CREATESTRUCTW, WS_TABSTOP,
+    GetWindowRect, WS_TABSTOP,
+    ShowWindow, SetForegroundWindow, SW_RESTORE, WM_SETFONT, SendMessageW,
 };
 use windows_sys::Win32::Foundation::RECT;
 
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Controls::{
     NMHDR, NM_CLICK, NM_RETURN, NMLINK, WC_LINK, ICC_LINK_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx,
-
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -26,7 +24,6 @@ use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
     DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect, HFONT,
 };
-
 
 const ABOUT_TITLE: &str = "About CompactRS";
 const GITHUB_URL: &str = "https://github.com/IRedDragonICY/compactrs";
@@ -42,31 +39,15 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
 
     // Check if window already exists
     let existing_hwnd = windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW(class_name.as_ptr(), std::ptr::null());
-    if existing_hwnd != std::ptr::null_mut() {
-        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SetForegroundWindow, SW_RESTORE};
+    if existing_hwnd != std::ptr::null_mut() {    
         ShowWindow(existing_hwnd, SW_RESTORE);
         SetForegroundWindow(existing_hwnd);
         return;
     }
-    let title = to_wstring(ABOUT_TITLE);
     
     // Load App Icon
     let icon = crate::ui::utils::load_app_icon(instance);
     
-    let wc = WNDCLASSW {
-        style: CS_HREDRAW | CS_VREDRAW,
-        lpfnWndProc: Some(about_wnd_proc),
-        hInstance: instance,
-        hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-        lpszClassName: class_name.as_ptr(),
-        hIcon: icon,
-        hbrBackground: crate::ui::theme::get_background_brush(is_dark),
-        cbClsExtra: 0,
-        cbWndExtra: 0,
-        lpszMenuName: std::ptr::null(),
-    };
-    RegisterClassW(&wc);
-
     // Calculate center position
     let mut rect: RECT = std::mem::zeroed();
     GetWindowRect(parent, &mut rect);
@@ -80,60 +61,32 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
     let mut state = AboutState {
         is_dark,
     };
+    
+    let bg_brush = crate::ui::theme::get_background_brush(is_dark);
 
-    let _hwnd = CreateWindowExW(
-        0,
-        class_name.as_ptr(),
-        title.as_ptr(),
+    let hwnd = Window::<AboutState>::create(
+        &mut state,
+        "CompactRS_About",
+        ABOUT_TITLE,
         WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        0,
         x, y, width, height,
         parent,
-        std::ptr::null_mut(),
-        instance,
-        &mut state as *mut _ as *mut std::ffi::c_void,
-    );
+        icon,
+        bg_brush
+    ).unwrap_or(std::ptr::null_mut());
 
-    // Message loop
-    crate::ui::utils::run_message_loop();
+    if hwnd != std::ptr::null_mut() {
+        // Message loop
+        crate::ui::utils::run_message_loop();
+    }
 }
 
-unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    // Use centralized helper for state access
-    let get_state = || get_window_state::<AboutState>(hwnd);
-
-    // Centralized handler for theme-related messages
-    if let Some(st) = get_state() {
-        if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, st.is_dark) {
-            return result;
-        }
-    }
-
-    match msg {
-        // WM_APP + 2: Theme change broadcast from Settings
-        0x8002 => {
-            if let Some(st) = get_state() {
-                let new_is_dark = wparam == 1;
-                st.is_dark = new_is_dark;
-                
-                // Update DWM title bar using centralized helper
-                crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
-                
-                // Force repaint
-                InvalidateRect(hwnd, std::ptr::null(), 1);
-            }
-            0
-        },
-        WM_CREATE => {
-            let createstruct = &*(lparam as *const CREATESTRUCTW);
-            let state_ptr = createstruct.lpCreateParams as *mut AboutState;
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
-            
-            let is_dark_mode = if let Some(st) = state_ptr.as_ref() { st.is_dark } else { false };
-            
+impl WindowHandler for AboutState {
+    fn on_create(&mut self, hwnd: HWND) -> LRESULT {
+        unsafe {
             // Apply DWM title bar color using centralized helper
-            crate::ui::theme::set_window_frame_theme(hwnd, is_dark_mode);
-            
-            let instance = GetModuleHandleW(std::ptr::null());
+            crate::ui::theme::set_window_frame_theme(hwnd, self.is_dark);
             
             // Initialize Link Control
             let iccex = INITCOMMONCONTROLSEX {
@@ -170,6 +123,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr()) as HFONT;
 
             // Icon - Centered at top (Large Hero Icon)
+            let instance = GetModuleHandleW(std::ptr::null());
             let icon_size = 128;
             let icon_x = (450 - icon_size) / 2;
             
@@ -187,7 +141,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 .icon_display()
                 .pos(icon_x, 20)
                 .size(icon_size, icon_size)
-                .dark_mode(is_dark_mode)
+                .dark_mode(self.is_dark)
                 .build();
             
             // Set the icon image
@@ -200,7 +154,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 .pos(margin, 160)
                 .size(content_width, 40)
                 .font(title_font)
-                .dark_mode(is_dark_mode)
+                .dark_mode(self.is_dark)
                 .build();
 
             // Version - Lighter font using ControlBuilder
@@ -211,7 +165,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 .pos(margin, 205)
                 .size(content_width, 20)
                 .font(version_font)
-                .dark_mode(is_dark_mode)
+                .dark_mode(self.is_dark)
                 .build();
 
             // Description - Regular body text using ControlBuilder
@@ -221,7 +175,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 .pos(margin, 240)
                 .size(content_width, 130)
                 .font(body_font)
-                .dark_mode(is_dark_mode)
+                .dark_mode(self.is_dark)
                 .build();
 
             // Created by - Italic style using ControlBuilder
@@ -231,7 +185,7 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 .pos(margin, 385)
                 .size(content_width, 40)
                 .font(creator_font)
-                .dark_mode(is_dark_mode)
+                .dark_mode(self.is_dark)
                 .build();
 
             // GitHub Link (SysLink) - Centered (still raw CreateWindowExW as it's a special control)
@@ -248,45 +202,68 @@ unsafe extern "system" fn about_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
                 instance,
                 std::ptr::null()
             );
-            SendMessageW(link, windows_sys::Win32::UI::WindowsAndMessaging::WM_SETFONT, body_font as WPARAM, 1);
-            if is_dark_mode {
+            SendMessageW(link, WM_SETFONT, body_font as WPARAM, 1);
+            if self.is_dark {
                 crate::ui::theme::apply_theme(link, crate::ui::theme::ControlType::Window, true);
             }
+        }
+        0
+    }
 
-            0
-        },
-
-        WM_NOTIFY => {
-            let nmhdr = &*(lparam as *const NMHDR);
-            // Handle SysLink clicks
-            if nmhdr.code == NM_CLICK || nmhdr.code == NM_RETURN {
-                 let nmlink = &*(lparam as *const NMLINK);
-                 let item = nmlink.item;
-                 
-                 let open = to_wstring("open");
-                 let github = to_wstring(GITHUB_URL);
-                 let license = to_wstring(LICENSE_URL);
-                 
-                 // Open URL
-                 if item.iLink == 0 {
-                      ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), github.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
-                 } else if item.iLink == 1 {
-                      ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), license.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
-                 }
+    fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+        unsafe {
+            // Centralized handler for theme-related messages
+            if let Some(result) = crate::ui::theme::handle_standard_colors(hwnd, msg, wparam, self.is_dark) {
+                return Some(result);
             }
-            0
-        },
 
-         WM_CLOSE => {
-            DestroyWindow(hwnd);
-            0
-        },
-        
-        WM_DESTROY => {
-            PostQuitMessage(0);
-            0
-        },
+            match msg {
+                // WM_APP + 2: Theme change broadcast from Settings
+                0x8002 => {
+                    let new_is_dark = wparam == 1;
+                    self.is_dark = new_is_dark;
+                    
+                    // Update DWM title bar using centralized helper
+                    crate::ui::theme::set_window_frame_theme(hwnd, new_is_dark);
+                    
+                    // Force repaint
+                    InvalidateRect(hwnd, std::ptr::null(), 1);
+                    Some(0)
+                },
+                
+                WM_NOTIFY => {
+                    let nmhdr = &*(lparam as *const NMHDR);
+                    // Handle SysLink clicks
+                    if nmhdr.code == NM_CLICK || nmhdr.code == NM_RETURN {
+                         let nmlink = &*(lparam as *const NMLINK);
+                         let item = nmlink.item;
+                         
+                         let open = to_wstring("open");
+                         let github = to_wstring(GITHUB_URL);
+                         let license = to_wstring(LICENSE_URL);
+                         
+                         // Open URL
+                         if item.iLink == 0 {
+                              ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), github.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                         } else if item.iLink == 1 {
+                              ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), license.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                         }
+                    }
+                    Some(0)
+                },
 
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+                 WM_CLOSE => {
+                    DestroyWindow(hwnd);
+                    Some(0)
+                },
+                
+                WM_DESTROY => {
+                    PostQuitMessage(0);
+                    Some(0)
+                },
+
+                _ => None,
+            }
+        }
     }
 }
