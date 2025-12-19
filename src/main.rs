@@ -250,18 +250,12 @@ fn main() {
                             }
                         },
                          0x41 => { // 'A' - Select All
-                             // Only if we want to force global Select All. 
-                             // But let's only do it if focus is not in an edit control (not present here).
-                             // We'll let ListView handle it if focused, or intercept? 
-                             // Since user complained about shortcuts, let's force it via Main Window logic
-                             // But Main Window logic for Ctrl+A sets ListView selection.
-                             // So it is safe to always trigger it.
-                             // We need to route it to Main Window wnd_proc logic for 'A' or manually trigger logic.
-                             // Window.rs wnd_proc has 0x41 handler. 
-                             // We can't SendMessage(WM_KEYDOWN) effectively to parent if child has focus without refocusing?
-                             // Actually, we can just invoke logic. But window.rs logic is inside wnd_proc.
-                             // Sending WM_KEYDOWN to hwnd_main works but wnd_proc handles logic.
-                             // Let's forward the KEYDOWN message to hwnd_main!
+                             SendMessageW(hwnd_main, WM_KEYDOWN, vk as usize, 0);
+                             handled = true;
+                         },
+                         0x56 => { // 'V' - Paste
+                             // Forward to generic handler or rely on window procedures
+                             // Since our window.rs logic listens for WM_KEYDOWN with Ctrl+V, simply forwarding works
                              SendMessageW(hwnd_main, WM_KEYDOWN, vk as usize, 0);
                              handled = true;
                          },

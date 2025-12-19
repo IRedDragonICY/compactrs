@@ -11,6 +11,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::Win32::System::DataExchange::{
     OpenClipboard, CloseClipboard, GetClipboardData, IsClipboardFormatAvailable
 };
+use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 
 
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP};
@@ -489,16 +490,39 @@ pub unsafe fn process_hdrop(_hwnd: HWND, hdrop: HDROP, st: &mut AppState) {
 }
 
 pub unsafe fn process_clipboard(hwnd: HWND, st: &mut AppState) {
+    if OpenClipboard(hwnd) == 0 { return; }
+
     // CF_HDROP = 15
     if IsClipboardFormatAvailable(15) != 0 {
-        if OpenClipboard(hwnd) != 0 {
-             let hdrop = GetClipboardData(15) as HDROP;
-             if !hdrop.is_null() {
-                 process_hdrop(hwnd, hdrop, st);
-             }
-             CloseClipboard();
+         let hdrop = GetClipboardData(15) as HDROP;
+         if !hdrop.is_null() {
+             process_hdrop(hwnd, hdrop, st);
+         }
+    } else if IsClipboardFormatAvailable(13) != 0 {
+        // CF_UNICODETEXT = 13
+        let h_global = GetClipboardData(13);
+        if !h_global.is_null() {
+            let ptr = GlobalLock(h_global) as *const u16;
+            if !ptr.is_null() {
+                // Read string until null terminator
+                let mut len = 0;
+                while *ptr.add(len) != 0 {
+                    len += 1;
+                }
+                let slice = std::slice::from_raw_parts(ptr, len);
+                let text = String::from_utf16_lossy(slice);
+                GlobalUnlock(h_global);
+                
+                // Clean up text (trim whitespace/quotes) and check existence
+                let path_str = text.trim().trim_matches('"').to_string();
+                if std::path::Path::new(&path_str).exists() {
+                    st.ingest_paths(vec![path_str]);
+                }
+            }
         }
     }
+    
+    CloseClipboard();
 }
 
 // --- Sorter ---
