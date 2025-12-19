@@ -4,6 +4,9 @@ use std::sync::{Arc, atomic::AtomicU8};
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
 use crate::ui::components::{FileListView, Component};
+use crate::engine::worker::{calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm};
+use crate::utils::to_wstring;
+use std::thread;
 
 /// Processing state for items (state machine)
 /// Used with AtomicU8 for thread-safe state transitions
@@ -279,5 +282,46 @@ impl AppState {
     /// Clear all batch items
     pub fn clear_batch(&mut self) {
         self.batch_items.clear();
+    }
+
+    /// Ingest a list of file paths, adding them to the batch and starting analysis
+    pub fn ingest_paths(&mut self, paths: Vec<String>) {
+        let mut items_to_analyze = Vec::new();
+
+        for path in paths {
+            // Filter duplicates
+            if !self.batch_items.iter().any(|item| item.path == path) {
+                let id = self.add_batch_item(path.clone());
+                
+                // Update UI immediately
+                if let Some(ctrls) = &self.controls {
+                     if let Some(batch_item) = self.batch_items.iter().find(|i| i.id == id) {
+                         ctrls.file_list.add_item(
+                             id, 
+                             batch_item, 
+                             to_wstring("Calculating..."), 
+                             to_wstring("Calculating..."), 
+                             crate::engine::wof::CompressionState::None
+                         );
+                     }
+                }
+                items_to_analyze.push((id, path));
+            }
+        }
+        
+        if items_to_analyze.is_empty() { return; }
+
+        let tx = self.tx.clone();
+        
+        // Spawn analysis thread
+        thread::spawn(move || {
+            for (id, path) in items_to_analyze {
+                 let logical = calculate_path_logical_size(&path);
+                 let disk = calculate_path_disk_size(&path);
+                 let algo = detect_path_algorithm(&path);
+                 let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, algo));
+            }
+            let _ = tx.send(UiMessage::Status(to_wstring("Ready.")));
+        });
     }
 }

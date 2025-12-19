@@ -1,5 +1,6 @@
 /* --- src/utils.rs --- */
-use windows_sys::Win32::UI::Shell::StrFormatByteSizeW;
+use windows_sys::Win32::UI::Shell::{StrFormatByteSizeW, ShellExecuteW};
+use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 
 /// Convert a Rust string to a null-terminated UTF-16 vector.
@@ -83,5 +84,32 @@ pub fn format_size(bytes: u64) -> Vec<u16> {
         // Buffer is filled with null-terminated string
         let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
         buffer[..=len].to_vec() // Include null terminator
+    }
+}
+
+/// Reveal a file or folder in Windows Explorer
+pub fn reveal_path_in_explorer(path: &str) {
+    let select_prefix = to_wstring("/select,\"");
+    let path_w = to_wstring_long_path(path);
+    // Remove null terminator from path_w for concatenation if using concat_wstrings logic manually, 
+    // but here we can just construct carefully.
+    // Actually, `to_wstring` adds a null terminator. `concat_wstrings` expects null-terminated slices.
+    // Note: `concat_wstrings` logic handles stripping nulls from parts except the last one.
+    
+    // We need strict quoting: /select,"C:\Path\To\File"
+    // `path_w` has \0 at end.
+    let suffix = to_wstring("\"");
+    
+    let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
+    
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            to_wstring("open").as_ptr(),
+            to_wstring("explorer.exe").as_ptr(),
+            args.as_ptr(),
+            std::ptr::null(),
+            SW_SHOWNORMAL
+        );
     }
 }
