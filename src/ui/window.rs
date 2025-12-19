@@ -1,21 +1,20 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use windows_sys::core::{PCWSTR, HRESULT, GUID};
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, RECT, POINT};
+use windows_sys::core::HRESULT;
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW, ShowWindow,
-    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
-    WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, WM_COMMAND,
-    GetWindowLongPtrW, SetWindowLongPtrW, GWLP_USERDATA, WM_DROPFILES, MessageBoxW, MB_OK,
+    CW_USEDEFAULT, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_SIZE, WM_COMMAND,
+    WM_DROPFILES, MessageBoxW, MB_OK,
     SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WM_TIMER, SetTimer,
     MB_ICONINFORMATION, WM_NOTIFY, BM_GETCHECK, GetClientRect, GetWindowRect,
     BM_SETCHECK, ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
     WM_CONTEXTMENU, TrackPopupMenu, CreatePopupMenu, AppendMenuW, MF_STRING, TPM_RETURNCMD, TPM_LEFTALIGN,
     DestroyMenu, GetCursorPos, WM_SETTINGCHANGE, SW_SHOWNORMAL, SetForegroundWindow,
-    GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, WM_CLOSE, WM_NCDESTROY, DestroyWindow,
+    GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, WM_CLOSE, WM_DESTROY, DestroyWindow,
     KillTimer,
 };
+use windows_sys::core::{GUID, PCWSTR};
 use windows_sys::Win32::System::DataExchange::{
     COPYDATASTRUCT, OpenClipboard, GetClipboardData, CloseClipboard, IsClipboardFormatAvailable,
 };
@@ -64,15 +63,15 @@ use crate::engine::worker::{
     calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm,
 };
 use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
-use crate::ui::utils::{format_size, get_window_state, load_app_icon};
+use crate::ui::utils::{format_size, load_app_icon};
 use crate::config::AppConfig;
+use crate::ui::framework::{Window, WindowHandler};
 
 const WINDOW_CLASS_NAME: &str = "CompactRS_Class";
 const WINDOW_TITLE: &str = "CompactRS";
 
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
     unsafe {
-        // Enable dark mode for the application
         // Enable dark mode for the application
         theme::set_preferred_app_mode(true);
 
@@ -90,33 +89,13 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         // Load icon
         let icon = load_app_icon(instance);
 
-        let class_name = to_wstring(WINDOW_CLASS_NAME);
         let mut title_str = WINDOW_TITLE.to_string();
         if crate::engine::elevation::is_system_or_ti() {
             title_str.push_str(" [TrustedInstaller]");
         } else if crate::is_admin() {
             title_str.push_str(" [Administrator]");
         }
-        let title_name = to_wstring(&title_str);
-
-        let wc = WNDCLASSW {
-            style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(wnd_proc),
-            hInstance: instance,
-            hIcon: icon,
-            hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
-            hbrBackground: bg_brush,
-            lpszClassName: class_name.as_ptr(),
-            lpszMenuName: std::ptr::null(),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-        };
-
-        if RegisterClassW(&wc) == 0 {
-            return Err("Failed to register window class".to_string());
-        }
-
-        // Load configuration
+        
         let config = AppConfig::load();
         let (win_x, win_y) = if config.window_x < 0 || config.window_y < 0 {
             (CW_USEDEFAULT, CW_USEDEFAULT)
@@ -125,31 +104,28 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         };
         let win_width = if config.window_width > 0 { config.window_width } else { 900 };
         let win_height = if config.window_height > 0 { config.window_height } else { 600 };
+        
+        // Setup State
+        // Main window state must live for the app lifetime.
+        // We use Box::leak (conceptually similar to the previous manual pointer management).
+        let state = Box::new(AppState::new());
+        let state_ref = Box::leak(state);
 
-        let hwnd = CreateWindowExW(
-            0,
-            class_name.as_ptr(),
-            title_name.as_ptr(),
+        let hwnd = Window::<AppState>::create(
+            state_ref,
+            WINDOW_CLASS_NAME,
+            &title_str,
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            win_x,
-            win_y,
-            win_width,
-            win_height,
+            0,
+            win_x, win_y, win_width, win_height,
             std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            instance,
-            std::ptr::null(),
-        );
-
-        if hwnd == std::ptr::null_mut() {
-            return Err("Failed to create window".to_string());
-        }
+            icon,
+            bg_brush
+        )?;
 
         // Apply initial theme
-        let is_dark = theme::resolve_mode(config.theme);
-        theme::set_window_frame_theme(hwnd, is_dark);
-
-        ShowWindow(hwnd, SW_SHOW);
+        // Note: on_create already applied theme, but resolve_mode calls might vary.
+        // Actually on_create logic (copied below) handles this.
         
         // Hostile Takeover: Force window to foreground (Bypass ASLR/Focus restrictions)
         let foreground_hwnd = GetForegroundWindow();
@@ -173,37 +149,11 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
     }
 }
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    // STATE ACCESS HELPER and THEMING
-    let get_state = || get_window_state::<AppState>(hwnd);
-
-    // Centralized handler for theme-related messages
-    // Note: We need to handle this manually since theme handles GDI types
-    let is_dark = get_state()
-        .map(|st| theme::resolve_mode(st.theme))
-        .unwrap_or_else(|| theme::is_system_dark_mode());
-        
-    if let Some(result) = theme::handle_standard_colors(hwnd, msg, wparam, is_dark) {
-        return result;
-    }
-    
-    // Handle WM_DRAWITEM for owner-drawn accent button
-    const WM_DRAWITEM: u32 = 0x002B;
-    if msg == WM_DRAWITEM {
-        use windows_sys::Win32::UI::Controls::DRAWITEMSTRUCT;
-        let dis = &*(lparam as *const DRAWITEMSTRUCT);
-        // Check if this is our Process button (IDC_BTN_PROCESS_ALL = 113)
-        if dis.CtlID == IDC_BTN_PROCESS_ALL as u32 {
-            crate::ui::controls::draw_accent_button(lparam);
-            return 1; // TRUE - we handled it
-        }
-    }
-
-    match msg {
-        WM_CREATE => {
-            let mut state = Box::new(AppState::new());
-             // Taskbar creation needs fixing for windows-sys, skipping strict type check or casting
-            state.taskbar = Some(TaskbarProgress::new(hwnd));
+impl WindowHandler for AppState {
+    fn on_create(&mut self, hwnd: HWND) -> LRESULT {
+        unsafe {
+             // Taskbar creation
+            self.taskbar = Some(TaskbarProgress::new(hwnd));
             
             // 1. StatusBar
             let mut status_bar = StatusBar::new(StatusBarIds {
@@ -243,14 +193,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             // Disable cancel button
             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(action_panel.cancel_hwnd(), 0);
 
-            // Populate algorithm combo (As Listed uses the default per-item algorithm)
+            // Populate algorithm combo
             let h_combo = action_panel.combo_hwnd();
             let algos = ["As Listed", "XPRESS4K", "XPRESS8K", "XPRESS16K", "LZX"];
             for alg in algos {
                 let w = to_wstring(alg);
                 SendMessageW(h_combo, CB_ADDSTRING, 0, w.as_ptr() as isize);
             }
-            let algo_index = match state.config.default_algo {
+            let algo_index = match self.config.default_algo {
                 WofAlgorithm::Xpress4K => 1,
                 WofAlgorithm::Xpress8K => 2,
                 WofAlgorithm::Xpress16K => 3,
@@ -268,966 +218,877 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             SendMessageW(h_action_mode, CB_SETCURSEL, 0, 0);
             
             // Set initial force checkbox state
-            if state.force_compress {
+            if self.force_compress {
                 SendMessageW(action_panel.force_hwnd(), BM_SETCHECK, BST_CHECKED as usize, 0);
             }
 
-            state.controls = Some(Controls {
+            self.controls = Some(Controls {
                 file_list,
                 status_bar,
                 action_panel,
                 header_panel,
             });
 
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
+            // Timer
             SetTimer(hwnd, 1, 100, None);
-            DragAcceptFiles(hwnd, 1); // TRUE = 1
+            DragAcceptFiles(hwnd, 1);
             
-            // Allow Drag and Drop messages to bypass UIPI
+            // Allow Drag and Drop messages
             ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ALLOW, std::ptr::null_mut());
             ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, std::ptr::null_mut());
-            ChangeWindowMessageFilterEx(hwnd, 0x0049, MSGFLT_ALLOW, std::ptr::null_mut()); // WM_COPYGLOBALDATA
+            ChangeWindowMessageFilterEx(hwnd, 0x0049, MSGFLT_ALLOW, std::ptr::null_mut()); 
             
             // Apply saved theme
-            if let Some(st) = get_state() {
-                let is_dark = theme::resolve_mode(st.theme);
-                theme::set_window_frame_theme(hwnd, is_dark);
-                if let Some(ctrls) = &mut st.controls {
-                    ctrls.update_theme(is_dark, hwnd);
-                }
-                InvalidateRect(hwnd, std::ptr::null(), 1);
+            let is_dark = theme::resolve_mode(self.theme);
+            theme::set_window_frame_theme(hwnd, is_dark);
+            if let Some(ctrls) = &mut self.controls {
+                ctrls.update_theme(is_dark, hwnd);
             }
+            // Not strictly needed in on_create as painted first time, but good for consistency
+            // InvalidateRect(hwnd, std::ptr::null(), 1); 
             
             // Process startup items
             let startup_items = crate::get_startup_items();
             if !startup_items.is_empty() {
-                if let Some(st) = get_state() {
-                    // Start an IPC batch for startup items!
-                    // This ensures subsequent WM_COPYDATA messages append to this batch instead of clearing selection.
-                    st.ipc_active = true;
-                    
-                    for startup_item in startup_items {
-                         if !st.batch_items.iter().any(|item| item.path == startup_item.path) {
-                                let item_id = st.add_batch_item(startup_item.path.clone());
-                                if let Some(batch_item) = st.get_batch_item_mut(item_id) {
-                                    batch_item.algorithm = startup_item.algorithm;
-                                    batch_item.action = startup_item.action;
-                                }
-                                let logical_size = calculate_path_logical_size(&startup_item.path);
-                                let disk_size = calculate_path_disk_size(&startup_item.path);
-                                let detected_algo = detect_path_algorithm(&startup_item.path);
-                                let logical_str = format_size(logical_size);
-                                let disk_str = format_size(disk_size);
-                                
-                                if let Some(ctrls) = &st.controls {
-                                    if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
-                                        ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
-                                        // Select the new item
-                                        if let Some(pos) = st.batch_items.iter().position(|i| i.id == item_id) {
-                                            ctrls.file_list.set_selected(pos as i32, true);
-                                            // Add to pending IPC list for robust selection at trigger time
-                                            st.pending_ipc_ids.push(item_id);
-                                        }
+                self.ipc_active = true;
+                
+                for startup_item in startup_items {
+                     if !self.batch_items.iter().any(|item| item.path == startup_item.path) {
+                            let item_id = self.add_batch_item(startup_item.path.clone());
+                            if let Some(batch_item) = self.get_batch_item_mut(item_id) {
+                                batch_item.algorithm = startup_item.algorithm;
+                                batch_item.action = startup_item.action;
+                            }
+                            let logical_size = calculate_path_logical_size(&startup_item.path);
+                            let disk_size = calculate_path_disk_size(&startup_item.path);
+                            let detected_algo = detect_path_algorithm(&startup_item.path);
+                            let logical_str = format_size(logical_size);
+                            let disk_str = format_size(disk_size);
+                            
+                            if let Some(ctrls) = &self.controls {
+                                if let Some(batch_item) = self.batch_items.iter().find(|i| i.id == item_id) {
+                                    ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
+                                    if let Some(pos) = self.batch_items.iter().position(|i| i.id == item_id) {
+                                        ctrls.file_list.set_selected(pos as i32, true);
+                                        self.pending_ipc_ids.push(item_id);
                                     }
                                 }
-                         }
+                            }
+                     }
+                }
+                
+                if let Some(ctrls) = &self.controls {
+                     SendMessageW(ctrls.action_panel.combo_hwnd(), CB_SETCURSEL, 0, 0);
+                }
+                SetTimer(hwnd, 2, 500, None);
+            }
+        }
+        0
+    }
+
+    fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+        let is_dark = theme::resolve_mode(self.theme);
+        
+        unsafe {
+            // Theme colors
+            if let Some(result) = theme::handle_standard_colors(hwnd, msg, wparam, is_dark) {
+                return Some(result);
+            }
+            
+            // WM_DRAWITEM
+            const WM_DRAWITEM: u32 = 0x002B;
+            if msg == WM_DRAWITEM {
+                use windows_sys::Win32::UI::Controls::DRAWITEMSTRUCT;
+                let dis = &*(lparam as *const DRAWITEMSTRUCT);
+                if dis.CtlID == IDC_BTN_PROCESS_ALL as u32 {
+                    crate::ui::controls::draw_accent_button(lparam);
+                    return Some(1);
+                }
+            }
+            
+            match msg {
+                 // WM_APP + 3: Set Enable Force Stop
+                0x8003 => {
+                    self.enable_force_stop = wparam != 0;
+                    Some(0)
+                },
+                
+                // WM_APP + 6: Set System Guard
+                0x8006 => {
+                    self.config.enable_system_guard = wparam != 0;
+                    Some(0)
+                },
+                
+                // WM_APP + 4: Query Force Stop
+                0x8004 => {
+                    let should_kill = if self.enable_force_stop {
+                          true
+                     } else {
+                         let name_ptr = wparam as *const u16;
+                         let len = (0..).take_while(|&i| *name_ptr.offset(i) != 0).count();
+                         let slice = std::slice::from_raw_parts(name_ptr, len);
+                         let name = String::from_utf16_lossy(slice);
+                         let is_dark = theme::resolve_mode(self.theme);
+                         crate::ui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark)
+                     };
+                     Some(if should_kill { 1 } else { 0 })
+                },
+                
+                // WM_THEME_CHANGED
+                0x8001 => {
+                    let theme_val = wparam;
+                    let new_theme = match theme_val {
+                        0 => AppTheme::System,
+                        1 => AppTheme::Dark,
+                        2 => AppTheme::Light,
+                        _ => self.theme,
+                    };
+                    self.theme = new_theme;
+                    let is_dark = theme::resolve_mode(self.theme);
+                    theme::set_window_frame_theme(hwnd, is_dark);
+                    if let Some(ctrls) = &mut self.controls {
+                        ctrls.update_theme(is_dark, hwnd);
                     }
-                    
+                    InvalidateRect(hwnd, std::ptr::null(), 1);
+                    Some(0)
+                },
+                
+                WM_COMMAND => Some(handle_command(self, hwnd, wparam, lparam)),
+                WM_TIMER => Some(handle_timer(self, hwnd, wparam)),
+                WM_SIZE => Some(handle_size(self, hwnd)),
+                WM_CLOSE => {
+                    DestroyWindow(hwnd);
+                    Some(0)
+                },
+                WM_DESTROY => {
+                    handle_destroy(self, hwnd);
+                    Some(0)
+                },
+                WM_COPYDATA => Some(handle_copy_data(self, hwnd, lparam)),
+                WM_DROPFILES => {
+                    let hdrop = wparam as HDROP;
+                    process_hdrop(hwnd, hdrop, self);
+                    DragFinish(hdrop);
+                    Some(0)
+                },
+                WM_SETTINGCHANGE => {
+                    handle_setting_change(self, hwnd);
+                    None // DefWindowProc handles weird cases too
+                },
+                WM_NOTIFY => Some(handle_notify(self, hwnd, lparam)),
+                WM_CONTEXTMENU => Some(handle_context_menu(self, hwnd, wparam)),
+                0x0100 => Some(handle_keydown(self, hwnd, wparam)), // WM_KEYDOWN
+                
+                _ => None,
+            }
+        }
+    }
+}
+
+// Logic Helper Functions
+
+unsafe fn handle_command(st: &mut AppState, hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let id = (wparam & 0xFFFF) as u16;
+    match id {
+         IDC_BTN_ADD_FILES => {
+             if let Ok(files) = pick_files() {
+                 for file_path in files {
+                     if !st.batch_items.iter().any(|item| item.path == file_path) {
+                        let item_id = st.add_batch_item(file_path.clone());
+                        let logical_size = calculate_path_logical_size(&file_path);
+                        let disk_size = calculate_path_disk_size(&file_path);
+                        let detected_algo = detect_path_algorithm(&file_path);
+                        let logical_str = format_size(logical_size);
+                        let disk_str = format_size(disk_size);
+                        if let Some(ctrls) = &st.controls {
+                            if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
+                                ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
+                            }
+                        }
+                     }
+                 }
+             }
+         },
+         IDC_BTN_ADD_FOLDER => {
+             if let Ok(folder) = pick_folder() {
+                 if !st.batch_items.iter().any(|item| item.path == folder) {
+                    let item_id = st.add_batch_item(folder.clone());
+                    let logical_size = calculate_path_logical_size(&folder);
+                    let disk_size = calculate_path_disk_size(&folder);
+                    let detected_algo = detect_path_algorithm(&folder);
+                    let logical_str = format_size(logical_size);
+                    let disk_str = format_size(disk_size);
                     if let Some(ctrls) = &st.controls {
-                         SendMessageW(ctrls.action_panel.combo_hwnd(), CB_SETCURSEL, 0, 0);
+                        if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
+                            ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
+                        }
                     }
-                    // Trigger auto-start
-                    SetTimer(hwnd, 2, 500, None);
-                }
-            }
-
-            0
-        }
-        
-        // WM_APP + 3: Set Enable Force Stop
-        0x8003 => {
-            if let Some(st) = get_state() {
-                st.enable_force_stop = wparam != 0;
-            }
-            0
-        },
-
-        // WM_APP + 6: Set System Guard
-        0x8006 => {
-            if let Some(st) = get_state() {
-                st.config.enable_system_guard = wparam != 0;
-            }
-            0
-        },
-        
-        // WM_APP + 4: Query Force Stop
-        0x8004 => {
-             let mut should_kill = false;
-             if let Some(st) = get_state() {
-                 if st.enable_force_stop {
-                     should_kill = true;
-                 } else {
-                     let name_ptr = wparam as *const u16;
-                     let len = (0..).take_while(|&i| unsafe { *name_ptr.offset(i) } != 0).count();
-                     let slice = unsafe { std::slice::from_raw_parts(name_ptr, len) };
-                     let name = String::from_utf16_lossy(slice);
-                     let is_dark = theme::resolve_mode(st.theme);
-                     should_kill = crate::ui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark);
                  }
              }
-             if should_kill { 1 } else { 0 }
-        },
-        
-        // WM_THEME_CHANGED
-        0x8001 => {
-            if let Some(st) = get_state() {
-                let theme_val = wparam;
-                let new_theme = match theme_val {
-                    0 => AppTheme::System,
-                    1 => AppTheme::Dark,
-                    2 => AppTheme::Light,
-                    _ => st.theme,
-                };
-                st.theme = new_theme;
-                let is_dark = theme::resolve_mode(st.theme);
-                theme::set_window_frame_theme(hwnd, is_dark);
-                if let Some(ctrls) = &mut st.controls {
-                    ctrls.update_theme(is_dark, hwnd);
-                }
-                InvalidateRect(hwnd, std::ptr::null(), 1);
-            }
-            0
-        }
-        
-        // WM_KEYDOWN: Handle Shortcuts (Ctrl+V, Ctrl+O, Ctrl+Shift+O, Ctrl+A, Del)
-        0x0100 => { // WM_KEYDOWN
-            let vk = wparam as u16;
-            let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
-            let shift_pressed = (GetKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
+         },
+         IDC_BTN_REMOVE => {
+               let mut selected_indices = if let Some(ctrls) = &st.controls {
+                   ctrls.file_list.get_selected_indices()
+               } else { Vec::new() };
+               selected_indices.sort_by(|a, b| b.cmp(a));
+               
+               let ids_to_remove: Vec<u32> = selected_indices.iter()
+                   .filter_map(|&idx| st.batch_items.get(idx).map(|item| item.id))
+                   .collect();
+               
+               for id in ids_to_remove { st.remove_batch_item(id); }
+               
+               if let Some(ctrls) = &st.controls {
+                   for idx in selected_indices { ctrls.file_list.remove_item(idx as i32); }
+               }
+         },
+         IDC_BTN_PROCESS_ALL => {
+                if st.batch_items.is_empty() {
+                    let w_info = to_wstring("Info");
+                    let w_msg = to_wstring("Add folders first!");
+                    MessageBoxW(hwnd, w_msg.as_ptr(), w_info.as_ptr(), MB_OK | MB_ICONINFORMATION);
+                } else {
+                    if let Some(ctrls) = &st.controls {
+                        let mut indices_to_process = ctrls.file_list.get_selected_indices();
+                        
+                        // Auto-Start Safety Check:
+                        // If triggered by timer (lparam == 1) and no items are selected, DO NOT process everything.
+                        // This prevents "Process All" from accidentally running on existing items.
+                        let is_auto_start = lparam == 1;
+                        if is_auto_start && indices_to_process.is_empty() {
+                            return 0;
+                        }
 
-            if ctrl_pressed {
-                match vk {
-                    0x56 => { // 'V' - Paste
-                        if IsClipboardFormatAvailable(15) != 0 {
-                            if OpenClipboard(hwnd) != 0 {
-                                let hdrop = GetClipboardData(15) as HDROP;
-                                if !hdrop.is_null() {
-                                    if let Some(st) = get_state() {
-                                        process_hdrop(hwnd, hdrop, st);
-                                    }
-                                }
-                                CloseClipboard();
+                        if indices_to_process.is_empty() {
+                            indices_to_process = (0..st.batch_items.len()).collect();
+                        }
+                        let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
+                        // Index 0 = "As Listed" (use per-item algorithm)
+                        // Index 1-4 = specific algorithms
+                        let use_as_listed = idx == 0;
+                        let global_algo = match idx {
+                            1 => WofAlgorithm::Xpress4K,
+                            3 => WofAlgorithm::Xpress16K,
+                            4 => WofAlgorithm::Lzx,
+                            _ => WofAlgorithm::Xpress8K, // Default to Xpress8K
+                        };
+                        
+                        // Update display in list (show "As Listed" or specific algo)
+                        if !use_as_listed {
+                            let algo_name = match global_algo {
+                                WofAlgorithm::Xpress4K => "XPRESS4K",
+                                WofAlgorithm::Xpress8K => "XPRESS8K",
+                                WofAlgorithm::Xpress16K => "XPRESS16K",
+                                WofAlgorithm::Lzx => "LZX",
+                            };
+                            for &row in &indices_to_process {
+                                ctrls.file_list.update_item_text(row as i32, 2, to_wstring(algo_name));
                             }
                         }
-                    },
-                    0x4F => { // 'O' - Open
-                        if shift_pressed {
-                            // Ctrl + Shift + O -> Add Folder
-                            SendMessageW(hwnd, WM_COMMAND, IDC_BTN_ADD_FOLDER as usize, 0);
-                        } else {
-                            // Ctrl + O -> Add Files
-                            SendMessageW(hwnd, WM_COMMAND, IDC_BTN_ADD_FILES as usize, 0);
-                        }
-                    },
-                    0x41 => { // 'A' - Select All
-                         if let Some(st) = get_state() {
-                             if let Some(ctrls) = &st.controls {
-                                 let count = ctrls.file_list.get_item_count();
-                                 if count > 0 {
-                                    for i in 0..count {
-                                        ctrls.file_list.set_selected(i, true);
-                                    }
-                                 }
-                             }
-                         }
-                    },
-                    _ => {}
-                }
-            } else if vk == VK_DELETE as u16 {
-                SendMessageW(hwnd, WM_COMMAND, IDC_BTN_REMOVE as usize, 0);
-            }
-            0
-        }
+                        if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
+                        windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 1); // TRUE
 
-        WM_COMMAND => {
-            let id = (wparam & 0xFFFF) as u16;
-            match id {
-                 IDC_BTN_ADD_FILES => {
-                     if let Ok(files) = pick_files() {
-                         if let Some(st) = get_state() {
-                             for file_path in files {
-                                 if !st.batch_items.iter().any(|item| item.path == file_path) {
-                                    let item_id = st.add_batch_item(file_path.clone());
-                                    let logical_size = calculate_path_logical_size(&file_path);
-                                    let disk_size = calculate_path_disk_size(&file_path);
-                                    let detected_algo = detect_path_algorithm(&file_path);
-                                    let logical_str = format_size(logical_size);
-                                    let disk_str = format_size(disk_size);
-                                    if let Some(ctrls) = &st.controls {
-                                        if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
-                                            ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
-                                        }
-                                    }
-                                 }
-                             }
-                         }
-                     }
-                 },
-                 IDC_BTN_ADD_FOLDER => {
-                     if let Ok(folder) = pick_folder() {
-                         if let Some(st) = get_state() {
-                             if !st.batch_items.iter().any(|item| item.path == folder) {
-                                let item_id = st.add_batch_item(folder.clone());
-                                let logical_size = calculate_path_logical_size(&folder);
-                                let disk_size = calculate_path_disk_size(&folder);
-                                let detected_algo = detect_path_algorithm(&folder);
-                                let logical_str = format_size(logical_size);
-                                let disk_str = format_size(disk_size);
-                                if let Some(ctrls) = &st.controls {
-                                    if let Some(batch_item) = st.batch_items.iter().find(|i| i.id == item_id) {
-                                        ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
-                                    }
-                                }
-                             }
-                         }
-                     }
-                 },
-                 IDC_BTN_REMOVE => {
-                      if let Some(st) = get_state() {
-                          let mut selected_indices = if let Some(ctrls) = &st.controls {
-                              ctrls.file_list.get_selected_indices()
-                          } else { Vec::new() };
-                          selected_indices.sort_by(|a, b| b.cmp(a));
-                          
-                          let ids_to_remove: Vec<u32> = selected_indices.iter()
-                              .filter_map(|&idx| st.batch_items.get(idx).map(|item| item.id))
-                              .collect();
-                          
-                          for id in ids_to_remove { st.remove_batch_item(id); }
-                          
-                          if let Some(ctrls) = &st.controls {
-                              for idx in selected_indices { ctrls.file_list.remove_item(idx as i32); }
-                          }
-                      }
-                 },
-                 IDC_BTN_PROCESS_ALL => {
-                      if let Some(st) = get_state() {
-                           if st.batch_items.is_empty() {
-                               let w_info = to_wstring("Info");
-                               let w_msg = to_wstring("Add folders first!");
-                               MessageBoxW(hwnd, w_msg.as_ptr(), w_info.as_ptr(), MB_OK | MB_ICONINFORMATION);
-                           } else {
-                               if let Some(ctrls) = &st.controls {
-                                   let mut indices_to_process = ctrls.file_list.get_selected_indices();
-                                   
-                                   // Auto-Start Safety Check:
-                                   // If triggered by timer (lparam == 1) and no items are selected, DO NOT process everything.
-                                   // This prevents "Process All" from accidentally running on existing items.
-                                   let is_auto_start = lparam == 1;
-                                   if is_auto_start && indices_to_process.is_empty() {
-                                       return 0;
-                                   }
-
-                                   if indices_to_process.is_empty() {
-                                       indices_to_process = (0..st.batch_items.len()).collect();
-                                   }
-                                   let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
-                                   // Index 0 = "As Listed" (use per-item algorithm)
-                                   // Index 1-4 = specific algorithms
-                                   let use_as_listed = idx == 0;
-                                   let global_algo = match idx {
-                                       1 => WofAlgorithm::Xpress4K,
-                                       3 => WofAlgorithm::Xpress16K,
-                                       4 => WofAlgorithm::Lzx,
-                                       _ => WofAlgorithm::Xpress8K, // Default to Xpress8K
-                                   };
-                                   
-                                   // Update display in list (show "As Listed" or specific algo)
-                                   if !use_as_listed {
-                                       let algo_name = match global_algo {
-                                           WofAlgorithm::Xpress4K => "XPRESS4K",
-                                           WofAlgorithm::Xpress8K => "XPRESS8K",
-                                           WofAlgorithm::Xpress16K => "XPRESS16K",
-                                           WofAlgorithm::Lzx => "LZX",
-                                       };
-                                       for &row in &indices_to_process {
-                                           ctrls.file_list.update_item_text(row as i32, 2, to_wstring(algo_name));
-                                       }
-                                   }
-                                   if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
-                                   windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 1); // TRUE
-
-                                   // format!("Processing {} items...", count)
-                                   let count_w = u64_to_wstring(indices_to_process.len() as u64);
-                                   let status_msg = concat_wstrings(&[&to_wstring("Processing "), &count_w, &to_wstring(" items...")]);
-                                   SetWindowTextW(ctrls.status_bar.label_hwnd(), status_msg.as_ptr());
-                                   
-                                   let tx = st.tx.clone();
-                                   let state_global = st.global_state.clone();
-                                   state_global.store(ProcessingState::Running as u8, Ordering::Relaxed);
-                                   
-                                   let action_mode_idx = SendMessageW(ctrls.action_panel.action_mode_hwnd(), CB_GETCURSEL, 0, 0);
-                                   let items: Vec<_> = indices_to_process.into_iter().filter_map(|idx| {
-                                       st.batch_items.get(idx).map(|item| {
-                                           let effective_action = match action_mode_idx {
-                                               1 => BatchAction::Compress, 2 => BatchAction::Decompress, _ => item.action,
-                                           };
-                                           // Determine effective algorithm PER ITEM
-                                           let effective_algo = if use_as_listed {
-                                               item.algorithm
-                                           } else {
-                                               global_algo
-                                           };
-                                           (item.path.clone(), effective_action, idx, effective_algo)
-                                       })
-                                   }).collect();
-                                   
-                                   let force = st.force_compress;
-                                   let guard = st.config.enable_system_guard;
-                                   let main_hwnd_usize = hwnd as usize;
-                                   thread::spawn(move || {
-                                       batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
-                                   });
-                               }
-                           }
-                      }
-                 },
-                 IDC_BTN_CANCEL => {
-                     if let Some(st) = get_state() {
-                         st.global_state.store(ProcessingState::Stopped as u8, Ordering::Relaxed);
-                         for item in &st.batch_items {
-                             if let Some(flag) = &item.state_flag { flag.store(ProcessingState::Stopped as u8, Ordering::Relaxed); }
-                         }
-                         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
-                         if let Some(ctrls) = &st.controls {
-                             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
-                             let w_stop = to_wstring("Stopping...");
-                             SetWindowTextW(ctrls.status_bar.label_hwnd(), w_stop.as_ptr());
-                         }
-                     }
-                 },
-                 IDC_BTN_SETTINGS => {
-                      if let Some(st) = get_state() {
-                          let current_theme = st.theme;
-                          let is_dark = theme::resolve_mode(st.theme);
-                          let enable_ctx = st.config.enable_context_menu;
-                          let enable_guard = st.config.enable_system_guard;
-                          let (new_theme, new_force, new_ctx, new_guard) = show_settings_modal(hwnd, current_theme, is_dark, st.enable_force_stop, enable_ctx, enable_guard);
-                          if let Some(t) = new_theme {
-                              st.theme = t;
-                              let new_is_dark = theme::resolve_mode(st.theme);
-                              theme::set_window_frame_theme(hwnd, new_is_dark);
-                              if let Some(ctrls) = &mut st.controls { ctrls.update_theme(new_is_dark, hwnd); }
-                              InvalidateRect(hwnd, std::ptr::null(), 1);
-                          }
-                          st.enable_force_stop = new_force;
-                          st.config.enable_context_menu = new_ctx;
-                          st.config.enable_system_guard = new_guard;
-                      }
-                 },
-                 IDC_BTN_ABOUT => {
-                     if let Some(st) = get_state() {
-                         let is_dark = theme::resolve_mode(st.theme);
-                         show_about_modal(hwnd, is_dark);
-                     }
-                 },
-                 IDC_BTN_SHORTCUTS => {
-                     if let Some(st) = get_state() {
-                         let is_dark = theme::resolve_mode(st.theme);
-                         show_shortcuts_modal(hwnd, is_dark);
-                     }
-                 },
-                 IDC_BTN_CONSOLE => {
-                     if let Some(st) = get_state() {
-                          let is_dark = theme::resolve_mode(st.theme);
-                          show_console_window(hwnd, &st.logs, is_dark);
-                     }
-                 },
-                 IDC_CHK_FORCE => {
-                      if let Some(st) = get_state() {
-                          let hwnd_ctl = lparam as HWND;
-                          let state = SendMessageW(hwnd_ctl, BM_GETCHECK, 0, 0);
-                          st.force_compress = state as u32 == BST_CHECKED;
-                      }
-                 },
-                 _ => {}
-            }
-            0
-        }
-        
-        WM_TIMER => {
-            if wparam == 2 {
-                KillTimer(hwnd, 2);
-                if let Some(st) = get_state() {
-                    st.ipc_active = false;
-                    
-                    // Robust Selection Logic:
-                    // If we have pending IPC items, explicitly select them right NOW.
-                    // This ensures that even if UI state drifted during debounce, we fix it before processing.
-                    if !st.pending_ipc_ids.is_empty() {
-                         if let Some(ctrls) = &st.controls {
-                             // clear existing selection
-                             let count = ctrls.file_list.get_item_count();
-                             for i in 0..count {
-                                 ctrls.file_list.set_selected(i, false);
-                             }
-                             // select pending items
-                             for &id in &st.pending_ipc_ids {
-                                 if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
-                                     ctrls.file_list.set_selected(pos as i32, true);
-                                 }
-                             }
-                         }
-                         st.pending_ipc_ids.clear();
+                        let count_w = u64_to_wstring(indices_to_process.len() as u64);
+                        let status_msg = concat_wstrings(&[&to_wstring("Processing "), &count_w, &to_wstring(" items...")]);
+                        SetWindowTextW(ctrls.status_bar.label_hwnd(), status_msg.as_ptr());
+                        
+                        let tx = st.tx.clone();
+                        let state_global = st.global_state.clone();
+                        state_global.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                        
+                        let action_mode_idx = SendMessageW(ctrls.action_panel.action_mode_hwnd(), CB_GETCURSEL, 0, 0);
+                        let items: Vec<_> = indices_to_process.into_iter().filter_map(|idx| {
+                            st.batch_items.get(idx).map(|item| {
+                                let effective_action = match action_mode_idx {
+                                    1 => BatchAction::Compress, 2 => BatchAction::Decompress, _ => item.action,
+                                };
+                                // Determine effective algorithm PER ITEM
+                                let effective_algo = if use_as_listed {
+                                    item.algorithm
+                                } else {
+                                    global_algo
+                                };
+                                (item.path.clone(), effective_action, idx, effective_algo)
+                            })
+                        }).collect();
+                        
+                        let force = st.force_compress;
+                        let guard = st.config.enable_system_guard;
+                        let main_hwnd_usize = hwnd as usize;
+                        thread::spawn(move || {
+                            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
+                        });
                     }
                 }
-                // Send lparam=1 to indicate Auto-Start source
-                SendMessageW(hwnd, WM_COMMAND, IDC_BTN_PROCESS_ALL as usize, 1);
-                return 0;
-            }
-            if let Some(st) = get_state() {
-                loop {
-                    match st.rx.try_recv() {
-                        Ok(msg) => {
-                             match msg {
-                                 UiMessage::Progress(cur, total) => {
-                                     if let Some(ctrls) = &st.controls {
-                                         SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETRANGE32, 0, total as isize);
-                                         SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETPOS, cur as usize, 0);
-                                     }
-                                     if let Some(tb) = &st.taskbar { tb.set_value(cur, total); }
-                                 },
-                                 UiMessage::Status(text) => {
-                                     if let Some(ctrls) = &st.controls {
-                                         SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
-                                     }
-                                 },
-                                 UiMessage::Log(text) => {
-                                     st.logs.push(text.clone());
-                                     append_log_msg(text);
-                                 },
-                                 UiMessage::Error(text) => {
-                                     if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Error); }
-                                     // format!("ERROR: {}", text)
-                                     let err_prefix = to_wstring("ERROR: ");
-                                     let full_err = concat_wstrings(&[&err_prefix, &text]);
-                                     st.logs.push(full_err.clone());
-                                     append_log_msg(full_err);
-                                     
-                                     if let Some(ctrls) = &st.controls {
-                                         // text is Vec<u16>, needs null term? to_wstring added it?
-                                         // UiMessage uses Vec<u16> which should be null terminated if coming from helpers
-                                         // But safe to ensure. SetWindowTextW needs ptr.
-                                         // text already likely has \0 from sender.
-                                         // If it doesn't, we might read OOB.
-                                         // Our helpers always add \0.
-                                         SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
-                                     }
-                                 },
-                                 UiMessage::Finished => {
-                                     if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::NoProgress); }
-                                     if let Some(ctrls) = &st.controls {
-                                         windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
-                                     }
-                                 },
-                                 UiMessage::RowUpdate(row, progress, status, _) => {
-                                     if let Some(ctrls) = &st.controls {
-                                         ctrls.file_list.update_item_text(row, 6, progress);
-                                         ctrls.file_list.update_item_text(row, 7, status);
-                                     }
-                                 },
-                                 UiMessage::ItemFinished(row, status, disk_size, final_state) => {
-                                     if let Some(ctrls) = &st.controls {
-                                         ctrls.file_list.update_item_text(row, 7, status);
-                                         if !disk_size.is_empty() && disk_size.len() > 1 { ctrls.file_list.update_item_text(row, 5, disk_size); }
-                                         let state_str = match final_state {
-                                             CompressionState::None => "-",
-                                             CompressionState::Specific(algo) => match algo {
-                                                 WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
-                                                 WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
-                                             },
-                                             CompressionState::Mixed => "Mixed",
-                                         };
-                                         ctrls.file_list.update_item_text(row, 1, to_wstring(state_str));
-                                         ctrls.file_list.update_item_text(row, 8, to_wstring("▶ Start"));
-                                         if let Some(item) = st.batch_items.get_mut(row as usize) {
-                                             item.status = BatchStatus::Pending;
-                                             item.state_flag = None;
-                                         }
-                                     }
-                                 },
-                                 UiMessage::BatchItemAnalyzed(id, log, disk, state) => {
-                                     let log_str = format_size(log);
-                                     let disk_str = format_size(disk);
-                                     if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
-                                         // Update item data for sorting
-                                         if let Some(item) = st.batch_items.get_mut(pos) {
-                                             item.logical_size = log;
-                                             item.disk_size = disk;
-                                         }
-                                         
-                                         if let Some(ctrls) = &st.controls {
-                                             ctrls.file_list.update_item_text(pos as i32, 4, log_str);
-                                             ctrls.file_list.update_item_text(pos as i32, 5, disk_str);
-                                             let state_str = match state {
-                                                CompressionState::None => "-",
-                                                CompressionState::Specific(algo) => match algo {
-                                                    WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
-                                                    WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
-                                                },
-                                                CompressionState::Mixed => "Mixed",
-                                             };
-                                             ctrls.file_list.update_item_text(pos as i32, 1, to_wstring(state_str));
-                                             ctrls.file_list.update_item_text(pos as i32, 7, to_wstring("Pending"));
-                                             let count = st.batch_items.len();
-                                             // format!("{} item(s) analyzed.", count)
-                                             let count_w = u64_to_wstring(count as u64);
-                                             let msg = concat_wstrings(&[&count_w, &to_wstring(" item(s) analyzed.")]);
-                                             SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
-                                         }
-                                     }
-                                 },
-                                 _ => {}
-                             }
-                        },
-                        Err(_) => break,
-                    }
-                }
-            }
-            0
-        }
+         },
+         IDC_BTN_CANCEL => {
+              st.global_state.store(ProcessingState::Stopped as u8, Ordering::Relaxed);
+              for item in &st.batch_items {
+                  if let Some(flag) = &item.state_flag { flag.store(ProcessingState::Stopped as u8, Ordering::Relaxed); }
+              }
+              if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
+              if let Some(ctrls) = &st.controls {
+                  windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
+                  let w_stop = to_wstring("Stopping...");
+                  SetWindowTextW(ctrls.status_bar.label_hwnd(), w_stop.as_ptr());
+              }
+         },
+         IDC_BTN_SETTINGS => {
+               let current_theme = st.theme;
+               let is_dark = theme::resolve_mode(st.theme);
+               let enable_ctx = st.config.enable_context_menu;
+               let enable_guard = st.config.enable_system_guard;
+               let (new_theme, new_force, new_ctx, new_guard) = show_settings_modal(hwnd, current_theme, is_dark, st.enable_force_stop, enable_ctx, enable_guard);
+               if let Some(t) = new_theme {
+                   st.theme = t;
+                   let new_is_dark = theme::resolve_mode(st.theme);
+                   theme::set_window_frame_theme(hwnd, new_is_dark);
+                   if let Some(ctrls) = &mut st.controls { ctrls.update_theme(new_is_dark, hwnd); }
+                   InvalidateRect(hwnd, std::ptr::null(), 1);
+               }
+               st.enable_force_stop = new_force;
+               st.config.enable_context_menu = new_ctx;
+               st.config.enable_system_guard = new_guard;
+         },
+         IDC_BTN_ABOUT => {
+              let is_dark = theme::resolve_mode(st.theme);
+              show_about_modal(hwnd, is_dark);
+         },
+         IDC_BTN_SHORTCUTS => {
+              let is_dark = theme::resolve_mode(st.theme);
+              show_shortcuts_modal(hwnd, is_dark);
+         },
+         IDC_BTN_CONSOLE => {
+               let is_dark = theme::resolve_mode(st.theme);
+               show_console_window(hwnd, &st.logs, is_dark);
+         },
+         IDC_CHK_FORCE => {
+               let hwnd_ctl = lparam as HWND;
+               let state = SendMessageW(hwnd_ctl, BM_GETCHECK, 0, 0);
+               st.force_compress = state as u32 == BST_CHECKED;
+         },
+         _ => {}
+    }
+    0
+}
+
+unsafe fn handle_timer(st: &mut AppState, hwnd: HWND, wparam: WPARAM) -> LRESULT {
+    if wparam == 2 {
+        KillTimer(hwnd, 2);
+        st.ipc_active = false;
         
-        WM_SIZE => {
-            let mut client_rect: RECT = unsafe { std::mem::zeroed() };
-            if GetClientRect(hwnd, &mut client_rect) != 0 {
-                if let Some(st) = get_state() {
-                    if let Some(ctrls) = &mut st.controls {
-                         ctrls.status_bar.on_resize(&client_rect);
-                         ctrls.file_list.on_resize(&client_rect);
-                         ctrls.action_panel.on_resize(&client_rect);
-                         ctrls.header_panel.on_resize(&client_rect);
-                    }
-                }
-            }
-            0
-        }
-        
-        WM_CLOSE => {
-            DestroyWindow(hwnd);
-            0
-        }
-
-        WM_DESTROY => {
-            if let Some(state) = get_window_state::<AppState>(hwnd) {
-                let mut rect: RECT = unsafe { std::mem::zeroed() };
-                if GetWindowRect(hwnd, &mut rect) != 0 {
-                    state.config.window_x = rect.left;
-                    state.config.window_y = rect.top;
-                    state.config.window_width = rect.right - rect.left;
-                    state.config.window_height = rect.bottom - rect.top;
-                }
-                if let Some(ctrls) = &state.controls {
-                    let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
-                   // Index 0 = "As Listed" - save as Xpress8K default
-                   state.config.default_algo = match idx {
-                       1 => WofAlgorithm::Xpress4K,
-                       3 => WofAlgorithm::Xpress16K, 
-                       4 => WofAlgorithm::Lzx,
-                       _ => WofAlgorithm::Xpress8K,
-                   };
-                    let force = SendMessageW(ctrls.action_panel.force_hwnd(), BM_GETCHECK, 0, 0);
-                    state.config.force_compress = force as u32 == BST_CHECKED;
-                }
-                state.config.theme = state.theme;
-                state.config.enable_force_stop = state.enable_force_stop;
-                // state.config.enable_system_guard is already updated via WM_APP+6 or loop above
-                state.config.save();
-            }
-            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-            if ptr != 0 {
-                let _ = Box::from_raw(ptr as *mut AppState);
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            }
-            // Force explicit process exit to prevent zombie processes.
-            // Bypassing the message loop unwind ensures we don't hang on stubborn dispatch chains.
-            std::process::exit(0);
-        }
-
-        WM_NCDESTROY => {
-            // PostQuitMessage(0); // Moved to WM_DESTROY only
-            0
-        }
-
-        WM_COPYDATA => {
-             let cds = &*(lparam as *const COPYDATASTRUCT);
-             if cds.dwData == 0xB00B {
-                 let len = (cds.cbData / 2) as usize;
-                 let slice = std::slice::from_raw_parts(cds.lpData as *const u16, len);
-                 let payload = String::from_utf16_lossy(slice).trim_matches('\0').to_string();
-                 let parts: Vec<&str> = payload.split('|').collect();
-                 
-                 if parts.len() >= 3 {
-                     let path = parts[0].to_string();
-                     let algo = match parts[1] {
-                         "xpress4k" => WofAlgorithm::Xpress4K,
-                         "xpress8k" => WofAlgorithm::Xpress8K,
-                         "xpress16k" => WofAlgorithm::Xpress16K,
-                         "lzx" => WofAlgorithm::Lzx,
-                         _ => WofAlgorithm::Xpress8K,
-                     };
-                     let action = match parts[2] {
-                         "decompress" => BatchAction::Decompress,
-                         _ => BatchAction::Compress,
-                     };
-                     
-                     if let Some(st) = get_state() {
-                         if !st.batch_items.iter().any(|item| item.path == path) {
-                             let id = st.add_batch_item(path.clone());
-                             if let Some(item) = st.get_batch_item_mut(id) {
-                                  item.algorithm = algo;
-                                  item.action = action;
-                             }
-                             
-                             if let Some(ctrls) = &st.controls {
-                                  SendMessageW(ctrls.action_panel.combo_hwnd(), CB_SETCURSEL, 0, 0);
-                                  
-                                  // Auto-Start Batch Logic:
-                                  // If this is the FIRST item in a potential batch (ipc_active is false), clear selection.
-                                  // Otherwise (ipc_active is true), we are appending to the same batch, so KEEP selection.
-                                  if !st.ipc_active {
-                                      let count = ctrls.file_list.get_item_count();
-                                      for i in 0..count {
-                                          ctrls.file_list.set_selected(i, false);
-                                      }
-                                      st.ipc_active = true;
-                                  }
-
-                                  if let Some(pos) = st.batch_items.iter().position(|i| i.id == id) {
-                                      if let Some(batch_item) = st.batch_items.get(pos) {
-                                           ctrls.file_list.add_item(id, batch_item, to_wstring("Calculating..."), to_wstring("Calculating..."), CompressionState::None);
-                                           // Select the new item visually
-                                           ctrls.file_list.set_selected(pos as i32, true);
-                                           // Add to pending IPC list for robust selection at trigger time
-                                           st.pending_ipc_ids.push(id);
-                                      }
-                                  }
-                             }
-                             
-                             let tx = st.tx.clone();
-                             let p = path.clone();
-                             thread::spawn(move || {
-                                  let logical = calculate_path_logical_size(&p);
-                                  let disk = calculate_path_disk_size(&p);
-                                  let algo = detect_path_algorithm(&p);
-                                  let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, algo));
-                             });
-                             
-                             SetTimer(hwnd, 2, 500, None);
-                         }
+        if !st.pending_ipc_ids.is_empty() {
+             if let Some(ctrls) = &st.controls {
+                 // clear existing selection
+                 let count = ctrls.file_list.get_item_count();
+                 for i in 0..count {
+                     ctrls.file_list.set_selected(i, false);
+                 }
+                 // select pending items
+                 for &id in &st.pending_ipc_ids {
+                     if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
+                         ctrls.file_list.set_selected(pos as i32, true);
                      }
                  }
-                 return 1;
              }
-             0
+             st.pending_ipc_ids.clear();
         }
-        
-        WM_DROPFILES => {
-            let hdrop = wparam as HDROP;
-            if let Some(st) = get_state() {
-                process_hdrop(hwnd, hdrop, st);
-            }
-            DragFinish(hdrop);
-            0
-        }
-        
-        WM_SETTINGCHANGE => {
-            if let Some(st) = get_state() {
-                if st.theme == AppTheme::System {
-                     let is_dark = theme::resolve_mode(st.theme);
-                     theme::set_window_frame_theme(hwnd, is_dark);
-                     if let Some(ctrls) = &mut st.controls {
-                         ctrls.update_theme(is_dark, hwnd);
-                     }
-                     InvalidateRect(hwnd, std::ptr::null(), 1);
-                }
-            }
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        }
-        
-        WM_NOTIFY => {
-            let nmhdr = &*(lparam as *const NMHDR);
-            if nmhdr.idFrom == IDC_BATCH_LIST as usize {
-                if nmhdr.code == NM_CLICK || nmhdr.code == NM_DBLCLK {
-                    let nmia = &*(lparam as *const NMITEMACTIVATE);
-                    let row = nmia.iItem;
-                    let col = nmia.iSubItem;
-                    if row >= 0 {
-                        if let Some(st) = get_state() {
-                             if col == 0 && nmhdr.code == NM_DBLCLK { // Open Path (Double Click Only)
-                                 if let Some(item) = st.batch_items.get(row as usize) {
-                                     let path = &item.path;
-                                     // format!("/select,\"{}\"", path)
-                                     let select_prefix = to_wstring("/select,\"");
-                                     let path_w = to_wstring(path);
-                                     let suffix = to_wstring("\"");
-                                     let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
-                                     
-                                     ShellExecuteW(std::ptr::null_mut(), to_wstring("open").as_ptr(), to_wstring("explorer.exe").as_ptr(), args.as_ptr(), std::ptr::null(), SW_SHOWNORMAL);
-                                 }
-                             } else if col == 2 && nmhdr.code == NM_DBLCLK { // Cycle Algo (Double Click Only)
-                                  if let Some(item) = st.batch_items.get_mut(row as usize) {
-                                      item.algorithm = match item.algorithm {
-                                          WofAlgorithm::Xpress4K => WofAlgorithm::Xpress8K,
-                                          WofAlgorithm::Xpress8K => WofAlgorithm::Xpress16K,
-                                          WofAlgorithm::Xpress16K => WofAlgorithm::Lzx,
-                                          WofAlgorithm::Lzx => WofAlgorithm::Xpress4K,
-                                      };
-                                      let name = match item.algorithm {
-                                          WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
-                                          WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
-                                      };
-                                      if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 2, to_wstring(name)); }
-                                  }
-                             } else if col == 3 && nmhdr.code == NM_DBLCLK { // Toggle Action (Double Click Only)
-                                  if let Some(item) = st.batch_items.get_mut(row as usize) {
-                                      item.action = match item.action {
-                                          BatchAction::Compress => BatchAction::Decompress,
-                                          BatchAction::Decompress => BatchAction::Compress,
-                                      };
-                                      let name = match item.action {
-                                          BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
-                                      };
-                                      if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, to_wstring(name)); }
-                                  }
-                             } else if col == 8 && nmhdr.code == NM_CLICK { // Start/Pause (Single Click)
-                                  if let Some(item) = st.batch_items.get_mut(row as usize) {
-                                       // Only start if not already running (basic check)
-                                       // For now, always allow forcing a restart of that item
-                                       let path = item.path.clone();
-                                       let action = item.action;
-                                       let algo = item.algorithm;
-                                       let row_idx = row as usize;
-                                       
-                                       // Update UI immediately to show visual feedback
-                                       if let Some(ctrls) = &st.controls {
-                                           ctrls.file_list.update_item_text(row, 7, to_wstring("Starting..."));
-                                       }
-                                       
-                                       // Prepare single item batch
-                                       let items = vec![(path, action, row_idx, algo)];
-                                       let tx = st.tx.clone();
-                                       let state_global = st.global_state.clone();
-                                       let force = st.force_compress;
-                                       let guard = st.config.enable_system_guard;
-                                       let main_hwnd_usize = hwnd as usize;
-
-                                       thread::spawn(move || {
-                                           batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
-                                       });
-                                  }
-                             }
-                        }
-                    }
-                }
-                
-                if nmhdr.code == LVN_KEYDOWN {
-                    let nmkd = &*(lparam as *const NMLVKEYDOWN);
-                    let vk = nmkd.wVKey as u16;
-                    
-                    // Handle Delete
-                    if vk == VK_DELETE {
-                        SendMessageW(hwnd, WM_COMMAND, (IDC_BTN_REMOVE as usize) | ((0 as usize) << 16), 0);
-                    }
-                    // Handle Ctrl + A
-                    else if vk == 0x41 { // 'A' key
-                        let ctrl_state = GetKeyState(VK_CONTROL as i32) as u16;
-                        if (ctrl_state & 0x8000) != 0 {
-                             if let Some(st) = get_state() {
-                                 if let Some(ctrls) = &st.controls {
-                                     let count = ctrls.file_list.get_item_count();
-                                     for i in 0..count {
-                                         ctrls.file_list.set_selected(i, true);
-                                     }
-                                 }
-                             }
-                        }
-                    }
-                    // Handle Ctrl + V (Paste)
-                    else if vk == 0x56 { // 'V' key
-                        let ctrl_state = GetKeyState(VK_CONTROL as i32) as u16;
-                        if (ctrl_state & 0x8000) != 0 {
-                            if IsClipboardFormatAvailable(15) != 0 {
-                                if OpenClipboard(hwnd) != 0 {
-                                     let hdrop = GetClipboardData(15) as HDROP;
-                                     if !hdrop.is_null() {
-                                         if let Some(st) = get_state() {
-                                             process_hdrop(hwnd, hdrop, st);
-                                         }
-                                     }
-                                     CloseClipboard();
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                if nmhdr.code == LVN_COLUMNCLICK {
-                     let nmlv = &*(lparam as *const NMLISTVIEW);
-                     let column = nmlv.iSubItem;
-                     
-                     if let Some(st) = get_state() {
-                         // Toggle if same column, else ascending
-                         if st.sort_column == column {
-                             st.sort_ascending = !st.sort_ascending;
-                         } else {
-                             st.sort_column = column;
-                             st.sort_ascending = true;
+        // Send lparam=1 to indicate Auto-Start source
+        SendMessageW(hwnd, WM_COMMAND, IDC_BTN_PROCESS_ALL as usize, 1);
+        return 0;
+    }
+    
+    loop {
+        match st.rx.try_recv() {
+            Ok(msg) => {
+                 match msg {
+                     UiMessage::Progress(cur, total) => {
+                         if let Some(ctrls) = &st.controls {
+                             SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETRANGE32, 0, total as isize);
+                             SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETPOS, cur as usize, 0);
                          }
+                         if let Some(tb) = &st.taskbar { tb.set_value(cur, total); }
+                     },
+                     UiMessage::Status(text) => {
+                         if let Some(ctrls) = &st.controls {
+                             SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
+                         }
+                     },
+                     UiMessage::Log(text) => {
+                         st.logs.push(text.clone());
+                         append_log_msg(text);
+                     },
+                     UiMessage::Error(text) => {
+                         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Error); }
+                         let err_prefix = to_wstring("ERROR: ");
+                         let full_err = concat_wstrings(&[&err_prefix, &text]);
+                         st.logs.push(full_err.clone());
+                         append_log_msg(full_err);
                          
                          if let Some(ctrls) = &st.controls {
-                             // Pass the AppState pointer as context
-                             let context = st as *const AppState as isize;
-                             ctrls.file_list.sort_items(compare_items, context);
+                             SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
                          }
-                     }
-                }
-                
-                if nmhdr.code == LVN_ITEMCHANGED {
-                     if let Some(st) = get_state() {
+                     },
+                     UiMessage::Finished => {
+                         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::NoProgress); }
                          if let Some(ctrls) = &st.controls {
-                             let count = ctrls.file_list.get_selection_count();
-                             let text = if count > 0 { "Process Selected" } else { "Process All" };
-                             SetWindowTextW(ctrls.action_panel.process_hwnd(), to_wstring(text).as_ptr());
+                             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
+                         }
+                     },
+                     UiMessage::RowUpdate(row, progress, status, _) => {
+                         if let Some(ctrls) = &st.controls {
+                             ctrls.file_list.update_item_text(row, 6, progress);
+                             ctrls.file_list.update_item_text(row, 7, status);
+                         }
+                     },
+                     UiMessage::ItemFinished(row, status, disk_size, final_state) => {
+                         if let Some(ctrls) = &st.controls {
+                             ctrls.file_list.update_item_text(row, 7, status);
+                             if !disk_size.is_empty() && disk_size.len() > 1 { ctrls.file_list.update_item_text(row, 5, disk_size); }
+                             let state_str = match final_state {
+                                 CompressionState::None => "-",
+                                 CompressionState::Specific(algo) => match algo {
+                                     WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
+                                     WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
+                                 },
+                                 CompressionState::Mixed => "Mixed",
+                             };
+                             ctrls.file_list.update_item_text(row, 1, to_wstring(state_str));
+                             ctrls.file_list.update_item_text(row, 8, to_wstring("▶ Start"));
+                             if let Some(item) = st.batch_items.get_mut(row as usize) {
+                                 item.status = BatchStatus::Pending;
+                                 item.state_flag = None;
+                             }
+                         }
+                     },
+                     UiMessage::BatchItemAnalyzed(id, log, disk, state) => {
+                         let log_str = format_size(log);
+                         let disk_str = format_size(disk);
+                         if let Some(pos) = st.batch_items.iter().position(|item| item.id == id) {
+                             if let Some(item) = st.batch_items.get_mut(pos) {
+                                 item.logical_size = log;
+                                 item.disk_size = disk;
+                             }
+                             
+                             if let Some(ctrls) = &st.controls {
+                                 ctrls.file_list.update_item_text(pos as i32, 4, log_str);
+                                 ctrls.file_list.update_item_text(pos as i32, 5, disk_str);
+                                 let state_str = match state {
+                                    CompressionState::None => "-",
+                                    CompressionState::Specific(algo) => match algo {
+                                        WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
+                                        WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
+                                    },
+                                    CompressionState::Mixed => "Mixed",
+                                 };
+                                 ctrls.file_list.update_item_text(pos as i32, 1, to_wstring(state_str));
+                                 ctrls.file_list.update_item_text(pos as i32, 7, to_wstring("Pending"));
+                                 let count = st.batch_items.len();
+                                 let count_w = u64_to_wstring(count as u64);
+                                 let msg = concat_wstrings(&[&count_w, &to_wstring(" item(s) analyzed.")]);
+                                 SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
+                             }
+                         }
+                     },
+                     _ => {}
+                 }
+            },
+            Err(_) => break,
+        }
+    }
+    0
+}
+
+unsafe fn handle_size(st: &mut AppState, hwnd: HWND) -> LRESULT {
+    let mut client_rect: RECT = std::mem::zeroed();
+    if GetClientRect(hwnd, &mut client_rect) != 0 {
+        if let Some(ctrls) = &mut st.controls {
+             ctrls.status_bar.on_resize(&client_rect);
+             ctrls.file_list.on_resize(&client_rect);
+             ctrls.action_panel.on_resize(&client_rect);
+             ctrls.header_panel.on_resize(&client_rect);
+        }
+    }
+    0
+}
+
+unsafe fn handle_destroy(st: &mut AppState, hwnd: HWND) {
+    let mut rect: RECT = std::mem::zeroed();
+    if GetWindowRect(hwnd, &mut rect) != 0 {
+        st.config.window_x = rect.left;
+        st.config.window_y = rect.top;
+        st.config.window_width = rect.right - rect.left;
+        st.config.window_height = rect.bottom - rect.top;
+    }
+    if let Some(ctrls) = &st.controls {
+        let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
+       st.config.default_algo = match idx {
+           1 => WofAlgorithm::Xpress4K,
+           3 => WofAlgorithm::Xpress16K, 
+           4 => WofAlgorithm::Lzx,
+           _ => WofAlgorithm::Xpress8K,
+       };
+        let force = SendMessageW(ctrls.action_panel.force_hwnd(), BM_GETCHECK, 0, 0);
+        st.config.force_compress = force as u32 == BST_CHECKED;
+    }
+    st.config.theme = st.theme;
+    st.config.enable_force_stop = st.enable_force_stop;
+    st.config.save();
+    
+    // Cleanup is handled by Box::from_raw in previous logic, but now AppState is Box::leak-ed
+    // The OS cleans up memory on exit.
+    // If we want to drop, we can:
+    // let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    // if ptr != 0 { let _ = Box::from_raw(ptr as *mut AppState); }
+    // framework.rs handles memory for generic?
+    // framework.rs: wnd_proc doesn't assume ownership (it does `&mut *ptr`). 
+    // It doesn't drop.
+    // So we should manually drop if we want clean drop semantics (saving config was moved here though).
+    
+    // Force explicit process exit to prevent zombie processes.
+    std::process::exit(0);
+}
+
+unsafe fn handle_copy_data(st: &mut AppState, hwnd: HWND, lparam: LPARAM) -> LRESULT {
+     let cds = &*(lparam as *const COPYDATASTRUCT);
+     if cds.dwData == 0xB00B {
+         let len = (cds.cbData / 2) as usize;
+         let slice = std::slice::from_raw_parts(cds.lpData as *const u16, len);
+         let payload = String::from_utf16_lossy(slice).trim_matches('\0').to_string();
+         let parts: Vec<&str> = payload.split('|').collect();
+         
+         if parts.len() >= 3 {
+             let path = parts[0].to_string();
+             let algo = match parts[1] {
+                 "xpress4k" => WofAlgorithm::Xpress4K,
+                 "xpress8k" => WofAlgorithm::Xpress8K,
+                 "xpress16k" => WofAlgorithm::Xpress16K,
+                 "lzx" => WofAlgorithm::Lzx,
+                 _ => WofAlgorithm::Xpress8K,
+             };
+             let action = match parts[2] {
+                 "decompress" => BatchAction::Decompress,
+                 _ => BatchAction::Compress,
+             };
+             
+             if !st.batch_items.iter().any(|item| item.path == path) {
+                 let id = st.add_batch_item(path.clone());
+                 if let Some(item) = st.get_batch_item_mut(id) {
+                      item.algorithm = algo;
+                      item.action = action;
+                 }
+                 
+                 if let Some(ctrls) = &st.controls {
+                      SendMessageW(ctrls.action_panel.combo_hwnd(), CB_SETCURSEL, 0, 0);
+                      
+                      if !st.ipc_active {
+                          let count = ctrls.file_list.get_item_count();
+                          for i in 0..count {
+                              ctrls.file_list.set_selected(i, false);
+                          }
+                          st.ipc_active = true;
+                      }
+
+                      if let Some(pos) = st.batch_items.iter().position(|i| i.id == id) {
+                          if let Some(batch_item) = st.batch_items.get(pos) {
+                               ctrls.file_list.add_item(id, batch_item, to_wstring("Calculating..."), to_wstring("Calculating..."), CompressionState::None);
+                               ctrls.file_list.set_selected(pos as i32, true);
+                               st.pending_ipc_ids.push(id);
+                          }
+                      }
+                 }
+                 
+                 let tx = st.tx.clone();
+                 let p = path.clone();
+                 thread::spawn(move || {
+                      let logical = calculate_path_logical_size(&p);
+                      let disk = calculate_path_disk_size(&p);
+                      let algo = detect_path_algorithm(&p);
+                      let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, algo));
+                 });
+                 
+                 SetTimer(hwnd, 2, 500, None);
+             }
+         }
+         return 1;
+     }
+     0
+}
+
+unsafe fn handle_setting_change(st: &mut AppState, hwnd: HWND) {
+    if st.theme == AppTheme::System {
+         let is_dark = theme::resolve_mode(st.theme);
+         theme::set_window_frame_theme(hwnd, is_dark);
+         if let Some(ctrls) = &mut st.controls {
+             ctrls.update_theme(is_dark, hwnd);
+         }
+         InvalidateRect(hwnd, std::ptr::null(), 1);
+    }
+}
+
+unsafe fn handle_notify(st: &mut AppState, hwnd: HWND, lparam: LPARAM) -> LRESULT {
+    let nmhdr = &*(lparam as *const NMHDR);
+    if nmhdr.idFrom == IDC_BATCH_LIST as usize {
+        if nmhdr.code == NM_CLICK || nmhdr.code == NM_DBLCLK {
+            let nmia = &*(lparam as *const NMITEMACTIVATE);
+            let row = nmia.iItem;
+            let col = nmia.iSubItem;
+            if row >= 0 {
+                 if col == 0 && nmhdr.code == NM_DBLCLK { // Open Path
+                     if let Some(item) = st.batch_items.get(row as usize) {
+                         let path = &item.path;
+                         let select_prefix = to_wstring("/select,\"");
+                         let path_w = to_wstring(path);
+                         let suffix = to_wstring("\"");
+                         let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
+                         
+                         ShellExecuteW(std::ptr::null_mut(), to_wstring("open").as_ptr(), to_wstring("explorer.exe").as_ptr(), args.as_ptr(), std::ptr::null(), SW_SHOWNORMAL);
+                     }
+                 } else if col == 2 && nmhdr.code == NM_DBLCLK { // Cycle Algo
+                      if let Some(item) = st.batch_items.get_mut(row as usize) {
+                          item.algorithm = match item.algorithm {
+                              WofAlgorithm::Xpress4K => WofAlgorithm::Xpress8K,
+                              WofAlgorithm::Xpress8K => WofAlgorithm::Xpress16K,
+                              WofAlgorithm::Xpress16K => WofAlgorithm::Lzx,
+                              WofAlgorithm::Lzx => WofAlgorithm::Xpress4K,
+                          };
+                          let name = match item.algorithm {
+                              WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
+                              WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
+                          };
+                          if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 2, to_wstring(name)); }
+                      }
+                 } else if col == 3 && nmhdr.code == NM_DBLCLK { // Toggle Action
+                      if let Some(item) = st.batch_items.get_mut(row as usize) {
+                          item.action = match item.action {
+                              BatchAction::Compress => BatchAction::Decompress,
+                              BatchAction::Decompress => BatchAction::Compress,
+                          };
+                          let name = match item.action {
+                              BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
+                          };
+                          if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, to_wstring(name)); }
+                      }
+                 } else if col == 8 && nmhdr.code == NM_CLICK { // Start/Pause
+                      if let Some(item) = st.batch_items.get_mut(row as usize) {
+                           let path = item.path.clone();
+                           let action = item.action;
+                           let algo = item.algorithm;
+                           let row_idx = row as usize;
+                           
+                           if let Some(ctrls) = &st.controls {
+                               ctrls.file_list.update_item_text(row, 7, to_wstring("Starting..."));
+                           }
+                           
+                           let items = vec![(path, action, row_idx, algo)];
+                           let tx = st.tx.clone();
+                           let state_global = st.global_state.clone();
+                           let force = st.force_compress;
+                           let guard = st.config.enable_system_guard;
+                           let main_hwnd_usize = hwnd as usize;
+
+                           thread::spawn(move || {
+                               batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
+                           });
+                      }
+                 }
+            }
+        }
+        
+        if nmhdr.code == LVN_KEYDOWN {
+            let nmkd = &*(lparam as *const NMLVKEYDOWN);
+            let vk = nmkd.wVKey as u16;
+            
+            if vk == VK_DELETE {
+                SendMessageW(hwnd, WM_COMMAND, (IDC_BTN_REMOVE as usize) | ((0 as usize) << 16), 0);
+            }
+            else if vk == 0x41 { // 'A' key
+                let ctrl_state = GetKeyState(VK_CONTROL as i32) as u16;
+                if (ctrl_state & 0x8000) != 0 {
+                     if let Some(ctrls) = &st.controls {
+                         let count = ctrls.file_list.get_item_count();
+                         for i in 0..count {
+                             ctrls.file_list.set_selected(i, true);
                          }
                      }
                 }
             }
-            0
+            else if vk == 0x56 { // 'V' key
+                let ctrl_state = GetKeyState(VK_CONTROL as i32) as u16;
+                if (ctrl_state & 0x8000) != 0 {
+                    if IsClipboardFormatAvailable(15) != 0 {
+                        if OpenClipboard(hwnd) != 0 {
+                             let hdrop = GetClipboardData(15) as HDROP;
+                             if !hdrop.is_null() {
+                                 process_hdrop(hwnd, hdrop, st);
+                             }
+                             CloseClipboard();
+                        }
+                    }
+                }
+            }
         }
         
-        WM_CONTEXTMENU => {
-            let hwnd_from = wparam as HWND;
-            if let Some(st) = get_state() {
-                if let Some(ctrls) = &st.controls {
-                    if hwnd_from == ctrls.file_list.hwnd() {
-                        let selected = ctrls.file_list.get_selected_indices();
-                        if !selected.is_empty() {
-                            let mut pt: POINT = unsafe { std::mem::zeroed() };
-                            GetCursorPos(&mut pt);
-                            let menu = CreatePopupMenu();
-                            if menu != std::ptr::null_mut() {
-                                // Determine status of selected items
-                                let mut any_processing = false;
-                                let mut any_pending = false;
-                                // let mut all_done = true; // Implied if not processing and not pending
+        if nmhdr.code == LVN_COLUMNCLICK {
+             let nmlv = &*(lparam as *const NMLISTVIEW);
+             let column = nmlv.iSubItem;
+             
+             if st.sort_column == column {
+                 st.sort_ascending = !st.sort_ascending;
+             } else {
+                 st.sort_column = column;
+                 st.sort_ascending = true;
+             }
+             
+             if let Some(ctrls) = &st.controls {
+                 let context = st as *const AppState as isize;
+                 ctrls.file_list.sort_items(compare_items, context);
+             }
+        }
+        
+        if nmhdr.code == LVN_ITEMCHANGED {
+             if let Some(ctrls) = &st.controls {
+                 let count = ctrls.file_list.get_selection_count();
+                 let text = if count > 0 { "Process Selected" } else { "Process All" };
+                 SetWindowTextW(ctrls.action_panel.process_hwnd(), to_wstring(text).as_ptr());
+             }
+        }
+    }
+    0
+}
+
+unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM) -> LRESULT {
+    let hwnd_from = wparam as HWND;
+    if let Some(ctrls) = &st.controls {
+        if hwnd_from == ctrls.file_list.hwnd() {
+            let selected = ctrls.file_list.get_selected_indices();
+            if !selected.is_empty() {
+                let mut pt: POINT = std::mem::zeroed();
+                GetCursorPos(&mut pt);
+                let menu = CreatePopupMenu();
+                if menu != std::ptr::null_mut() {
+                    let mut any_processing = false;
+                    let mut any_pending = false;
+                    
+                    for &idx in &selected {
+                        if let Some(item) = st.batch_items.get(idx as usize) {
+                            match item.status {
+                                BatchStatus::Processing => { any_processing = true; },
+                                BatchStatus::Pending => { any_pending = true; },
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    if any_processing {
+                        let _ = AppendMenuW(menu, MF_STRING, 1001, to_wstring("Pause").as_ptr());
+                        let _ = AppendMenuW(menu, MF_STRING, 1003, to_wstring("Stop").as_ptr());
+                        let _ = AppendMenuW(menu, MF_STRING, 1004, to_wstring("Remove").as_ptr());
+                    } else if any_pending {
+                        let _ = AppendMenuW(menu, MF_STRING, 1005, to_wstring("Start").as_ptr());
+                        let _ = AppendMenuW(menu, MF_STRING, 1004, to_wstring("Remove").as_ptr());
+                    } else {
+                        let _ = AppendMenuW(menu, MF_STRING, 1004, to_wstring("Remove").as_ptr());
+                    }
+                    let _ = AppendMenuW(menu, MF_STRING, 1006, to_wstring("Open File Location").as_ptr());
+
+                    let _cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, std::ptr::null());
+                    DestroyMenu(menu);
+                    
+                    if _cmd == 1001 { // Pause
+                    } else if _cmd == 1003 { // Stop
+                         SendMessageW(hwnd, WM_COMMAND, IDC_BTN_CANCEL as usize, 0);
+                    } else if _cmd == 1004 { // Remove
+                         SendMessageW(hwnd, WM_COMMAND, IDC_BTN_REMOVE as usize, 0);
+                    } else if _cmd == 1005 { // Start Selected
+                        let action_mode_idx = SendMessageW(ctrls.action_panel.action_mode_hwnd(), CB_GETCURSEL, 0, 0);
+                        let items: Vec<_> = selected.iter().filter_map(|&idx| {
+                            st.batch_items.get(idx as usize).map(|item| {
+                                let effective_action = match action_mode_idx {
+                                    1 => BatchAction::Compress, 2 => BatchAction::Decompress, _ => item.action,
+                                };
+                                (item.path.clone(), effective_action, idx as usize, item.algorithm)
+                            })
+                        }).collect();
+                        
+                        if !items.is_empty() {
+                            let tx = st.tx.clone();
+                            let state_global = st.global_state.clone();
+                            state_global.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                            let force = st.force_compress;
+                            let guard = st.config.enable_system_guard;
+                            let main_hwnd_usize = hwnd as usize;
+
+                            for &idx in &selected {
+                                if let Some(ctrls) = &st.controls {
+                                    ctrls.file_list.update_item_text(idx as i32, 7, to_wstring("Starting..."));
+                                }
+                            }
+
+                            thread::spawn(move || {
+                                batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
+                            });
+                        }
+                    } else if _cmd == 1006 {
+                        if let Some(&first_idx) = selected.first() {
+                            if let Some(item) = st.batch_items.get(first_idx as usize) {
+                                let select_prefix = to_wstring("/select,\"");
+                                let path_w = to_wstring(&item.path);
+                                let suffix = to_wstring("\"");
+                                let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
                                 
-                                for &idx in &selected {
-                                    if let Some(item) = st.batch_items.get(idx as usize) {
-                                        match item.status {
-                                            BatchStatus::Processing => {
-                                                any_processing = true;
-                                            },
-                                            BatchStatus::Pending => {
-                                                any_pending = true;
-                                            },
-                                            _ => {}
-                                        }
-                                    }
-                                }
-
-                                if any_processing {
-                                    // If anything is running, offer control options
-                                    let _ = AppendMenuW(menu, MF_STRING, 1001, to_wstring("Pause").as_ptr());
-                                    let _ = AppendMenuW(menu, MF_STRING, 1003, to_wstring("Stop").as_ptr());
-                                    let _ = AppendMenuW(menu, MF_STRING, 1004, to_wstring("Remove").as_ptr());
-                                    // Note: Stop acts as Cancel/Removing from the active logic usually, 
-                                    // but here we allow explicit Remove too which might be cleaner.
-                                } else if any_pending {
-                                    // If strictly pending (and potentially some done, but no processing), show Start
-                                    let _ = AppendMenuW(menu, MF_STRING, 1005, to_wstring("Start").as_ptr());
-                                    let _ = AppendMenuW(menu, MF_STRING, 1004, to_wstring("Remove").as_ptr());
-                                } else {
-                                    // All done or mixed done/error, just Remove
-                                    let _ = AppendMenuW(menu, MF_STRING, 1004, to_wstring("Remove").as_ptr());
-                                }
-
-                                // Add "Open File Location"
-                                let _ = AppendMenuW(menu, MF_STRING, 1006, to_wstring("Open File Location").as_ptr());
-
-                                let _cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, std::ptr::null());
-                                DestroyMenu(menu);
-                                
-                                if _cmd == 1001 { // Pause
-                                     // ...
-                                } else if _cmd == 1002 { // Resume
-                                     // ...
-                                } else if _cmd == 1003 { // Stop
-                                     SendMessageW(hwnd, WM_COMMAND, IDC_BTN_CANCEL as usize, 0);
-                                } else if _cmd == 1004 { // Remove
-                                     SendMessageW(hwnd, WM_COMMAND, IDC_BTN_REMOVE as usize, 0);
-                                } else if _cmd == 1005 { // Start Selected
-                                     // Logic similar to Process All but for selected items
-                                    let action_mode_idx = SendMessageW(ctrls.action_panel.action_mode_hwnd(), CB_GETCURSEL, 0, 0);
-                                    let _global_algo = st.config.default_algo; // Was compression_algorithm
-                                    let _use_as_listed = action_mode_idx == 0; 
-                                    
-                                    // ...
-                                    
-                                    let items: Vec<_> = selected.iter().filter_map(|&idx| {
-                                        st.batch_items.get(idx as usize).map(|item| {
-                                            (item.path.clone(), item.action, idx as usize, item.algorithm)
-                                        })
-                                    }).collect();
-                                    
-                                    if !items.is_empty() {
-                                        let tx = st.tx.clone();
-                                        let state_global = st.global_state.clone();
-                                        state_global.store(ProcessingState::Running as u8, Ordering::Relaxed);
-                                        let force = st.force_compress;
-                                        let guard = st.config.enable_system_guard;
-                                        let main_hwnd_usize = hwnd as usize;
-
-                                        // Update UI status to Starting
-                                        for &idx in &selected {
-                                            if let Some(ctrls) = &st.controls {
-                                                ctrls.file_list.update_item_text(idx as i32, 7, to_wstring("Starting..."));
-                                            }
-                                        }
-
-                                        thread::spawn(move || {
-                                            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
-                                        });
-                                    }
-                                } else if _cmd == 1006 {
-                                    // Open file location logic
-                                    if let Some(&first_idx) = selected.first() {
-                                        if let Some(item) = st.batch_items.get(first_idx as usize) {
-                                            let select_prefix = to_wstring("/select,\"");
-                                            let path_w = to_wstring(&item.path);
-                                            let suffix = to_wstring("\"");
-                                            let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
-                                            
-                                            ShellExecuteW(
-                                                std::ptr::null_mut(),
-                                                to_wstring("open").as_ptr(),
-                                                to_wstring("explorer.exe").as_ptr(),
-                                                args.as_ptr(),
-                                                std::ptr::null(),
-                                                SW_SHOWNORMAL
-                                            );
-                                        }
-                                    }
-                                }
+                                ShellExecuteW(std::ptr::null_mut(), to_wstring("open").as_ptr(), to_wstring("explorer.exe").as_ptr(), args.as_ptr(), std::ptr::null(), SW_SHOWNORMAL);
                             }
                         }
                     }
                 }
             }
-            0
         }
-        
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+    0
+}
+
+unsafe fn handle_keydown(st: &mut AppState, hwnd: HWND, wparam: WPARAM) -> LRESULT {
+    let vk = wparam as u16;
+    let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
+    let shift_pressed = (GetKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
+
+    if ctrl_pressed {
+        match vk {
+            0x56 => { // 'V' - Paste
+                if IsClipboardFormatAvailable(15) != 0 {
+                    if OpenClipboard(hwnd) != 0 {
+                        let hdrop = GetClipboardData(15) as HDROP;
+                        if !hdrop.is_null() {
+                            process_hdrop(hwnd, hdrop, st);
+                        }
+                        CloseClipboard();
+                    }
+                }
+            },
+            0x4F => { // 'O' - Open
+                if shift_pressed {
+                    SendMessageW(hwnd, WM_COMMAND, IDC_BTN_ADD_FOLDER as usize, 0);
+                } else {
+                    SendMessageW(hwnd, WM_COMMAND, IDC_BTN_ADD_FILES as usize, 0);
+                }
+            },
+            0x41 => { // 'A' - Select All
+                 if let Some(ctrls) = &st.controls {
+                     let count = ctrls.file_list.get_item_count();
+                     if count > 0 {
+                        for i in 0..count {
+                            ctrls.file_list.set_selected(i, true);
+                        }
+                     }
+                 }
+            },
+            _ => {}
+        }
+    } else if vk == VK_DELETE as u16 {
+        SendMessageW(hwnd, WM_COMMAND, IDC_BTN_REMOVE as usize, 0);
+    }
+    0
 }
 
 /// Comparison callback for ListView sorting
