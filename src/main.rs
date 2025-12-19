@@ -23,6 +23,7 @@ pub mod registry;
 pub mod utils;
 pub mod updater;
 pub mod json;
+pub mod com;
 
 use crate::engine::wof::WofAlgorithm;
 use crate::ui::state::BatchAction;

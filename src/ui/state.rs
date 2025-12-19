@@ -309,6 +309,9 @@ impl AppState {
         let mut items_to_analyze = Vec::new();
 
         for path in paths {
+            // Resolve shortcut if applicable
+            let path = crate::com::shell_link::resolve_shortcut(&path).unwrap_or(path);
+
             // Filter duplicates
             if !self.batch_items.iter().any(|item| item.path == path) {
                 let id = self.add_batch_item(path.clone());
