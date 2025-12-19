@@ -161,7 +161,7 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
 pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     let current_theme = st.theme;
     let is_dark = theme::resolve_mode(st.theme);
-    let (new_theme, new_force, new_ctx, new_guard) = crate::ui::settings::show_settings_modal(
+    let (new_theme, new_force, new_ctx, new_guard) = crate::ui::dialogs::show_settings_modal(
         hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard
     );
     

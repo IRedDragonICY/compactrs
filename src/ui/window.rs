@@ -362,15 +362,15 @@ impl AppState {
                  IDC_BTN_SETTINGS => handlers::on_open_settings(self, hwnd),
                  IDC_BTN_ABOUT => {
                       let is_dark = theme::resolve_mode(self.theme);
-                      crate::ui::about::show_about_modal(hwnd, is_dark);
+                      crate::ui::dialogs::show_about_modal(hwnd, is_dark);
                  },
                  IDC_BTN_SHORTCUTS => {
                       let is_dark = theme::resolve_mode(self.theme);
-                      crate::ui::shortcuts::show_shortcuts_modal(hwnd, is_dark);
+                      crate::ui::dialogs::show_shortcuts_modal(hwnd, is_dark);
                  },
                  IDC_BTN_CONSOLE => {
                        let is_dark = theme::resolve_mode(self.theme);
-                       crate::ui::console::show_console_window(hwnd, &self.logs, is_dark);
+                       crate::ui::dialogs::show_console_window(hwnd, &self.logs, is_dark);
                  },
                  IDC_CHK_FORCE => {
                        let hwnd_ctl = lparam as HWND;
@@ -441,14 +441,14 @@ impl AppState {
                  },
                  UiMessage::Log(text) => {
                      self.logs.push(text.clone());
-                     crate::ui::console::append_log_msg(text);
+                     crate::ui::dialogs::append_log_msg(text);
                  },
                  UiMessage::Error(text) => {
                      if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::Error); }
                      let err_prefix = to_wstring("ERROR: ");
                      let full_err = concat_wstrings(&[&err_prefix, &text]);
                      self.logs.push(full_err.clone());
-                     crate::ui::console::append_log_msg(full_err);
+                     crate::ui::dialogs::append_log_msg(full_err);
                      
                      if let Some(ctrls) = &self.controls {
                          SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
