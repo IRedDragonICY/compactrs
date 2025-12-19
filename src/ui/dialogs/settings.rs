@@ -31,6 +31,13 @@ const IDC_CHK_FORCE_STOP: u16 = 2007;
 const IDC_CHK_CONTEXT_MENU: u16 = 2008;
 const IDC_CHK_SYSTEM_GUARD: u16 = 2009;
 const IDC_CHK_LOW_POWER: u16 = 2013;
+const IDC_SLIDER_THREADS: u16 = 2014;
+const IDC_LBL_THREADS_VALUE: u16 = 2015;
+
+const TBM_GETPOS: u32 = 0x0400;
+const TBM_SETPOS: u32 = 0x0405;
+const TBM_SETRANGE: u32 = 0x0406;
+const WM_HSCROLL: u32 = 0x0114;
 
 struct SettingsState {
     theme: AppTheme,
@@ -40,6 +47,7 @@ struct SettingsState {
     enable_context_menu: bool, // Track context menu checkbox state
     enable_system_guard: bool, // Track system guard checkbox state
     low_power_mode: bool,      // Track low power mode checkbox state
+    max_threads: u32,          // Track max threads
     update_status: UpdateStatus,
 }
 
@@ -59,14 +67,14 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 
 
 // Main settings modal function with proper data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool) -> (Option<AppTheme>, bool, bool, bool, bool) {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool, max_threads: u32) -> (Option<AppTheme>, bool, bool, bool, bool, u32) {
     // Check if window already exists
     let class_name = to_wstring("CompactRS_Settings");
     let existing_hwnd = FindWindowW(class_name.as_ptr(), std::ptr::null());
     if existing_hwnd != std::ptr::null_mut() {
         ShowWindow(existing_hwnd, SW_RESTORE);
         SetForegroundWindow(existing_hwnd);
-        return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode);
+        return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads);
     }
     
     let mut state = SettingsState {
@@ -77,6 +85,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         enable_context_menu,
         enable_system_guard,
         low_power_mode,
+        max_threads,
         update_status: UpdateStatus::Idle,
     };
 
@@ -86,13 +95,13 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     show_modal(
         WindowBuilder::new(&mut state, "CompactRS_Settings", SETTINGS_TITLE)
             .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
-            .size(300, 440)
+            .size(300, 520) // Increased height for slider
             .align(WindowAlignment::CenterOnParent)
             .background(bg_brush), // Optional, builder handles it if passed
         parent
     );
     
-    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode)
+    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads)
 }
 
 impl WindowHandler for SettingsState {
@@ -176,11 +185,41 @@ impl WindowHandler for SettingsState {
                 .checked(self.low_power_mode)
                 .build();
 
+            // Thread Slider Panel
+            let cpu_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as u32;
+            let current_val = if self.max_threads == 0 { cpu_count } else { self.max_threads };
+            
+            // Slider Label
+            let label_text = format!("Max CPU Threads: {}", current_val);
+            let _lbl_threads = ControlBuilder::new(hwnd, IDC_LBL_THREADS_VALUE)
+                .label(false)
+                .text(&label_text)
+                .pos(30, 290)
+                .size(200, 20) // Increased width to fit text
+                .dark_mode(is_dark_mode)
+                .build();
+
+            // Slider
+            let h_slider = ControlBuilder::new(hwnd, IDC_SLIDER_THREADS)
+                .trackbar()
+                .pos(30, 310)
+                .size(240, 30)
+                .dark_mode(is_dark_mode)
+                .build();
+            
+            // Set Range (1 to CPU count)
+            // TBM_SETRANGE: WPARAM=Redraw(TRUE), LPARAM=LOWORD(Min)|HIWORD(Max)
+            let range_lparam = (1 & 0xFFFF) | ((cpu_count << 16) & 0xFFFF0000);
+            SendMessageW(h_slider, TBM_SETRANGE, 1, range_lparam as isize);
+            
+            // Set Position
+            SendMessageW(h_slider, TBM_SETPOS, 1, current_val as isize);
+
             // Updates Section
             let _btn_update = ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
                 .button()
                 .text("Check for Updates")
-                .pos(30, 290)
+                .pos(30, 360)
                 .size(150, 25)
                 .dark_mode(is_dark_mode)
                 .build();
@@ -188,7 +227,7 @@ impl WindowHandler for SettingsState {
             let _btn_ti = ControlBuilder::new(hwnd, IDC_BTN_RESTART_TI)
                 .button()
                 .text("Restart as TrustedInstaller")
-                .pos(30, 360)
+                .pos(30, 440) // Moved down
                 .size(240, 25)
                 .dark_mode(is_dark_mode)
                 .build();
@@ -206,8 +245,8 @@ impl WindowHandler for SettingsState {
             let _h_lbl = ControlBuilder::new(hwnd, IDC_LBL_UPDATE_STATUS)
                 .label(false) // left-aligned
                 .text(&("Current Version: ".to_string() + env!("APP_VERSION")))
-                .pos(30, 320)
-                .size(240, 40)
+                .pos(30, 400) // Moved down
+                .size(240, 30)
                 .dark_mode(self.is_dark)
                 .build();
 
@@ -215,7 +254,7 @@ impl WindowHandler for SettingsState {
             let _close_btn = ControlBuilder::new(hwnd, IDC_BTN_CANCEL)
                 .button()
                 .text("Close")
-                .pos(190, 290)
+                .pos(190, 360) 
                 .size(80, 25)
                 .dark_mode(self.is_dark)
                 .build();
@@ -226,6 +265,32 @@ impl WindowHandler for SettingsState {
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
             match msg {
+                WM_HSCROLL => {
+                     // Check if it's our slider
+                     let h_ctl = lparam as HWND;
+                     let h_slider = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_SLIDER_THREADS as i32);
+                     if h_ctl == h_slider {
+                         // Get Position
+                         let pos = SendMessageW(h_slider, TBM_GETPOS, 0, 0);
+                         self.max_threads = pos as u32;
+                         
+                         // Update Label
+                         let label_text = format!("Max CPU Threads: {}", pos);
+                         let w_text = to_wstring(&label_text);
+                         let h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_THREADS_VALUE as i32);
+                         SendMessageW(h_lbl, WM_SETTEXT, 0, w_text.as_ptr() as LPARAM);
+                         
+                         // Notify Parent
+                         use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                         let parent = GetParent(hwnd);
+                         if parent != std::ptr::null_mut() {
+                             // Custom message for threads? Or just update on close?
+                             // Prompt didn't specify real-time parent notification, but consistent with others.
+                             // We'll save on close or rely on return value.
+                         }
+                     }
+                     Some(0)
+                },
                 WM_APP_UPDATE_CHECK_RESULT => {
                     let status_ptr = lparam as *mut UpdateStatus;
                     let status = Box::from_raw(status_ptr); // Take ownership
@@ -303,7 +368,7 @@ impl WindowHandler for SettingsState {
                                     
                                     // 5. Update controls theme
                                     use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
-                                    let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_CHK_LOW_POWER, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI];
+                                    let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_CHK_LOW_POWER, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI, IDC_SLIDER_THREADS, IDC_LBL_THREADS_VALUE];
 
                                     for &ctrl_id in &controls {
                                         let h_ctl = GetDlgItem(hwnd, ctrl_id as i32);
@@ -313,6 +378,8 @@ impl WindowHandler for SettingsState {
                                                 IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
                                                 IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD | IDC_CHK_LOW_POWER => crate::ui::theme::ControlType::CheckBox,
                                                 IDC_BTN_CANCEL | IDC_BTN_CHECK_UPDATE | IDC_BTN_RESTART_TI => crate::ui::theme::ControlType::Button,
+                                                IDC_SLIDER_THREADS => crate::ui::theme::ControlType::Trackbar,
+                                                IDC_LBL_THREADS_VALUE | IDC_LBL_UPDATE_STATUS => crate::ui::theme::ControlType::Window, // Label behaves like static
                                                 _ => crate::ui::theme::ControlType::RadioButton, // Radio buttons
                                             };
                                             crate::ui::theme::apply_theme(h_ctl, ctl_type, new_is_dark);

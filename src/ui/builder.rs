@@ -96,6 +96,13 @@ impl ControlBuilder {
         self
     }
 
+    pub fn trackbar(mut self) -> Self {
+        self.class_name = "msctls_trackbar32".to_string();
+        // TBS_AUTOTICKS | WS_TABSTOP
+        self.style |= 0x0001 | WS_TABSTOP;
+        self
+    }
+
     pub fn build(self) -> HWND {
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());
@@ -131,6 +138,7 @@ impl ControlBuilder {
             else if (self.style & (BS_AUTORADIOBUTTON as u32)) != 0 { ControlType::RadioButton }
             else { ControlType::Button }
         } else if self.class_name == "COMBOBOX" { ControlType::ComboBox }
+        else if self.class_name == "msctls_trackbar32" { ControlType::Trackbar }
         else { ControlType::Button }
     }
 }

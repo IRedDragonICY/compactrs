@@ -22,13 +22,14 @@ pub struct AppConfig {
     pub enable_context_menu: bool,
     pub enable_system_guard: bool,
     pub low_power_mode: bool,
+    pub max_threads: u32,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             magic: 0x43505253,
-            version: 1,
+            version: 2,
             theme: AppTheme::System,
             default_algo: WofAlgorithm::Xpress8K, // Default to XPRESS8K
             force_compress: false,
@@ -40,6 +41,7 @@ impl Default for AppConfig {
             enable_context_menu: false,
             enable_system_guard: true,
             low_power_mode: false,
+            max_threads: 0, // 0 = Auto
         }
     }
 }
@@ -60,7 +62,15 @@ impl AppConfig {
                 unsafe { 
                     let config: AppConfig = std::mem::transmute(buffer);
                     // Validate magic and version
-                    if config.magic == 0x43505253 && config.version == 1 {
+                    if config.magic == 0x43505253 && (config.version == 1 || config.version == 2) {
+                        if config.version == 1 {
+                             // Migrate v1 to v2 (default max_threads = 0)
+                             return AppConfig {
+                                 max_threads: 0,
+                                 version: 2,
+                                 ..config
+                             };
+                        }
                         return config;
                     }
                 }

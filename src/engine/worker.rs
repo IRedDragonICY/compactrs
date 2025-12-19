@@ -710,6 +710,7 @@ pub fn batch_process_worker(
     main_hwnd: usize,
     guard_enabled: bool,
     low_power_mode: bool,
+    max_threads: u32,
 ) {
     // RAII guard: Prevent system sleep for the duration of batch processing.
     // Automatically resets on drop (panic-safe).
@@ -743,7 +744,9 @@ pub fn batch_process_worker(
     
     let _ = tx.send(UiMessage::Progress(0, total_files));
     let parallelism = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let num_threads = if low_power_mode {
+    let num_threads = if max_threads > 0 {
+        max_threads as usize
+    } else if low_power_mode {
         std::cmp::max(1, parallelism / 4)
     } else {
         parallelism
@@ -752,8 +755,9 @@ pub fn batch_process_worker(
     let total_w = u64_to_wstring(total_files);
     let threads_w = u64_to_wstring(num_threads as u64);
     let msg = concat_wstrings(&[
-        &to_wstring("Processing "), &total_w, &to_wstring(" files with "), &threads_w, &to_wstring(" threads...")
+        &to_wstring("Processing "), &total_w, &to_wstring(" files with "), &threads_w, &to_wstring(" CPU Threads...")
     ]);
+    let _ = tx.send(UiMessage::Log(msg.clone())); // Log it for verification
     let _ = tx.send(UiMessage::Status(msg));
     
     if total_files == 0 {

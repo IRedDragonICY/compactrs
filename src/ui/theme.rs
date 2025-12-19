@@ -59,6 +59,7 @@ pub enum ControlType {
     GroupBox,
     RadioButton, // New type for distinct styling
     ItemsView, // For specialized ListView themes
+    Trackbar, 
 }
 
 /// Trait for components that need to react to theme changes.
@@ -105,6 +106,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::GroupBox => ("", None),
             ControlType::RadioButton => ("", None),
             ControlType::ItemsView => ("DarkMode_ItemsView", None),
+            ControlType::Trackbar => ("", None), // Use default drawing but with dark background
         }
     } else {
         match control_type {
@@ -118,6 +120,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::GroupBox => ("Explorer", None),
             ControlType::RadioButton => ("Explorer", None),
             ControlType::ItemsView => ("Explorer", None),
+            ControlType::Trackbar => ("Explorer", None),
         }
     };
 
