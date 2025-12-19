@@ -269,6 +269,133 @@ pub unsafe fn on_list_keydown(st: &mut AppState, _hwnd: HWND, key: u16) {
     }
 }
 
+pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) -> bool {
+    if row < 0 { return false; } 
+
+    // Handle Algorithm Column (2)
+    if col == 2 {
+        let mut pt: POINT = std::mem::zeroed();
+        GetCursorPos(&mut pt);
+        
+        let menu = CreatePopupMenu();
+        if menu != std::ptr::null_mut() {
+            let _ = AppendMenuW(menu, MF_STRING, 2001, to_wstring("XPRESS4K").as_ptr());
+            let _ = AppendMenuW(menu, MF_STRING, 2002, to_wstring("XPRESS8K").as_ptr());
+            let _ = AppendMenuW(menu, MF_STRING, 2003, to_wstring("XPRESS16K").as_ptr());
+            let _ = AppendMenuW(menu, MF_STRING, 2004, to_wstring("LZX").as_ptr());
+
+            if let Some(item) = st.batch_items.get(row as usize) {
+                let check_id = match item.algorithm {
+                    WofAlgorithm::Xpress4K => 2001,
+                    WofAlgorithm::Xpress8K => 2002,
+                    WofAlgorithm::Xpress16K => 2003,
+                    WofAlgorithm::Lzx => 2004,
+                };
+                use windows_sys::Win32::UI::WindowsAndMessaging::{CheckMenuItem, MF_CHECKED};
+                CheckMenuItem(menu, check_id, MF_CHECKED);
+            }
+
+            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | windows_sys::Win32::UI::WindowsAndMessaging::TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
+            DestroyMenu(menu);
+
+            if cmd >= 2001 && cmd <= 2004 {
+                let new_algo = match cmd {
+                    2001 => WofAlgorithm::Xpress4K,
+                    2002 => WofAlgorithm::Xpress8K,
+                    2003 => WofAlgorithm::Xpress16K,
+                    2004 => WofAlgorithm::Lzx,
+                    _ => WofAlgorithm::Xpress8K,
+                };
+
+                if let Some(item) = st.batch_items.get_mut(row as usize) {
+                    if item.algorithm != new_algo {
+                        item.algorithm = new_algo;
+                        
+                        let name = match item.algorithm {
+                            WofAlgorithm::Xpress4K => "XPRESS4K", 
+                            WofAlgorithm::Xpress8K => "XPRESS8K",
+                            WofAlgorithm::Xpress16K => "XPRESS16K", 
+                            WofAlgorithm::Lzx => "LZX",
+                        };
+                        
+                        if let Some(ctrls) = &st.controls { 
+                            ctrls.file_list.update_item_text(row, 2, to_wstring(name)); 
+                        }
+
+                        if let Some(cached) = item.get_cached_estimate(new_algo) {
+                            item.estimated_size = cached;
+                            let est_str = crate::utils::format_size(cached);
+                            if let Some(ctrls) = &st.controls { 
+                                ctrls.file_list.update_item_text(row, 5, est_str);
+                            }
+                        } else {
+                            let path = item.path.clone();
+                            let id = item.id;
+                            if let Some(ctrls) = &st.controls { 
+                                ctrls.file_list.update_item_text(row, 5, to_wstring("Estimating..."));
+                            }
+                            let tx = st.tx.clone();
+                            thread::spawn(move || {
+                                let estimated = crate::engine::estimator::estimate_path(&path, new_algo);
+                                let est_str = crate::utils::format_size(estimated);
+                                let _ = tx.send(crate::ui::state::UiMessage::UpdateEstimate(id, new_algo, estimated, est_str));
+                            });
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+    } 
+    // Handle Action Column (3)
+    else if col == 3 {
+        let mut pt: POINT = std::mem::zeroed();
+        GetCursorPos(&mut pt);
+        
+        let menu = CreatePopupMenu();
+        if menu != std::ptr::null_mut() {
+            let _ = AppendMenuW(menu, MF_STRING, 3001, to_wstring("Compress").as_ptr());
+            let _ = AppendMenuW(menu, MF_STRING, 3002, to_wstring("Decompress").as_ptr());
+
+            if let Some(item) = st.batch_items.get(row as usize) {
+                let check_id = match item.action {
+                    crate::ui::state::BatchAction::Compress => 3001,
+                    crate::ui::state::BatchAction::Decompress => 3002,
+                };
+                use windows_sys::Win32::UI::WindowsAndMessaging::{CheckMenuItem, MF_CHECKED};
+                CheckMenuItem(menu, check_id, MF_CHECKED);
+            }
+
+            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | windows_sys::Win32::UI::WindowsAndMessaging::TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
+            DestroyMenu(menu);
+
+            if cmd >= 3001 && cmd <= 3002 {
+                let new_action = match cmd {
+                    3001 => crate::ui::state::BatchAction::Compress,
+                    3002 => crate::ui::state::BatchAction::Decompress,
+                    _ => crate::ui::state::BatchAction::Compress,
+                };
+                
+                if let Some(item) = st.batch_items.get_mut(row as usize) {
+                    if item.action != new_action {
+                        item.action = new_action;
+                        let name = match item.action {
+                            crate::ui::state::BatchAction::Compress => "Compress", 
+                            crate::ui::state::BatchAction::Decompress => "Decompress",
+                        };
+                         if let Some(ctrls) = &st.controls { 
+                            ctrls.file_list.update_item_text(row, 3, to_wstring(name)); 
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+    }
+
+    false
+}
+
 pub unsafe fn on_column_click(st: &mut AppState, lparam: LPARAM) {
     let nmlv = &*(lparam as *const NMLISTVIEW);
     let column = nmlv.iSubItem;

@@ -17,7 +17,7 @@ use windows_sys::Win32::UI::Shell::DragAcceptFiles;
 use windows_sys::Win32::UI::Controls::{
     PBM_SETRANGE32, PBM_SETPOS, NMITEMACTIVATE, NMHDR, NM_CLICK, NM_DBLCLK,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
-    LVN_ITEMCHANGED, BST_CHECKED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK,
+    LVN_ITEMCHANGED, BST_CHECKED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NM_RCLICK,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_DELETE};
 
@@ -770,6 +770,11 @@ impl AppState {
                         let text = if count > 0 { "Process Selected" } else { "Process All" };
                         SetWindowTextW(ctrls.action_panel.process_hwnd(), to_wstring(text).as_ptr());
                     }
+                } else if nmhdr.code == NM_RCLICK {
+                     let nmia = &*(lparam as *const NMITEMACTIVATE);
+                     if handlers::on_list_rclick(self, hwnd, nmia.iItem, nmia.iSubItem) {
+                         return 1;
+                     }
                 }
             }
             0
