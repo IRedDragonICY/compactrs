@@ -86,6 +86,81 @@ pub struct ScanStats {
     pub file_paths: Vec<String>,
 }
 
+/// Metrics gathered from a single-pass path scan.
+/// Consolidates logical size, disk size, compression state, and file count.
+pub struct PathMetrics {
+    pub logical_size: u64,
+    pub disk_size: u64,
+    pub compression_state: crate::engine::wof::CompressionState,
+    pub file_count: u64,
+}
+
+/// Single-pass scanner for both files and directories.
+/// Gathers all metadata in one traversal, eliminating redundant I/O.
+pub fn scan_path_metrics(path: &str) -> PathMetrics {
+    let p = std::path::Path::new(path);
+    
+    if p.is_file() {
+        // Single file: direct metadata access
+        let logical = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let disk = get_real_file_size(path);
+        let state = match get_wof_algorithm(path) {
+            Some(algo) => crate::engine::wof::CompressionState::Specific(algo),
+            None => crate::engine::wof::CompressionState::None,
+        };
+        return PathMetrics { logical_size: logical, disk_size: disk, compression_state: state, file_count: 1 };
+    }
+    
+    // Directory: single-pass traversal
+    let mut metrics = PathMetrics { 
+        logical_size: 0, disk_size: 0, 
+        compression_state: crate::engine::wof::CompressionState::None, 
+        file_count: 0 
+    };
+    let mut seen_algos = std::collections::HashSet::new();
+    let mut algo_scanned = 0usize;
+    const MAX_ALGO_SCAN: usize = 50;
+
+    walk_directory_generic(path, None, &mut |full_path, is_dir, find_data| {
+        if !is_dir {
+            metrics.file_count += 1;
+            
+            // Logical size from FindData (no extra syscall)
+            let size = ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
+            metrics.logical_size += size;
+            
+            // Disk size (requires handle, unavoidable for WOF)
+            metrics.disk_size += get_real_file_size(full_path);
+            
+            // Sample algorithms (limit to avoid excessive overhead)
+            if algo_scanned < MAX_ALGO_SCAN {
+                if let Some(algo) = get_wof_algorithm(full_path) {
+                    seen_algos.insert(algo as u32);
+                }
+                algo_scanned += 1;
+            }
+        }
+    });
+
+    // Resolve compression state
+    metrics.compression_state = if seen_algos.is_empty() {
+        crate::engine::wof::CompressionState::None
+    } else if seen_algos.len() > 1 {
+        crate::engine::wof::CompressionState::Mixed
+    } else {
+        let algo_val = seen_algos.into_iter().next().unwrap();
+        match algo_val {
+            0 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Xpress4K),
+            1 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Lzx),
+            2 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Xpress8K),
+            3 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Xpress16K),
+            _ => crate::engine::wof::CompressionState::None,
+        }
+    };
+
+    metrics
+}
+
 // ===== SKIP HEURISTICS =====
 
 /// Extensions that should be skipped during compression (already compressed or incompressible)

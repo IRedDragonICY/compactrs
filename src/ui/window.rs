@@ -320,9 +320,10 @@ impl AppState {
                                 batch_item.algorithm = startup_item.algorithm;
                                 batch_item.action = startup_item.action;
                             }
-                            let logical_size = crate::engine::worker::calculate_path_logical_size(&startup_item.path);
-                            let disk_size = crate::engine::worker::calculate_path_disk_size(&startup_item.path);
-                            let detected_algo = crate::engine::worker::detect_path_algorithm(&startup_item.path);
+                            let metrics = crate::engine::worker::scan_path_metrics(&startup_item.path);
+                            let logical_size = metrics.logical_size;
+                            let disk_size = metrics.disk_size;
+                            let detected_algo = metrics.compression_state;
                             let logical_str = format_size(logical_size);
                             let disk_str = format_size(disk_size);
                             

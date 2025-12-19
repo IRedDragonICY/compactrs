@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
 use crate::ui::components::{FileListView, Component};
-use crate::engine::worker::{calculate_path_logical_size, calculate_path_disk_size, detect_path_algorithm};
+use crate::engine::worker::scan_path_metrics;
 use crate::utils::to_wstring;
 use std::thread;
 
@@ -332,10 +332,9 @@ impl AppState {
         // Spawn analysis thread
         thread::spawn(move || {
             for (id, path, algo) in items_to_analyze {
-                 let logical = calculate_path_logical_size(&path);
-                 let disk = calculate_path_disk_size(&path);
-                 let detected_algo = detect_path_algorithm(&path);
-                 let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, detected_algo));
+                 // Single-pass scan: gathers logical size, disk size, and compression state together
+                 let metrics = scan_path_metrics(&path);
+                 let _ = tx.send(UiMessage::BatchItemAnalyzed(id, metrics.logical_size, metrics.disk_size, metrics.compression_state));
                  
                  // Estimate compressed size
                  let estimated = crate::engine::estimator::estimate_path(&path, algo);
