@@ -34,10 +34,11 @@ pub mod columns {
     pub const ALGORITHM: i32 = 2;
     pub const ACTION: i32 = 3;
     pub const SIZE: i32 = 4;
-    pub const ON_DISK: i32 = 5;
-    pub const PROGRESS: i32 = 6;
-    pub const STATUS: i32 = 7;
-    pub const START: i32 = 8;
+    pub const EST_SIZE: i32 = 5;
+    pub const ON_DISK: i32 = 6;
+    pub const PROGRESS: i32 = 7;
+    pub const STATUS: i32 = 8;
+    pub const START: i32 = 9;
 }
 
 /// A high-level facade for the Win32 ListView control used to display batch items.
@@ -111,13 +112,14 @@ impl FileListView {
 
     /// Sets up the ListView columns.
     fn setup_columns(&self) {
-        // Columns: Path | Current | Algo | Action | Size | On Disk | Progress | Status | ▶ Start
+        // Columns: Path | Current | Algo | Action | Size | Est. Size | On Disk | Progress | Status | ▶ Start
         let columns = [
             ("Path", 250),
             ("Current", 70),
             ("Algorithm", 70),
             ("Action", 70),
             ("Size", 75),
+            ("Est. Size", 75),
             ("On Disk", 75),
             ("Progress", 70),
             ("Status", 80),
@@ -152,6 +154,7 @@ impl FileListView {
     /// * `item` - The BatchItem containing path, algorithm, action data
     /// * `size_logical` - Logical size string (e.g., "1.5 GiB")
     /// * `size_disk` - On-disk size string
+    /// * `size_estimated` - Estimated compressed size string
     /// * `state` - Current compression state
     ///
     /// # Returns
@@ -162,6 +165,7 @@ impl FileListView {
         item: &BatchItem,
         size_logical: Vec<u16>,
         size_disk: Vec<u16>,
+        size_estimated: Vec<u16>,
         state: CompressionState,
     ) -> i32 {
         let path_wide = to_wstring(&item.path);
@@ -173,9 +177,10 @@ impl FileListView {
             "Decompress"
         };
         let action_wide = to_wstring(action_str);
-        // size_logical and size_disk are already Vec<u16>
+        // size_logical, size_disk, size_estimated are already Vec<u16>
         let size_wide = size_logical;
         let disk_wide = size_disk;
+        let est_wide = size_estimated;
 
         // Format current state string
         let current_text = match state {
@@ -235,17 +240,22 @@ impl FileListView {
             lvi.pszText = size_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
-            // Col 5 = On Disk (compressed size)
+            // Col 5 = Estimated Size
+            lvi.iSubItem = columns::EST_SIZE;
+            lvi.pszText = est_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
+
+            // Col 6 = On Disk (compressed size)
             lvi.iSubItem = columns::ON_DISK;
             lvi.pszText = disk_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
-            // Col 7 = Status (shows Pending)
+            // Col 8 = Status (shows Pending)
             lvi.iSubItem = columns::STATUS;
             lvi.pszText = status_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
-            // Col 8 = Start button
+            // Col 9 = Start button
             lvi.iSubItem = columns::START;
             lvi.pszText = start_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
@@ -450,7 +460,7 @@ impl FileListView {
             state: u32,
         }
 
-        const COLUMN_COUNT: i32 = 9; // Total columns defined in setup_columns
+        const COLUMN_COUNT: i32 = 10; // Total columns defined in setup_columns
 
         unsafe {
             // Get the header control handle from the ListView

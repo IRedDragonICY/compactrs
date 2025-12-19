@@ -198,7 +198,32 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                   WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
                   WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
               };
-              if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 2, to_wstring(name)); }
+              let algo = item.algorithm;
+              
+              // Check cache first
+              if let Some(cached) = item.get_cached_estimate(algo) {
+                  // Use cached value instantly
+                  item.estimated_size = cached;
+                  let est_str = crate::utils::format_size(cached);
+                  if let Some(ctrls) = &st.controls { 
+                      ctrls.file_list.update_item_text(row, 2, to_wstring(name)); 
+                      ctrls.file_list.update_item_text(row, 5, est_str);
+                  }
+              } else {
+                  // Need to calculate - trigger async estimation
+                  let path = item.path.clone();
+                  let id = item.id;
+                  if let Some(ctrls) = &st.controls { 
+                      ctrls.file_list.update_item_text(row, 2, to_wstring(name)); 
+                      ctrls.file_list.update_item_text(row, 5, to_wstring("Estimating..."));
+                  }
+                  let tx = st.tx.clone();
+                  thread::spawn(move || {
+                      let estimated = crate::engine::estimator::estimate_path(&path, algo);
+                      let est_str = crate::utils::format_size(estimated);
+                      let _ = tx.send(crate::ui::state::UiMessage::UpdateEstimate(id, algo, estimated, est_str));
+                  });
+              }
           }
     } else if col == 3 && code == NM_DBLCLK { // Toggle Action
           if let Some(item) = st.batch_items.get_mut(row as usize) {
@@ -211,7 +236,7 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
               };
               if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, to_wstring(name)); }
           }
-    } else if col == 8 && code == NM_CLICK { // Start/Pause Single Item
+    } else if col == 9 && code == NM_CLICK { // Start/Pause Single Item (was col 8, now col 9)
            if let Some(item) = st.batch_items.get_mut(row as usize) {
                 // Trigger single item processing
                 // Fix unused var warning by using the var
@@ -350,8 +375,9 @@ pub unsafe extern "system" fn compare_items(lparam1: isize, lparam2: isize, lpar
                 2 => format!("{:?}", i1.algorithm).cmp(&format!("{:?}", i2.algorithm)),
                 3 => format!("{:?}", i1.action).cmp(&format!("{:?}", i2.action)),
                 4 => i1.logical_size.cmp(&i2.logical_size),
-                5 => i1.disk_size.cmp(&i2.disk_size),
-                7 => format!("{:?}", i1.status).cmp(&format!("{:?}", i2.status)),
+                5 => i1.estimated_size.cmp(&i2.estimated_size),
+                6 => i1.disk_size.cmp(&i2.disk_size),
+                8 => format!("{:?}", i1.status).cmp(&format!("{:?}", i2.status)),
                 _ => CmpOrdering::Equal,
             };
             

@@ -1,6 +1,7 @@
 use windows_sys::Win32::Foundation::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, atomic::AtomicU8};
+use std::collections::HashMap;
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
 use crate::ui::components::{FileListView, Component};
@@ -62,17 +63,10 @@ pub enum UiMessage {
     Finished,
     /// Single item finished: (row_index, status_wide, size_after_wide, final_state)
     ItemFinished(i32, Vec<u16>, Vec<u16>, crate::engine::wof::CompressionState),
-    /// Item analyzed (id, logical_size, disk_size, compression_state, logical_str_wide, disk_str_wide)
-    /// Note: I'm adding pre-formatted strings here to avoid re-formatting in UI thread if possible, 
-    /// or just keeping numbers. Actually, let's keep numbers and format in UI? 
-    /// User said: "Modify format_size to return Vec<u16> ... Refactor UI Logic ... Identify where we perform UI updates".
-    /// If I format in worker, I send Vec<u16>.
-    /// The original was: BatchItemAnalyzed(u32, u64, u64, ...).
-    /// Let's keep numbers for BatchItemAnalyzed as they are stored in BatchItem? 
-    /// Wait, BatchItem has progress(u64,u64). It doesn't store size strings.
-    /// UI updates text.
-    /// Let's stick to the current definition for BatchItemAnalyzed but remember that window.rs formats them.
+    /// Item analyzed (id, logical_size, disk_size, compression_state)
     BatchItemAnalyzed(u32, u64, u64, crate::engine::wof::CompressionState),
+    /// Estimated size update: (id, algorithm, estimated_size, formatted_string)
+    UpdateEstimate(u32, WofAlgorithm, u64, Vec<u16>),
     Error(Vec<u16>),
 }
 
@@ -117,6 +111,9 @@ pub struct BatchItem {
     // Added for sorting
     pub logical_size: u64,
     pub disk_size: u64,
+    pub estimated_size: u64,        // Current estimated compressed size
+    /// Cache of estimated sizes per algorithm (avoids re-calculation)
+    pub estimation_cache: HashMap<u32, u64>,
 }
 
 impl BatchItem {
@@ -131,7 +128,20 @@ impl BatchItem {
             state_flag: None,
             logical_size: 0,
             disk_size: 0,
+            estimated_size: 0,
+            estimation_cache: HashMap::new(),
         }
+    }
+    
+    /// Get cached estimation for an algorithm, if available
+    pub fn get_cached_estimate(&self, algo: WofAlgorithm) -> Option<u64> {
+        self.estimation_cache.get(&(algo as u32)).copied()
+    }
+    
+    /// Cache an estimation result for an algorithm
+    pub fn cache_estimate(&mut self, algo: WofAlgorithm, size: u64) {
+        self.estimation_cache.insert(algo as u32, size);
+        self.estimated_size = size;
     }
 }
 
@@ -293,6 +303,11 @@ impl AppState {
             if !self.batch_items.iter().any(|item| item.path == path) {
                 let id = self.add_batch_item(path.clone());
                 
+                // Get the default algorithm for estimation
+                let algo = self.batch_items.iter().find(|i| i.id == id)
+                    .map(|i| i.algorithm)
+                    .unwrap_or(WofAlgorithm::Xpress8K);
+                
                 // Update UI immediately
                 if let Some(ctrls) = &self.controls {
                      if let Some(batch_item) = self.batch_items.iter().find(|i| i.id == id) {
@@ -300,12 +315,13 @@ impl AppState {
                              id, 
                              batch_item, 
                              to_wstring("Calculating..."), 
-                             to_wstring("Calculating..."), 
+                             to_wstring("Calculating..."),
+                             to_wstring("Estimating..."),
                              crate::engine::wof::CompressionState::None
                          );
                      }
                 }
-                items_to_analyze.push((id, path));
+                items_to_analyze.push((id, path, algo));
             }
         }
         
@@ -315,11 +331,16 @@ impl AppState {
         
         // Spawn analysis thread
         thread::spawn(move || {
-            for (id, path) in items_to_analyze {
+            for (id, path, algo) in items_to_analyze {
                  let logical = calculate_path_logical_size(&path);
                  let disk = calculate_path_disk_size(&path);
-                 let algo = detect_path_algorithm(&path);
-                 let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, algo));
+                 let detected_algo = detect_path_algorithm(&path);
+                 let _ = tx.send(UiMessage::BatchItemAnalyzed(id, logical, disk, detected_algo));
+                 
+                 // Estimate compressed size
+                 let estimated = crate::engine::estimator::estimate_path(&path, algo);
+                 let est_str = crate::utils::format_size(estimated);
+                 let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated, est_str));
             }
             let _ = tx.send(UiMessage::Status(to_wstring("Ready.")));
         });

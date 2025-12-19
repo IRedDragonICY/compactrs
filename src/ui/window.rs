@@ -328,7 +328,7 @@ impl AppState {
                             
                             if let Some(ctrls) = &self.controls {
                                 if let Some(batch_item) = self.batch_items.iter().find(|i| i.id == item_id) {
-                                    ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, detected_algo);
+                                    ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, to_wstring("Estimating..."), detected_algo);
                                     if let Some(pos) = self.batch_items.iter().position(|i| i.id == item_id) {
                                         ctrls.file_list.set_selected(pos as i32, true);
                                         self.pending_ipc_ids.push(item_id);
@@ -350,6 +350,9 @@ impl AppState {
     unsafe fn dispatch_command(&mut self, hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         unsafe {
             let id = (wparam & 0xFFFF) as u16;
+            let notification_code = ((wparam >> 16) & 0xFFFF) as u16;
+            const CBN_SELCHANGE: u16 = 1;
+            
             match id {
                  IDC_BTN_ADD_FILES => handlers::on_add_files(self),
                  IDC_BTN_ADD_FOLDER => handlers::on_add_folder(self),
@@ -376,6 +379,12 @@ impl AppState {
                        let hwnd_ctl = lparam as HWND;
                        let state = SendMessageW(hwnd_ctl, BM_GETCHECK, 0, 0);
                        self.force_compress = state as u32 == BST_CHECKED;
+                 },
+                 IDC_COMBO_ALGO => {
+                     // Re-estimate all items when global algorithm changes
+                     if notification_code == CBN_SELCHANGE {
+                         self.on_global_algo_changed();
+                     }
                  },
                  _ => {}
             }
@@ -462,14 +471,14 @@ impl AppState {
                  },
                  UiMessage::RowUpdate(row, progress, status, _) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 6, progress);
-                         ctrls.file_list.update_item_text(row, 7, status);
+                         ctrls.file_list.update_item_text(row, 7, progress);
+                         ctrls.file_list.update_item_text(row, 8, status);
                      }
                  },
                  UiMessage::ItemFinished(row, status, disk_size, final_state) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 7, status);
-                         if !disk_size.is_empty() && disk_size.len() > 1 { ctrls.file_list.update_item_text(row, 5, disk_size); }
+                         ctrls.file_list.update_item_text(row, 8, status);
+                         if !disk_size.is_empty() && disk_size.len() > 1 { ctrls.file_list.update_item_text(row, 6, disk_size); }
                          let state_str = match final_state {
                              CompressionState::None => "-",
                              CompressionState::Specific(algo) => match algo {
@@ -479,7 +488,7 @@ impl AppState {
                              CompressionState::Mixed => "Mixed",
                          };
                          ctrls.file_list.update_item_text(row, 1, to_wstring(state_str));
-                         ctrls.file_list.update_item_text(row, 8, to_wstring("▶ Start"));
+                         ctrls.file_list.update_item_text(row, 9, to_wstring("▶ Start"));
                          if let Some(item) = self.batch_items.get_mut(row as usize) {
                              item.status = BatchStatus::Pending;
                              item.state_flag = None;
@@ -497,7 +506,7 @@ impl AppState {
                          
                          if let Some(ctrls) = &self.controls {
                              ctrls.file_list.update_item_text(pos as i32, 4, log_str);
-                             ctrls.file_list.update_item_text(pos as i32, 5, disk_str);
+                             ctrls.file_list.update_item_text(pos as i32, 6, disk_str);
                              let state_str = match state {
                                 CompressionState::None => "-",
                                 CompressionState::Specific(algo) => match algo {
@@ -507,11 +516,22 @@ impl AppState {
                                 CompressionState::Mixed => "Mixed",
                              };
                              ctrls.file_list.update_item_text(pos as i32, 1, to_wstring(state_str));
-                             ctrls.file_list.update_item_text(pos as i32, 7, to_wstring("Pending"));
+                             ctrls.file_list.update_item_text(pos as i32, 8, to_wstring("Pending"));
                              let count = self.batch_items.len();
                              let count_w = u64_to_wstring(count as u64);
                              let msg = concat_wstrings(&[&count_w, &to_wstring(" item(s) analyzed.")]);
                              SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
+                         }
+                     }
+                 },
+                 UiMessage::UpdateEstimate(id, algo, est_size, est_str) => {
+                     if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
+                         if let Some(item) = self.batch_items.get_mut(pos) {
+                             // Cache the result for this algorithm
+                             item.cache_estimate(algo, est_size);
+                         }
+                         if let Some(ctrls) = &self.controls {
+                             ctrls.file_list.update_item_text(pos as i32, 5, est_str);
                          }
                      }
                  },
@@ -532,6 +552,63 @@ impl AppState {
                 }
             }
             0
+        }
+    }
+
+    /// Re-estimate all items when the global algorithm ComboBox changes
+    unsafe fn on_global_algo_changed(&mut self) {
+        unsafe {
+            // Get the selected algorithm from the ComboBox
+            let algo = if let Some(ctrls) = &self.controls {
+                let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
+                match idx {
+                    0 => None, // "As Listed" - use per-item algorithm
+                    1 => Some(WofAlgorithm::Xpress4K),
+                    2 => Some(WofAlgorithm::Xpress8K),
+                    3 => Some(WofAlgorithm::Xpress16K),
+                    4 => Some(WofAlgorithm::Lzx),
+                    _ => Some(WofAlgorithm::Xpress8K),
+                }
+            } else {
+                return;
+            };
+
+            // Check cache first and collect items that need estimation
+            let mut items_to_estimate: Vec<(u32, String, WofAlgorithm)> = Vec::new();
+            
+            for (i, item) in self.batch_items.iter_mut().enumerate() {
+                let effective_algo = algo.unwrap_or(item.algorithm);
+                
+                // Check cache
+                if let Some(cached) = item.get_cached_estimate(effective_algo) {
+                    // Use cached value instantly
+                    item.estimated_size = cached;
+                    let est_str = format_size(cached);
+                    if let Some(ctrls) = &self.controls {
+                        ctrls.file_list.update_item_text(i as i32, 5, est_str);
+                    }
+                } else {
+                    // Need to calculate
+                    items_to_estimate.push((item.id, item.path.clone(), effective_algo));
+                    if let Some(ctrls) = &self.controls {
+                        ctrls.file_list.update_item_text(i as i32, 5, to_wstring("Estimating..."));
+                    }
+                }
+            }
+
+            if items_to_estimate.is_empty() {
+                return;
+            }
+
+            // Spawn estimation thread only for items that need it
+            let tx = self.tx.clone();
+            std::thread::spawn(move || {
+                for (id, path, algo) in items_to_estimate {
+                    let estimated = crate::engine::estimator::estimate_path(&path, algo);
+                    let est_str = crate::utils::format_size(estimated);
+                    let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated, est_str));
+                }
+            });
         }
     }
 

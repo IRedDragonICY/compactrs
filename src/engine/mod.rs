@@ -1,6 +1,6 @@
 pub mod wof;
 pub mod process;
 
-pub mod compresstimate;
+pub mod estimator;
 pub mod worker;
 pub mod elevation;
