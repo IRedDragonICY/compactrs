@@ -416,6 +416,85 @@ impl FileListView {
         }
     }
 
+    /// Sets the sort indicator (up/down arrow) on a column header.
+    ///
+    /// # Arguments
+    /// * `column_index` - The column to show the indicator on
+    /// * `ascending` - True for up arrow (HDF_SORTUP), false for down arrow (HDF_SORTDOWN)
+    ///
+    /// This clears sort indicators from all other columns to ensure only
+    /// the active sort column displays an arrow.
+    pub fn set_sort_indicator(&self, column_index: i32, ascending: bool) {
+        // Win32 Header control constants
+        const LVM_GETHEADER_MSG: u32 = 0x1000 + 31;
+        const HDM_GETITEMW: u32 = 0x1200 + 11;
+        const HDM_SETITEMW: u32 = 0x1200 + 12;
+        const HDI_FORMAT: u32 = 0x0004;
+        const HDF_SORTUP: i32 = 0x0400;
+        const HDF_SORTDOWN: i32 = 0x0200;
+
+        // HDITEMW struct layout for header item manipulation
+        #[repr(C)]
+        struct HDITEMW {
+            mask: u32,
+            cxy: i32,
+            psz_text: *mut u16,
+            hbm: isize,
+            cch_text_max: i32,
+            fmt: i32,
+            l_param: isize,
+            i_image: i32,
+            i_order: i32,
+            type_: u32,
+            pv_filter: *mut std::ffi::c_void,
+            state: u32,
+        }
+
+        const COLUMN_COUNT: i32 = 9; // Total columns defined in setup_columns
+
+        unsafe {
+            // Get the header control handle from the ListView
+            let header = SendMessageW(self.hwnd, LVM_GETHEADER_MSG, 0, 0) as HWND;
+            if header.is_null() {
+                return;
+            }
+
+            for i in 0..COLUMN_COUNT {
+                // Initialize HDITEMW to retrieve current format
+                let mut hd_item: HDITEMW = std::mem::zeroed();
+                hd_item.mask = HDI_FORMAT;
+
+                // Get current item state
+                let result = SendMessageW(
+                    header,
+                    HDM_GETITEMW,
+                    i as usize,
+                    &mut hd_item as *mut _ as isize,
+                );
+
+                if result == 0 {
+                    continue; // Failed to get item, skip
+                }
+
+                // Clear existing sort flags
+                hd_item.fmt &= !(HDF_SORTUP | HDF_SORTDOWN);
+
+                // Apply sort flag only to the target column
+                if i == column_index {
+                    hd_item.fmt |= if ascending { HDF_SORTUP } else { HDF_SORTDOWN };
+                }
+
+                // Apply the updated format
+                SendMessageW(
+                    header,
+                    HDM_SETITEMW,
+                    i as usize,
+                    &hd_item as *const _ as isize,
+                );
+            }
+        }
+    }
+
     /// Helper to convert WofAlgorithm to string.
     fn algo_to_str(algo: WofAlgorithm) -> &'static str {
         match algo {

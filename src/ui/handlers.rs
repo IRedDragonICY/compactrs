@@ -242,6 +242,8 @@ pub unsafe fn on_column_click(st: &mut AppState, lparam: LPARAM) {
     if let Some(ctrls) = &st.controls {
         let context = st as *const AppState as isize;
         ctrls.file_list.sort_items(compare_items, context);
+        // Update header sort indicator
+        ctrls.file_list.set_sort_indicator(st.sort_column, st.sort_ascending);
     }
 }
 
