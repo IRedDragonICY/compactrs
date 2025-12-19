@@ -140,6 +140,7 @@ impl WindowHandler for AppState {
                 btn_files: IDC_BTN_ADD_FILES,
                 btn_folder: IDC_BTN_ADD_FOLDER,
                 btn_remove: IDC_BTN_REMOVE,
+                btn_clear: IDC_BTN_CLEAR,
                 lbl_input: IDC_LBL_INPUT,
                 combo_action_mode: IDC_COMBO_ACTION_MODE,
                 lbl_action_mode: IDC_LBL_ACTION_MODE,
@@ -364,6 +365,7 @@ impl AppState {
                  IDC_BTN_ADD_FILES => handlers::on_add_files(self),
                  IDC_BTN_ADD_FOLDER => handlers::on_add_folder(self),
                  IDC_BTN_REMOVE => handlers::on_remove_selected(self),
+                 IDC_BTN_CLEAR => handlers::on_clear_all(self),
                  IDC_BTN_PROCESS_ALL => {
                      let is_auto_start = lparam == 1;
                      handlers::on_process_all(self, hwnd, is_auto_start);

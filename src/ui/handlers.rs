@@ -66,6 +66,17 @@ pub unsafe fn on_remove_selected(st: &mut AppState) {
     }
 }
 
+pub unsafe fn on_clear_all(st: &mut AppState) {
+    if st.batch_items.is_empty() { return; }
+    
+    st.clear_batch();
+    st.next_item_id = 1;
+
+    if let Some(ctrls) = &st.controls {
+        ctrls.file_list.clear_all();
+    }
+}
+
 pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool) {
     if st.batch_items.is_empty() {
         let w_info = to_wstring("Info");

@@ -12,7 +12,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, SetBkMode, SetTextColor, TRANSPARENT};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Controls::{
-    LVM_DELETEITEM, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMNW,
+    LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMNW,
     LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMW,
     LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, LVCFMT_LEFT, LVCF_FMT, LVCF_TEXT, LVCF_WIDTH,
     LVCOLUMNW, LVIF_PARAM, LVIF_TEXT, LVITEMW, LVNI_SELECTED, LVS_EX_DOUBLEBUFFER,
@@ -517,6 +517,12 @@ impl FileListView {
 
     // Local allow_dark_mode_for_window removed in favor of theme::allow_dark_mode_for_window
 
+    /// Removes all items from the ListView.
+    pub fn clear_all(&self) {
+        unsafe {
+            SendMessageW(self.hwnd, LVM_DELETEALLITEMS, 0, 0);
+        }
+    }
 }
 
 impl Component for FileListView {

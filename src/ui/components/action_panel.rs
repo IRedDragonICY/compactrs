@@ -20,6 +20,7 @@ pub struct ActionPanelIds {
     pub btn_files: u16,
     pub btn_folder: u16,
     pub btn_remove: u16,
+    pub btn_clear: u16,
     pub lbl_input: u16,
     pub combo_action_mode: u16,
     pub lbl_action_mode: u16,
@@ -40,6 +41,7 @@ pub struct ActionPanel {
     hwnd_files: HWND,
     hwnd_folder: HWND,
     hwnd_remove: HWND,
+    hwnd_clear: HWND,
     hwnd_lbl_action_mode: HWND,
     hwnd_action_mode: HWND,
     hwnd_lbl_algo: HWND,
@@ -60,6 +62,7 @@ impl ActionPanel {
             hwnd_files: std::ptr::null_mut(),
             hwnd_folder: std::ptr::null_mut(),
             hwnd_remove: std::ptr::null_mut(),
+            hwnd_clear: std::ptr::null_mut(),
             hwnd_lbl_action_mode: std::ptr::null_mut(),
             hwnd_action_mode: std::ptr::null_mut(),
             hwnd_lbl_algo: std::ptr::null_mut(),
@@ -87,6 +90,12 @@ impl ActionPanel {
     #[inline]
     pub fn remove_hwnd(&self) -> HWND {
         self.hwnd_remove
+    }
+
+    /// Returns the Clear button HWND.
+    #[inline]
+    pub fn clear_hwnd(&self) -> HWND {
+        self.hwnd_clear
     }
 
     /// Returns the Action Mode ComboBox HWND.
@@ -134,6 +143,7 @@ impl ActionPanel {
         SendMessageW(self.hwnd_files, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_folder, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_remove, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_clear, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_lbl_action_mode, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_action_mode, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_lbl_algo, WM_SETFONT, wparam, lparam);
@@ -190,11 +200,20 @@ impl Component for ActionPanel {
             .dark_mode(is_dark)
             .build();
 
+        // Create Clear button
+        self.hwnd_clear = ControlBuilder::new(parent, self.ids.btn_clear)
+            .button()
+            .text("Clear")
+            .pos(235, btn_y)
+            .size(70, btn_h)
+            .dark_mode(is_dark)
+            .build();
+
         // Create Action Mode Label (title above dropdown)
         self.hwnd_lbl_action_mode = ControlBuilder::new(parent, self.ids.lbl_action_mode)
             .label(false)
             .text("Action")
-            .pos(240, btn_y - 18)
+            .pos(310, btn_y - 18)
             .size(100, 16)
             .dark_mode(is_dark)
             .build();
@@ -202,7 +221,7 @@ impl Component for ActionPanel {
         // Create Action Mode ComboBox
         self.hwnd_action_mode = ControlBuilder::new(parent, self.ids.combo_action_mode)
             .combobox()
-            .pos(240, btn_y)
+            .pos(310, btn_y)
             .size(100, 200) // Height is dropdown height
             .dark_mode(is_dark)
             .build();
@@ -211,7 +230,7 @@ impl Component for ActionPanel {
         self.hwnd_lbl_algo = ControlBuilder::new(parent, self.ids.lbl_algo)
             .label(false)
             .text("Algorithm")
-            .pos(350, btn_y - 18)
+            .pos(420, btn_y - 18)
             .size(100, 16)
             .dark_mode(is_dark)
             .build();
@@ -219,7 +238,7 @@ impl Component for ActionPanel {
         // Create Algorithm ComboBox
         self.hwnd_combo = ControlBuilder::new(parent, self.ids.combo_algo)
             .combobox()
-            .pos(350, btn_y)
+            .pos(420, btn_y)
             .size(100, 200) // Height is dropdown height
             .dark_mode(is_dark)
             .build();
@@ -228,7 +247,7 @@ impl Component for ActionPanel {
         self.hwnd_force = ControlBuilder::new(parent, self.ids.chk_force)
             .checkbox()
             .text("Force")
-            .pos(360, btn_y)
+            .pos(430, btn_y)
             .size(60, btn_h)
             .dark_mode(is_dark)
             .build();
@@ -237,7 +256,7 @@ impl Component for ActionPanel {
         self.hwnd_process = ControlBuilder::new(parent, self.ids.btn_process)
             .button()
             .text("Process All")
-            .pos(430, btn_y)
+            .pos(500, btn_y)
             .size(100, btn_h)
             .dark_mode(is_dark)
             .build();
@@ -248,7 +267,7 @@ impl Component for ActionPanel {
         self.hwnd_cancel = ControlBuilder::new(parent, self.ids.btn_cancel)
             .button()
             .text("Cancel")
-            .pos(540, btn_y)
+            .pos(610, btn_y)
             .size(80, btn_h)
             .dark_mode(is_dark)
             .build();
@@ -318,11 +337,22 @@ impl Component for ActionPanel {
                 SWP_NOZORDER,
             );
 
+            // Clear button
+            SetWindowPos(
+                self.hwnd_clear,
+                std::ptr::null_mut(),
+                padding + 190,
+                btn_y,
+                65,
+                btn_height,
+                SWP_NOZORDER,
+            );
+
             // Action Mode label (above dropdown)
             SetWindowPos(
                 self.hwnd_lbl_action_mode,
                 std::ptr::null_mut(),
-                padding + 190,
+                padding + 260,
                 lbl_y,
                 100,
                 lbl_height,
@@ -333,7 +363,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_action_mode,
                 std::ptr::null_mut(),
-                padding + 190,
+                padding + 260,
                 btn_y,
                 100,
                 btn_height,
@@ -344,7 +374,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_lbl_algo,
                 std::ptr::null_mut(),
-                padding + 295,
+                padding + 365,
                 lbl_y,
                 100,
                 lbl_height,
@@ -355,7 +385,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_combo,
                 std::ptr::null_mut(),
-                padding + 295,
+                padding + 365,
                 btn_y,
                 100,
                 btn_height,
@@ -366,7 +396,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_force,
                 std::ptr::null_mut(),
-                padding + 400,
+                padding + 470,
                 btn_y,
                 65,
                 btn_height,
@@ -377,7 +407,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_process,
                 std::ptr::null_mut(),
-                padding + 470,
+                padding + 540,
                 btn_y,
                 110, // Increased from 90 to fit "Process Selected"
                 btn_height,
@@ -388,7 +418,7 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_cancel,
                 std::ptr::null_mut(),
-                padding + 590, // Adjusted from 565 to account for wider Process button
+                padding + 660, // Adjusted from 565 to account for wider Process button
                 btn_y,
                 70,
                 btn_height,
@@ -403,6 +433,7 @@ impl Component for ActionPanel {
             apply_button_theme(self.hwnd_files, is_dark);
             apply_button_theme(self.hwnd_folder, is_dark);
             apply_button_theme(self.hwnd_remove, is_dark);
+            apply_button_theme(self.hwnd_clear, is_dark);
             apply_accent_button_theme(self.hwnd_process, is_dark);
             apply_button_theme(self.hwnd_cancel, is_dark);
             apply_button_theme(self.hwnd_force, is_dark); // Checkbox uses button theme

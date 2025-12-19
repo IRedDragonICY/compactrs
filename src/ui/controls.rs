@@ -22,6 +22,7 @@ pub const IDC_COMBO_ACTION_MODE: u16 = 120;
 pub const IDC_LBL_ACTION_MODE: u16 = 121;
 pub const IDC_LBL_ALGO: u16 = 122;
 pub const IDC_LBL_INPUT: u16 = 123;
+pub const IDC_BTN_CLEAR: u16 = 124;
 
 // Helper untuk update tema dinamis (digunakan saat switch theme)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
