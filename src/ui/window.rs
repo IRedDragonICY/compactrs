@@ -221,6 +221,12 @@ impl WindowHandler for AppState {
                     Some(0)
                 },
                 
+                // Custom Message: Set Low Power Mode
+                0x8007 => {
+                    self.low_power_mode = wparam != 0;
+                    Some(0)
+                },
+                
                 // Custom Message: Query Force Stop
                 0x8004 => {
                     let should_kill = self.handle_force_stop_request(hwnd, wparam);
@@ -666,6 +672,7 @@ impl AppState {
             }
             self.config.theme = self.theme;
             self.config.enable_force_stop = self.enable_force_stop;
+            self.config.low_power_mode = self.low_power_mode;
             self.config.save();
             
             // Force explicit process exit to ensure all threads terminate

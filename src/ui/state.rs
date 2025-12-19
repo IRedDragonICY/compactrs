@@ -218,6 +218,7 @@ pub struct AppState {
     pub console_hwnd: Option<HWND>,
     pub force_compress: bool,
     pub enable_force_stop: bool,
+    pub low_power_mode: bool,
     pub taskbar: Option<super::taskbar::TaskbarProgress>,
     
     // Sorting state
@@ -233,6 +234,12 @@ impl AppState {
     pub fn new() -> Self {
         let (tx, rx) = channel();
         let config = AppConfig::load();
+        
+        // Apply Eco Mode immediately if saved in config
+        if config.low_power_mode {
+            crate::engine::power::set_process_eco_mode(true);
+        }
+
         Self {
             batch_items: Vec::new(),
             next_item_id: 1,
@@ -246,6 +253,7 @@ impl AppState {
             console_hwnd: None,
             force_compress: config.force_compress,
             enable_force_stop: config.enable_force_stop,
+            low_power_mode: config.low_power_mode,
             taskbar: None,
             sort_column: -1,
             sort_ascending: true,

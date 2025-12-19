@@ -136,11 +136,12 @@ pub unsafe fn start_processing(st: &mut AppState, hwnd: HWND, indices_to_process
         
         let force = st.force_compress;
         let guard = st.config.enable_system_guard;
+        let low_power = st.low_power_mode;
         let main_hwnd_usize = hwnd as usize;
         
         // Launch Worker Thread
         thread::spawn(move || {
-            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard);
+            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard, low_power);
         });
     }
 }
@@ -161,8 +162,8 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
 pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     let current_theme = st.theme;
     let is_dark = theme::resolve_mode(st.theme);
-    let (new_theme, new_force, new_ctx, new_guard) = crate::ui::dialogs::show_settings_modal(
-        hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard
+    let (new_theme, new_force, new_ctx, new_guard, new_low_power) = crate::ui::dialogs::show_settings_modal(
+        hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard, st.low_power_mode
     );
     
     if let Some(t) = new_theme {
@@ -175,6 +176,10 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     st.enable_force_stop = new_force;
     st.config.enable_context_menu = new_ctx;
     st.config.enable_system_guard = new_guard;
+    st.low_power_mode = new_low_power;
+    
+    // Apply Process Eco Mode immediately
+    crate::engine::power::set_process_eco_mode(st.low_power_mode);
 }
 
 // --- Notification Handlers (ListView) ---

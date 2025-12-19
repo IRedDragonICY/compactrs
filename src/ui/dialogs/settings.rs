@@ -30,6 +30,7 @@ const IDC_BTN_CANCEL: u16 = 2006;
 const IDC_CHK_FORCE_STOP: u16 = 2007;
 const IDC_CHK_CONTEXT_MENU: u16 = 2008;
 const IDC_CHK_SYSTEM_GUARD: u16 = 2009;
+const IDC_CHK_LOW_POWER: u16 = 2013;
 
 struct SettingsState {
     theme: AppTheme,
@@ -38,6 +39,7 @@ struct SettingsState {
     enable_force_stop: bool, // Track checkbox state
     enable_context_menu: bool, // Track context menu checkbox state
     enable_system_guard: bool, // Track system guard checkbox state
+    low_power_mode: bool,      // Track low power mode checkbox state
     update_status: UpdateStatus,
 }
 
@@ -57,14 +59,14 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 
 
 // Main settings modal function with proper data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool) -> (Option<AppTheme>, bool, bool, bool) {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool) -> (Option<AppTheme>, bool, bool, bool, bool) {
     // Check if window already exists
     let class_name = to_wstring("CompactRS_Settings");
     let existing_hwnd = FindWindowW(class_name.as_ptr(), std::ptr::null());
     if existing_hwnd != std::ptr::null_mut() {
         ShowWindow(existing_hwnd, SW_RESTORE);
         SetForegroundWindow(existing_hwnd);
-        return (None, enable_force_stop, enable_context_menu, enable_system_guard);
+        return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode);
     }
     
     let mut state = SettingsState {
@@ -74,6 +76,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         enable_force_stop,
         enable_context_menu,
         enable_system_guard,
+        low_power_mode,
         update_status: UpdateStatus::Idle,
     };
 
@@ -83,13 +86,13 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     show_modal(
         WindowBuilder::new(&mut state, "CompactRS_Settings", SETTINGS_TITLE)
             .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
-            .size(300, 400)
+            .size(300, 440)
             .align(WindowAlignment::CenterOnParent)
             .background(bg_brush), // Optional, builder handles it if passed
         parent
     );
     
-    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard)
+    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode)
 }
 
 impl WindowHandler for SettingsState {
@@ -163,11 +166,21 @@ impl WindowHandler for SettingsState {
                 .checked(self.enable_system_guard)
                 .build();
 
+            // Checkbox: Low Power Mode
+            let _chk_low_power = ControlBuilder::new(hwnd, IDC_CHK_LOW_POWER)
+                .checkbox()
+                .text("Enable Low Power Mode (Eco)")
+                .pos(30, 250)
+                .size(240, 25)
+                .dark_mode(is_dark_mode)
+                .checked(self.low_power_mode)
+                .build();
+
             // Updates Section
             let _btn_update = ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
                 .button()
                 .text("Check for Updates")
-                .pos(30, 250)
+                .pos(30, 290)
                 .size(150, 25)
                 .dark_mode(is_dark_mode)
                 .build();
@@ -175,7 +188,7 @@ impl WindowHandler for SettingsState {
             let _btn_ti = ControlBuilder::new(hwnd, IDC_BTN_RESTART_TI)
                 .button()
                 .text("Restart as TrustedInstaller")
-                .pos(30, 320)
+                .pos(30, 360)
                 .size(240, 25)
                 .dark_mode(is_dark_mode)
                 .build();
@@ -193,7 +206,7 @@ impl WindowHandler for SettingsState {
             let _h_lbl = ControlBuilder::new(hwnd, IDC_LBL_UPDATE_STATUS)
                 .label(false) // left-aligned
                 .text(&("Current Version: ".to_string() + env!("APP_VERSION")))
-                .pos(30, 280)
+                .pos(30, 320)
                 .size(240, 40)
                 .dark_mode(self.is_dark)
                 .build();
@@ -202,7 +215,7 @@ impl WindowHandler for SettingsState {
             let _close_btn = ControlBuilder::new(hwnd, IDC_BTN_CANCEL)
                 .button()
                 .text("Close")
-                .pos(190, 250)
+                .pos(190, 290)
                 .size(80, 25)
                 .dark_mode(self.is_dark)
                 .build();
@@ -290,7 +303,7 @@ impl WindowHandler for SettingsState {
                                     
                                     // 5. Update controls theme
                                     use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
-                                    let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI];
+                                    let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_CHK_LOW_POWER, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI];
 
                                     for &ctrl_id in &controls {
                                         let h_ctl = GetDlgItem(hwnd, ctrl_id as i32);
@@ -298,7 +311,7 @@ impl WindowHandler for SettingsState {
                                             // Map ID to ControlType roughly
                                             let ctl_type = match ctrl_id {
                                                 IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
-                                                IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD => crate::ui::theme::ControlType::CheckBox,
+                                                IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD | IDC_CHK_LOW_POWER => crate::ui::theme::ControlType::CheckBox,
                                                 IDC_BTN_CANCEL | IDC_BTN_CHECK_UPDATE | IDC_BTN_RESTART_TI => crate::ui::theme::ControlType::Button,
                                                 _ => crate::ui::theme::ControlType::RadioButton, // Radio buttons
                                             };
@@ -361,46 +374,64 @@ impl WindowHandler for SettingsState {
                               }
                           },
                           IDC_CHK_CONTEXT_MENU => {
-                              if (code as u32) == BN_CLICKED {
+                               if (code as u32) == BN_CLICKED {
+                                    let mut checked = false;
+                                    let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
+                                    if h_ctl != std::ptr::null_mut() {
+                                        checked = SendMessageW(h_ctl, BM_GETCHECK, 0, 0) == 1;
+                                        self.enable_context_menu = checked;
+                                    }
+                                    
+                                    // Perform registry operation
+                                    if checked {
+                                        if let Err(_e) = crate::registry::register_context_menu() {
+                                            // Show error, revert checkbox
+                                            let msg = to_wstring("Failed to register context menu. Run as Administrator.");
+                                            let title = to_wstring("Error");
+                                            
+                                            MessageBoxW(
+                                                hwnd,
+                                                msg.as_ptr(),
+                                                title.as_ptr(),
+                                                MB_ICONERROR | MB_OK
+                                            );
+                                            self.enable_context_menu = false;
+                                            
+                                            let h_ctl_revert = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
+                                            if h_ctl_revert != std::ptr::null_mut() {
+                                                SendMessageW(h_ctl_revert, BM_SETCHECK, 0, 0);
+                                            }
+                                        }
+                                    } else {
+                                        let _ = crate::registry::unregister_context_menu();
+                                    }
+                                    
+                                    // Notify Parent immediately (WM_APP + 5)
+                                    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                    let parent = GetParent(hwnd);
+                                    if parent != std::ptr::null_mut() {
+                                        let val = if self.enable_context_menu { 1 } else { 0 };
+                                        SendMessageW(parent, 0x8000 + 5, val as WPARAM, 0);
+                                    }
+                               }
+                          },
+                          IDC_CHK_LOW_POWER => {
+                               if (code as u32) == BN_CLICKED {
                                    let mut checked = false;
-                                   let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
-                                   if h_ctl != std::ptr::null_mut() {
-                                       checked = SendMessageW(h_ctl, BM_GETCHECK, 0, 0) == 1;
-                                       self.enable_context_menu = checked;
-                                   }
-                                   
-                                   // Perform registry operation
-                                   if checked {
-                                       if let Err(_e) = crate::registry::register_context_menu() {
-                                           // Show error, revert checkbox
-                                           let msg = to_wstring("Failed to register context menu. Run as Administrator.");
-                                           let title = to_wstring("Error");
-                                           
-                                           MessageBoxW(
-                                               hwnd,
-                                               msg.as_ptr(),
-                                               title.as_ptr(),
-                                               MB_ICONERROR | MB_OK
-                                           );
-                                           self.enable_context_menu = false;
-                                           
-                                           let h_ctl_revert = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
-                                           if h_ctl_revert != std::ptr::null_mut() {
-                                               SendMessageW(h_ctl_revert, BM_SETCHECK, 0, 0);
-                                           }
-                                       }
-                                   } else {
-                                       let _ = crate::registry::unregister_context_menu();
-                                   }
-                                   
-                                   // Notify Parent immediately (WM_APP + 5)
-                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
-                                   let parent = GetParent(hwnd);
-                                   if parent != std::ptr::null_mut() {
-                                       let val = if self.enable_context_menu { 1 } else { 0 };
-                                       SendMessageW(parent, 0x8000 + 5, val as WPARAM, 0);
-                                   }
-                              }
+                                    let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_LOW_POWER as i32);
+                                    if h_ctl != std::ptr::null_mut() {
+                                        checked = SendMessageW(h_ctl, BM_GETCHECK, 0, 0) == 1;
+                                        self.low_power_mode = checked;
+                                    }
+                                    
+                                    // Notify Parent immediately (WM_APP + 7)
+                                    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                    let parent = GetParent(hwnd);
+                                    if parent != std::ptr::null_mut() {
+                                        let val = if checked { 1 } else { 0 };
+                                        SendMessageW(parent, 0x8000 + 7, val as WPARAM, 0);
+                                    }
+                               }
                           },
                           IDC_CHK_SYSTEM_GUARD => {
                               if (code as u32) == BN_CLICKED {

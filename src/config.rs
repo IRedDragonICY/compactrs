@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub window_y: i32,
     pub enable_context_menu: bool,
     pub enable_system_guard: bool,
+    pub low_power_mode: bool,
 }
 
 impl Default for AppConfig {
@@ -38,6 +39,7 @@ impl Default for AppConfig {
             window_y: -1,
             enable_context_menu: false,
             enable_system_guard: true,
+            low_power_mode: false,
         }
     }
 }

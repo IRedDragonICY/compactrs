@@ -709,6 +709,7 @@ pub fn batch_process_worker(
     force: bool,
     main_hwnd: usize,
     guard_enabled: bool,
+    low_power_mode: bool,
 ) {
     // RAII guard: Prevent system sleep for the duration of batch processing.
     // Automatically resets on drop (panic-safe).
@@ -741,7 +742,12 @@ pub fn batch_process_worker(
     }
     
     let _ = tx.send(UiMessage::Progress(0, total_files));
-    let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let parallelism = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let num_threads = if low_power_mode {
+        std::cmp::max(1, parallelism / 4)
+    } else {
+        parallelism
+    };
     
     let total_w = u64_to_wstring(total_files);
     let threads_w = u64_to_wstring(num_threads as u64);
@@ -827,6 +833,11 @@ pub fn batch_process_worker(
             s.spawn(move || {
                 // Enable backup privileges ONCE per thread (reduces syscalls)
                 crate::engine::wof::enable_backup_privileges();
+                
+                // Apply Low Power Mode if requested
+                if low_power_mode {
+                    crate::engine::power::enable_eco_mode();
+                }
                 
                 // Consume tasks from channel
                 while let Some(task) = shared_rx_clone.recv() {
