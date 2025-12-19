@@ -20,6 +20,7 @@ use crate::ui::controls::apply_button_theme;
 pub struct HeaderPanelIds {
     pub btn_settings: u16,
     pub btn_about: u16,
+    pub btn_shortcuts: u16,
     pub btn_console: u16,
 }
 
@@ -32,6 +33,7 @@ pub struct HeaderPanelIds {
 pub struct HeaderPanel {
     hwnd_settings: HWND,
     hwnd_about: HWND,
+    hwnd_shortcuts: HWND,
     hwnd_console: HWND,
     ids: HeaderPanelIds,
 }
@@ -44,6 +46,7 @@ impl HeaderPanel {
         Self {
             hwnd_settings: std::ptr::null_mut(),
             hwnd_about: std::ptr::null_mut(),
+            hwnd_shortcuts: std::ptr::null_mut(),
             hwnd_console: std::ptr::null_mut(),
             ids,
         }
@@ -59,6 +62,12 @@ impl HeaderPanel {
     #[inline]
     pub fn about_hwnd(&self) -> HWND {
         self.hwnd_about
+    }
+
+    /// Returns the Shortcuts button HWND.
+    #[inline]
+    pub fn shortcuts_hwnd(&self) -> HWND {
+        self.hwnd_shortcuts
     }
 
     /// Returns the Console button HWND.
@@ -80,6 +89,7 @@ impl HeaderPanel {
         
         SendMessageW(self.hwnd_settings, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_about, WM_SETFONT, wparam, lparam);
+        SendMessageW(self.hwnd_shortcuts, WM_SETFONT, wparam, lparam);
         SendMessageW(self.hwnd_console, WM_SETFONT, wparam, lparam);
     }
 }
@@ -99,6 +109,10 @@ impl Component for HeaderPanel {
 
             self.hwnd_about = ButtonBuilder::new(parent, self.ids.btn_about)
                 .text("?")
+                .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
+
+            self.hwnd_shortcuts = ButtonBuilder::new(parent, self.ids.btn_shortcuts)
+                .text("\u{2328}")
                 .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
 
             self.hwnd_console = ButtonBuilder::new(parent, self.ids.btn_console)
@@ -144,11 +158,22 @@ impl Component for HeaderPanel {
                 SWP_NOZORDER,
             );
 
-            // Position Console button (Left of About)
+            // Position Shortcuts button (Left of About)
+            SetWindowPos(
+                self.hwnd_shortcuts,
+                std::ptr::null_mut(),
+                width - padding - btn_width - 70,
+                padding,
+                btn_width,
+                header_height,
+                SWP_NOZORDER,
+            );
+
+            // Position Console button (Left of Shortcuts)
             SetWindowPos(
                 self.hwnd_console,
                 std::ptr::null_mut(),
-                width - padding - btn_width - 70,
+                width - padding - btn_width - 105,
                 padding,
                 btn_width,
                 header_height,
@@ -161,6 +186,7 @@ impl Component for HeaderPanel {
         unsafe {
             apply_button_theme(self.hwnd_settings, is_dark);
             apply_button_theme(self.hwnd_about, is_dark);
+            apply_button_theme(self.hwnd_shortcuts, is_dark);
             apply_button_theme(self.hwnd_console, is_dark);
         }
     }

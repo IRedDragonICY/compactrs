@@ -30,7 +30,7 @@ use windows_sys::Win32::UI::Controls::{
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
     LVN_ITEMCHANGED, BST_CHECKED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NMLISTVIEW,
 };
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_DELETE, VK_CONTROL};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_DELETE, VK_CONTROL, VK_SHIFT};
 
 #[link(name = "user32")]
 unsafe extern "system" {
@@ -42,7 +42,7 @@ use windows_sys::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_AL
 use crate::ui::controls::{
     IDC_COMBO_ALGO, IDC_STATIC_TEXT, IDC_PROGRESS_BAR, IDC_BTN_CANCEL, IDC_BATCH_LIST,
     IDC_BTN_ADD_FOLDER, IDC_BTN_REMOVE, IDC_BTN_PROCESS_ALL, IDC_BTN_ADD_FILES,
-    IDC_BTN_SETTINGS, IDC_BTN_ABOUT, IDC_BTN_CONSOLE, IDC_CHK_FORCE, IDC_COMBO_ACTION_MODE,
+    IDC_BTN_SETTINGS, IDC_BTN_ABOUT, IDC_BTN_SHORTCUTS, IDC_BTN_CONSOLE, IDC_CHK_FORCE, IDC_COMBO_ACTION_MODE,
     IDC_LBL_ACTION_MODE, IDC_LBL_ALGO, IDC_LBL_INPUT,
 };
 use crate::ui::components::{
@@ -51,6 +51,7 @@ use crate::ui::components::{
 };
 use crate::ui::settings::show_settings_modal;
 use crate::ui::about::show_about_modal;
+use crate::ui::shortcuts::show_shortcuts_modal;
 use crate::ui::console::{show_console_window, append_log_msg};
 use crate::ui::state::{AppState, Controls, UiMessage, BatchAction, BatchStatus, AppTheme, ProcessingState};
 use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
@@ -234,6 +235,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             let mut header_panel = HeaderPanel::new(HeaderPanelIds {
                 btn_settings: IDC_BTN_SETTINGS,
                 btn_about: IDC_BTN_ABOUT,
+                btn_shortcuts: IDC_BTN_SHORTCUTS,
                 btn_console: IDC_BTN_CONSOLE,
             });
             let _ = header_panel.create(hwnd);
@@ -397,26 +399,52 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             0
         }
         
-        // WM_KEYDOWN: Handle Ctrl+V for Paste
+        // WM_KEYDOWN: Handle Shortcuts (Ctrl+V, Ctrl+O, Ctrl+Shift+O, Ctrl+A, Del)
         0x0100 => { // WM_KEYDOWN
             let vk = wparam as u16;
-            if vk == 0x56 { // 'V'
-                 let ctrl_state = GetKeyState(VK_CONTROL as i32) as u16;
-                 if (ctrl_state & 0x8000) != 0 {
-                      // Ctrl + V detected
-                      // 15 = CF_HDROP
-                      if IsClipboardFormatAvailable(15) != 0 {
-                          if OpenClipboard(hwnd) != 0 {
-                               let hdrop = GetClipboardData(15) as HDROP;
-                               if !hdrop.is_null() {
-                                   if let Some(st) = get_state() {
-                                       process_hdrop(hwnd, hdrop, st);
-                                   }
-                               }
-                               CloseClipboard();
-                          }
-                      }
-                 }
+            let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
+            let shift_pressed = (GetKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
+
+            if ctrl_pressed {
+                match vk {
+                    0x56 => { // 'V' - Paste
+                        if IsClipboardFormatAvailable(15) != 0 {
+                            if OpenClipboard(hwnd) != 0 {
+                                let hdrop = GetClipboardData(15) as HDROP;
+                                if !hdrop.is_null() {
+                                    if let Some(st) = get_state() {
+                                        process_hdrop(hwnd, hdrop, st);
+                                    }
+                                }
+                                CloseClipboard();
+                            }
+                        }
+                    },
+                    0x4F => { // 'O' - Open
+                        if shift_pressed {
+                            // Ctrl + Shift + O -> Add Folder
+                            SendMessageW(hwnd, WM_COMMAND, IDC_BTN_ADD_FOLDER as usize, 0);
+                        } else {
+                            // Ctrl + O -> Add Files
+                            SendMessageW(hwnd, WM_COMMAND, IDC_BTN_ADD_FILES as usize, 0);
+                        }
+                    },
+                    0x41 => { // 'A' - Select All
+                         if let Some(st) = get_state() {
+                             if let Some(ctrls) = &st.controls {
+                                 let count = ctrls.file_list.get_item_count();
+                                 if count > 0 {
+                                    for i in 0..count {
+                                        ctrls.file_list.set_selected(i, true);
+                                    }
+                                 }
+                             }
+                         }
+                    },
+                    _ => {}
+                }
+            } else if vk == VK_DELETE as u16 {
+                SendMessageW(hwnd, WM_COMMAND, IDC_BTN_REMOVE as usize, 0);
             }
             0
         }
@@ -601,6 +629,12 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                      if let Some(st) = get_state() {
                          let is_dark = theme::resolve_mode(st.theme);
                          show_about_modal(hwnd, is_dark);
+                     }
+                 },
+                 IDC_BTN_SHORTCUTS => {
+                     if let Some(st) = get_state() {
+                         let is_dark = theme::resolve_mode(st.theme);
+                         show_shortcuts_modal(hwnd, is_dark);
                      }
                  },
                  IDC_BTN_CONSOLE => {

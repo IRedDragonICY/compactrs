@@ -6,6 +6,7 @@ pub mod state;
 pub mod settings;
 pub mod dialogs;
 pub mod about;
+pub mod shortcuts;
 pub mod console;
 pub mod utils;
 pub mod builder;

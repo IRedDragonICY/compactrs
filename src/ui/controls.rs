@@ -15,6 +15,7 @@ pub const IDC_BTN_PROCESS_ALL: u16 = 113;
 pub const IDC_BTN_ADD_FILES: u16 = 114;
 pub const IDC_BTN_SETTINGS: u16 = 115;
 pub const IDC_BTN_ABOUT: u16 = 116;
+pub const IDC_BTN_SHORTCUTS: u16 = 117;
 pub const IDC_BTN_CONSOLE: u16 = 118;
 pub const IDC_CHK_FORCE: u16 = 119;
 pub const IDC_COMBO_ACTION_MODE: u16 = 120;

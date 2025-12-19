@@ -5,13 +5,16 @@ use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MessageBoxW, TranslateMessage, 
     MB_ICONERROR, MB_OK, MSG, WM_QUIT, SW_SHOW, FindWindowW, SendMessageW,
-    WM_COPYDATA,
+    WM_COPYDATA, WM_COMMAND, WM_KEYDOWN,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_DELETE};
 use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
 use windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW;
 use std::ptr;
 use std::sync::OnceLock;
+
+use crate::ui::controls::{IDC_BTN_ADD_FILES, IDC_BTN_ADD_FOLDER, IDC_BTN_REMOVE};
 
 pub mod ui;
 pub mod engine;
@@ -205,11 +208,15 @@ fn main() {
         let instance = GetModuleHandleW(ptr::null());
         
         // We'll update create_main_window to accept isize (HINSTANCE)
-        if let Err(e) = ui::window::create_main_window(instance) {
-            let msg = to_wstring(&("Failed to create main window: ".to_string() + &e.to_string()));
-            MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), to_wstring("Error").as_ptr(), MB_ICONERROR | MB_OK);
-            std::process::exit(1);
-        }
+        // We'll update create_main_window to accept isize (HINSTANCE)
+        let hwnd_main = match ui::window::create_main_window(instance) {
+            Ok(h) => h,
+            Err(e) => {
+                let msg = to_wstring(&("Failed to create main window: ".to_string() + &e.to_string()));
+                MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), to_wstring("Error").as_ptr(), MB_ICONERROR | MB_OK);
+                std::process::exit(1);
+            }
+        };
 
         // Message Loop
         let mut msg: MSG = std::mem::zeroed();
@@ -220,7 +227,56 @@ fn main() {
                 break;
             }
 
-            // TODO: Add TranslateAcceleratorW here if we add an accelerator table later
+            // Global Shortcuts Interception
+            if msg.message == WM_KEYDOWN {
+                let vk = msg.wParam as u16;
+                let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
+                let shift_pressed = (GetKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
+                
+                let mut handled = false;
+                
+                if ctrl_pressed {
+                    match vk {
+                        0x4F => { // 'O'
+                            if shift_pressed {
+                                // Ctrl+Shift+O -> Add Folder
+                                SendMessageW(hwnd_main, WM_COMMAND, IDC_BTN_ADD_FOLDER as usize, 0);
+                                handled = true;
+                            } else {
+                                // Ctrl+O -> Add Files
+                                SendMessageW(hwnd_main, WM_COMMAND, IDC_BTN_ADD_FILES as usize, 0);
+                                handled = true;
+                            }
+                        },
+                         0x41 => { // 'A' - Select All
+                             // Only if we want to force global Select All. 
+                             // But let's only do it if focus is not in an edit control (not present here).
+                             // We'll let ListView handle it if focused, or intercept? 
+                             // Since user complained about shortcuts, let's force it via Main Window logic
+                             // But Main Window logic for Ctrl+A sets ListView selection.
+                             // So it is safe to always trigger it.
+                             // We need to route it to Main Window wnd_proc logic for 'A' or manually trigger logic.
+                             // Window.rs wnd_proc has 0x41 handler. 
+                             // We can't SendMessage(WM_KEYDOWN) effectively to parent if child has focus without refocusing?
+                             // Actually, we can just invoke logic. But window.rs logic is inside wnd_proc.
+                             // Sending WM_KEYDOWN to hwnd_main works but wnd_proc handles logic.
+                             // Let's forward the KEYDOWN message to hwnd_main!
+                             SendMessageW(hwnd_main, WM_KEYDOWN, vk as usize, 0);
+                             handled = true;
+                         },
+                        _ => {}
+                    }
+                } else if vk == VK_DELETE as u16 {
+                     // Propagate Delete to main window to trigger removal
+                     // Send WM_COMMAND directly
+                     SendMessageW(hwnd_main, WM_COMMAND, IDC_BTN_REMOVE as usize, 0);
+                     handled = true;
+                }
+                
+                if handled {
+                    continue;
+                }
+            }
             
             // Dispatch key events manually if needed or just translate
             TranslateMessage(&msg);
