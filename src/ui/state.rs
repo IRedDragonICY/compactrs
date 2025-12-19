@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
 use crate::ui::components::{FileListView, Component};
-use crate::engine::worker::scan_path_metrics;
+use crate::engine::worker::scan_path_streaming;
 use crate::utils::to_wstring;
 use std::thread;
 
@@ -58,6 +58,8 @@ pub enum UiMessage {
     BatchItemProgress(u32, u64, u64),    // Individual item progress (id, current, total)
     /// Row update for ListView: (row_index, progress_wide, status_wide, size_after_wide)
     RowUpdate(i32, Vec<u16>, Vec<u16>, Vec<u16>),
+    /// Incremental scan progress: (id, logical_size, disk_size, file_count)
+    ScanProgress(u32, u64, u64, u64),
     Log(Vec<u16>),
     Status(Vec<u16>),
     Finished,
@@ -332,8 +334,8 @@ impl AppState {
         // Spawn analysis thread
         thread::spawn(move || {
             for (id, path, algo) in items_to_analyze {
-                 // Single-pass scan: gathers logical size, disk size, and compression state together
-                 let metrics = scan_path_metrics(&path);
+                 // Single-pass scan with streaming updates
+                 let metrics = scan_path_streaming(id, &path, tx.clone(), None);
                  let _ = tx.send(UiMessage::BatchItemAnalyzed(id, metrics.logical_size, metrics.disk_size, metrics.compression_state));
                  
                  // Estimate compressed size

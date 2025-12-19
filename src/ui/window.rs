@@ -470,6 +470,37 @@ impl AppState {
                          windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
                      }
                  },
+                 UiMessage::ScanProgress(id, logical, disk, count) => {
+                     if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
+                         if let Some(item) = self.batch_items.get_mut(pos) {
+                             item.logical_size = logical;
+                             item.disk_size = disk;
+                         }
+
+                         if let Some(ctrls) = &self.controls {
+                             let log_str = format_size(logical);
+                             let disk_str = format_size(disk);
+                             let count_str = u64_to_wstring(count);
+                             
+                             ctrls.file_list.update_item_text(pos as i32, 4, log_str);
+                             ctrls.file_list.update_item_text(pos as i32, 6, disk_str);
+                             
+                             let status_text = concat_wstrings(&[&to_wstring("Scanning... "), &count_str]);
+                             ctrls.file_list.update_item_text(pos as i32, 8, status_text);
+
+                             if let Some(item) = self.batch_items.get(pos) {
+                                 let sb_msg = concat_wstrings(&[
+                                     &to_wstring("Scanning: "), 
+                                     &to_wstring(&item.path), 
+                                     &to_wstring("... ("), 
+                                     &count_str, 
+                                     &to_wstring(" files)")
+                                 ]);
+                                 SetWindowTextW(ctrls.status_bar.label_hwnd(), sb_msg.as_ptr());
+                             }
+                         }
+                     }
+                 },
                  UiMessage::RowUpdate(row, progress, status, _) => {
                      if let Some(ctrls) = &self.controls {
                          ctrls.file_list.update_item_text(row, 7, progress);

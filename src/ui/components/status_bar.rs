@@ -171,7 +171,7 @@ impl Component for StatusBar {
                 std::ptr::null_mut(),
                 padding,
                 label_y,
-                width - padding - 120,
+                width - padding - 160,
                 header_height,
                 SWP_NOZORDER,
             );

@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, Ordering}};
+use std::time::Instant;
 use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use crate::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
@@ -141,6 +142,92 @@ pub fn scan_path_metrics(path: &str) -> PathMetrics {
             }
         }
     });
+
+    // Resolve compression state
+    metrics.compression_state = if seen_algos.is_empty() {
+        crate::engine::wof::CompressionState::None
+    } else if seen_algos.len() > 1 {
+        crate::engine::wof::CompressionState::Mixed
+    } else {
+        let algo_val = seen_algos.into_iter().next().unwrap();
+        match algo_val {
+            0 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Xpress4K),
+            1 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Lzx),
+            2 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Xpress8K),
+            3 => crate::engine::wof::CompressionState::Specific(WofAlgorithm::Xpress16K),
+            _ => crate::engine::wof::CompressionState::None,
+        }
+    };
+
+    metrics
+}
+
+/// Single-pass scanner that streams progress updates to the UI.
+/// Used for real-time feedback during "Calculating..." phase.
+pub fn scan_path_streaming(
+    id: u32,
+    path: &str,
+    tx: Sender<UiMessage>,
+    state: Option<&Arc<AtomicU8>>,
+) -> PathMetrics {
+    let p = std::path::Path::new(path);
+    
+    if p.is_file() {
+        // Single file: direct metadata access (no streaming needed)
+        let logical = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let disk = get_real_file_size(path);
+        let state_val = match get_wof_algorithm(path) {
+            Some(algo) => crate::engine::wof::CompressionState::Specific(algo),
+            None => crate::engine::wof::CompressionState::None,
+        };
+        // Send one update to ensure UI is consistent
+        let _ = tx.send(UiMessage::ScanProgress(id, logical, disk, 1));
+        return PathMetrics { logical_size: logical, disk_size: disk, compression_state: state_val, file_count: 1 };
+    }
+    
+    // Directory: single-pass traversal with streaming updates
+    let mut metrics = PathMetrics { 
+        logical_size: 0, disk_size: 0, 
+        compression_state: crate::engine::wof::CompressionState::None, 
+        file_count: 0 
+    };
+    let mut seen_algos = std::collections::HashSet::new();
+    let mut algo_scanned = 0usize;
+    const MAX_ALGO_SCAN: usize = 50;
+
+    let mut last_update = Instant::now();
+    // Throttle updates to ~10fps to avoid clogging the message queue
+    let update_interval = std::time::Duration::from_millis(100);
+
+    walk_directory_generic(path, state, &mut |full_path, is_dir, find_data| {
+        if !is_dir {
+            metrics.file_count += 1;
+            
+            // Logical size from FindData (no extra syscall)
+            let size = ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
+            metrics.logical_size += size;
+            
+            // Disk size (requires handle, unavoidable for WOF)
+            metrics.disk_size += get_real_file_size(full_path);
+            
+            // Sample algorithms
+            if algo_scanned < MAX_ALGO_SCAN {
+                if let Some(algo) = get_wof_algorithm(full_path) {
+                    seen_algos.insert(algo as u32);
+                }
+                algo_scanned += 1;
+            }
+
+            // Send streaming update if enough time has passed
+            if last_update.elapsed() >= update_interval {
+                let _ = tx.send(UiMessage::ScanProgress(id, metrics.logical_size, metrics.disk_size, metrics.file_count));
+                last_update = Instant::now();
+            }
+        }
+    });
+
+    // Send FINAL guaranteed update with exact totals
+    let _ = tx.send(UiMessage::ScanProgress(id, metrics.logical_size, metrics.disk_size, metrics.file_count));
 
     // Resolve compression state
     metrics.compression_state = if seen_algos.is_empty() {
