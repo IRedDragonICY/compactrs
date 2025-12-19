@@ -27,6 +27,15 @@ struct ShortcutsState {
 pub unsafe fn show_shortcuts_modal(parent: HWND, is_dark: bool) {
     let instance = GetModuleHandleW(std::ptr::null());
     let class_name = to_wstring("CompactRS_Shortcuts");
+
+    // Check if window already exists
+    let existing_hwnd = windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW(class_name.as_ptr(), std::ptr::null());
+    if existing_hwnd != std::ptr::null_mut() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SetForegroundWindow, SW_RESTORE};
+        ShowWindow(existing_hwnd, SW_RESTORE);
+        SetForegroundWindow(existing_hwnd);
+        return;
+    }
     let title = to_wstring(SHORTCUTS_TITLE);
 
     // Load App Icon

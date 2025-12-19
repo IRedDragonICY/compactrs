@@ -8,8 +8,8 @@ use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW, InvalidateRect};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_CTLCOLOREDIT, WM_COMMAND,
     CreateWindowExW, DefWindowProcW, DestroyWindow, 
-    LoadCursorW, RegisterClassW, ShowWindow,
-    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, WM_DESTROY, WNDCLASSW,
+    LoadCursorW, RegisterClassW, ShowWindow, SetForegroundWindow, BringWindowToTop,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, SW_SHOW, SW_RESTORE, WM_DESTROY, WNDCLASSW,
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_CREATE, WM_SIZE, SetWindowPos, SWP_NOZORDER,
     WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL,
     SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW,
@@ -39,7 +39,9 @@ pub unsafe fn show_console_window(_parent: HWND, initial_logs: &[Vec<u16>], is_d
         // Update theme if window exists
         update_console_theme(hwnd, is_dark);
         // If already exists, just show and focus
-        ShowWindow(hwnd, SW_SHOW);
+        ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd);
+        BringWindowToTop(hwnd);
         return;
     }
 

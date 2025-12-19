@@ -63,11 +63,21 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 // Main settings modal function with proper data passing
 pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool) -> (Option<AppTheme>, bool, bool, bool) {
     let instance = GetModuleHandleW(std::ptr::null());
+    let class_name = to_wstring("CompactRS_Settings");
+
+    // Check if window already exists
+    let existing_hwnd = FindWindowW(class_name.as_ptr(), std::ptr::null());
+    if existing_hwnd != std::ptr::null_mut() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SetForegroundWindow, SW_RESTORE};
+        ShowWindow(existing_hwnd, SW_RESTORE);
+        SetForegroundWindow(existing_hwnd);
+        return (None, enable_force_stop, enable_context_menu, enable_system_guard);
+    }
+    
     
     // Load App Icon using centralized helper
     let icon = crate::ui::utils::load_app_icon(instance);
     
-    let class_name = to_wstring("CompactRS_Settings");
     let title = to_wstring(SETTINGS_TITLE);
     
     let wc = WNDCLASSW {
