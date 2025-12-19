@@ -9,6 +9,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::ptr;
+use std::path::Path;
 
 use windows_sys::Win32::Storage::Compression::{
     CloseCompressor, Compress, CreateCompressor,
@@ -18,11 +19,21 @@ use windows_sys::Win32::Storage::Compression::{
 
 use crate::engine::wof::WofAlgorithm;
 
-/// Sample size for estimation (256 KB)
+/// Sample size for individual file reading (256 KB)
 const SAMPLE_SIZE: usize = 256 * 1024;
 
 /// Minimum file size to bother estimating (below this, just return file size)
 const MIN_ESTIMATE_SIZE: u64 = 4096;
+
+/// Maximum total bytes to read from disk during folder estimation.
+/// Prevents IO bottlenecks on massive directories (e.g., 50MB limit).
+const MAX_TOTAL_SAMPLE_BYTES: u64 = 50 * 1024 * 1024; 
+
+/// Sampling rate for small files (1 in N files)
+const SMALL_FILE_SAMPLING_RATE: usize = 20;
+
+/// Threshold to consider a file "Large" (1 MB). Large files are always sampled until cap.
+const LARGE_FILE_THRESHOLD: u64 = 1024 * 1024;
 
 /// Maps WofAlgorithm to Windows Compression API algorithm.
 ///
@@ -46,12 +57,10 @@ fn map_algorithm(_algo: WofAlgorithm) -> u32 {
 /// # Returns
 /// Estimated compressed size in bytes
 pub fn estimate_path(path: &str, algo: WofAlgorithm) -> u64 {
-    use std::path::Path;
-    
     let p = Path::new(path);
     
     if p.is_dir() {
-        // For folders, use recursive estimation
+        // For folders, use recursive sampling estimation
         let (_logical, estimated) = estimate_folder_size(path, algo);
         estimated
     } else if p.is_file() {
@@ -76,7 +85,7 @@ pub fn estimate_path(path: &str, algo: WofAlgorithm) -> u64 {
 /// * `algo` - The WOF algorithm to simulate
 ///
 /// # Returns
-/// Estimated compressed size in bytes, or 0 on error
+/// Estimated compressed size in bytes, or original size on error
 pub fn estimate_compressed_size(path: &str, algo: WofAlgorithm) -> u64 {
     // Open file and get metadata
     let mut file = match File::open(path) {
@@ -188,7 +197,12 @@ fn compress_buffer(data: &[u8], algo: WofAlgorithm) -> usize {
     }
 }
 
-/// Estimates compressed sizes for a folder by sampling files.
+/// Estimates compressed sizes for a folder by using SMART SAMPLING.
+///
+/// Instead of reading every file (which kills performance), this function:
+/// 1. Scans all files for accurate Logical Size (metadata only).
+/// 2. Samples specific files for Compression Ratio (content read).
+/// 3. Extrapolates the ratio to the total size.
 ///
 /// # Arguments
 /// * `path` - Path to the folder
@@ -197,42 +211,96 @@ fn compress_buffer(data: &[u8], algo: WofAlgorithm) -> usize {
 /// # Returns
 /// Tuple of (total_logical_size, estimated_compressed_size)
 pub fn estimate_folder_size(path: &str, algo: WofAlgorithm) -> (u64, u64) {
-    use std::path::Path;
-
-    let path = Path::new(path);
-    if !path.is_dir() {
-        // Single file
-        let logical = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        let estimated = estimate_compressed_size(path.to_str().unwrap_or(""), algo);
-        return (logical, estimated);
-    }
-
     let mut total_logical: u64 = 0;
-    let mut total_estimated: u64 = 0;
+    let mut sampled_logical: u64 = 0;
+    let mut sampled_compressed: u64 = 0;
+    let mut file_count: usize = 0;
 
-    // Walk directory
-    if let Ok(entries) = std::fs::read_dir(path) {
+    // Start recursive sampling
+    visit_dirs_sampling(
+        path, 
+        algo, 
+        &mut total_logical, 
+        &mut sampled_logical, 
+        &mut sampled_compressed, 
+        &mut file_count
+    );
+
+    // Calculate ratio from samples
+    let estimated_total = if sampled_logical > 0 {
+        let ratio = sampled_compressed as f64 / sampled_logical as f64;
+        (total_logical as f64 * ratio) as u64
+    } else {
+        // Fallback: If no samples were taken (empty folder or all reads failed),
+        // assume no compression (1:1).
+        total_logical 
+    };
+
+    (total_logical, estimated_total)
+}
+
+/// Recursive helper for smart sampling
+fn visit_dirs_sampling(
+    dir: &str, 
+    algo: WofAlgorithm, 
+    total_log: &mut u64, 
+    samp_log: &mut u64, 
+    samp_comp: &mut u64,
+    count: &mut usize
+) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            let entry_path = entry.path();
-            if entry_path.is_file() {
-                if let Ok(meta) = entry_path.metadata() {
-                    total_logical += meta.len();
-                    total_estimated += estimate_compressed_size(
-                        entry_path.to_str().unwrap_or(""),
-                        algo,
-                    );
+            let path = entry.path();
+            
+            if path.is_dir() {
+                if let Some(s) = path.to_str() {
+                    visit_dirs_sampling(s, algo, total_log, samp_log, samp_comp, count);
                 }
-            } else if entry_path.is_dir() {
-                // Recursively process subdirectories
-                let (sub_logical, sub_estimated) =
-                    estimate_folder_size(entry_path.to_str().unwrap_or(""), algo);
-                total_logical += sub_logical;
-                total_estimated += sub_estimated;
+            } else if path.is_file() {
+                // Get metadata (cheap operation)
+                if let Ok(meta) = path.metadata() {
+                    let len = meta.len();
+                    *total_log += len;
+                    *count += 1;
+
+                    // --- SAMPLING LOGIC ---
+                    
+                    // Condition 1: Have we exceeded the IO Cap?
+                    if *samp_log >= MAX_TOTAL_SAMPLE_BYTES {
+                        continue;
+                    }
+
+                    // Condition 2: Is the file significant enough or is it its turn?
+                    // - Always sample large files (they impact ratio the most)
+                    // - Sample small files sparsely (1 in 20)
+                    let should_sample = if len > LARGE_FILE_THRESHOLD {
+                        true 
+                    } else {
+                        *count % SMALL_FILE_SAMPLING_RATE == 0
+                    };
+
+                    if should_sample {
+                        if let Some(p_str) = path.to_str() {
+                            // Heavy operation: Read + Compress
+                            let est = estimate_compressed_size(p_str, algo);
+                            
+                            // estimate_compressed_size returns 0 on total failure,
+                            // or returns original size if incompressible.
+                            // We treat 0 as a read failure and don't add to sample stats.
+                            // However, we must ensure we only add if it actually processed data.
+                            
+                            // Since estimate_compressed_size handles its own fallback, 
+                            // we rely on it returning a valid number > 0 for valid files.
+                            if est > 0 || len == 0 {
+                                *samp_log += len;
+                                *samp_comp += est;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-
-    (total_logical, total_estimated)
 }
 
 #[cfg(test)]
@@ -244,6 +312,7 @@ mod tests {
         assert_eq!(map_algorithm(WofAlgorithm::Xpress4K), COMPRESS_ALGORITHM_XPRESS_HUFF);
         assert_eq!(map_algorithm(WofAlgorithm::Xpress8K), COMPRESS_ALGORITHM_XPRESS_HUFF);
         assert_eq!(map_algorithm(WofAlgorithm::Xpress16K), COMPRESS_ALGORITHM_XPRESS_HUFF);
-        assert_eq!(map_algorithm(WofAlgorithm::Lzx), COMPRESS_ALGORITHM_LZMS);
+        // We use XPRESS_HUFF for LZX estimation too, with a multiplier, for performance
+        assert_eq!(map_algorithm(WofAlgorithm::Lzx), COMPRESS_ALGORITHM_XPRESS_HUFF);
     }
 }
