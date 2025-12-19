@@ -488,13 +488,15 @@ impl AppState {
                          if let Some(ctrls) = &self.controls {
                              let log_str = format_size(logical);
                              let disk_str = format_size(disk);
+                             let ratio_str = crate::utils::calculate_ratio_string(logical, disk);
                              let count_str = u64_to_wstring(count);
                              
                              ctrls.file_list.update_item_text(pos as i32, 4, log_str);
                              ctrls.file_list.update_item_text(pos as i32, 6, disk_str);
+                             ctrls.file_list.update_item_text(pos as i32, 7, ratio_str); // Ratio
                              
                              let status_text = concat_wstrings(&[&to_wstring("Scanning... "), &count_str]);
-                             ctrls.file_list.update_item_text(pos as i32, 8, status_text);
+                             ctrls.file_list.update_item_text(pos as i32, 9, status_text); // Status is now 9
 
                              if let Some(item) = self.batch_items.get(pos) {
                                  let sb_msg = concat_wstrings(&[
@@ -511,14 +513,27 @@ impl AppState {
                  },
                  UiMessage::RowUpdate(row, progress, status, _) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 7, progress);
-                         ctrls.file_list.update_item_text(row, 8, status);
+                         ctrls.file_list.update_item_text(row, 8, progress); // Progress is now 8
+                         ctrls.file_list.update_item_text(row, 9, status);   // Status is now 9
                      }
                  },
-                 UiMessage::ItemFinished(row, status, disk_size, final_state) => {
+                 UiMessage::ItemFinished(row, status, disk_size_vec, final_state) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 8, status);
-                         if !disk_size.is_empty() && disk_size.len() > 1 { ctrls.file_list.update_item_text(row, 6, disk_size); }
+                         ctrls.file_list.update_item_text(row, 9, status); // Status is now 9
+                         
+                         // Update disk size and ratio if we have a valid disk size string?
+                         // The message passes `disk_size` as Vec<u16> (string).
+                         // We need the numeric values to calculate ratio. 
+                         // Check `self.batch_items[row]`.
+                         // Update Ratio using stored values (Best Effort)
+                         if let Some(item) = self.batch_items.get(row as usize) {
+                             let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, item.disk_size);
+                             ctrls.file_list.update_item_text(row, 7, ratio_str);
+                         }
+                         
+                         if !disk_size_vec.is_empty() && disk_size_vec.len() > 1 { 
+                             ctrls.file_list.update_item_text(row, 6, disk_size_vec); 
+                         }
                          let state_str = match final_state {
                              CompressionState::None => "-",
                              CompressionState::Specific(algo) => match algo {
@@ -528,7 +543,14 @@ impl AppState {
                              CompressionState::Mixed => "Mixed",
                          };
                          ctrls.file_list.update_item_text(row, 1, to_wstring(state_str));
-                         ctrls.file_list.update_item_text(row, 9, to_wstring("▶ Start"));
+                         
+                         // Update Ratio using stored values (Best Effort)
+                         if let Some(item) = self.batch_items.get(row as usize) {
+                             let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, item.disk_size);
+                             ctrls.file_list.update_item_text(row, 7, ratio_str);
+                         }
+
+                         ctrls.file_list.update_item_text(row, 10, to_wstring("▶ Start")); // Start is now 10
                          if let Some(item) = self.batch_items.get_mut(row as usize) {
                              item.status = BatchStatus::Pending;
                              item.state_flag = None;
@@ -538,6 +560,8 @@ impl AppState {
                  UiMessage::BatchItemAnalyzed(id, log, disk, state) => {
                      let log_str = format_size(log);
                      let disk_str = format_size(disk);
+                     let ratio_str = crate::utils::calculate_ratio_string(log, disk);
+                     
                      if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
                          if let Some(item) = self.batch_items.get_mut(pos) {
                              item.logical_size = log;
@@ -547,6 +571,8 @@ impl AppState {
                          if let Some(ctrls) = &self.controls {
                              ctrls.file_list.update_item_text(pos as i32, 4, log_str);
                              ctrls.file_list.update_item_text(pos as i32, 6, disk_str);
+                             ctrls.file_list.update_item_text(pos as i32, 7, ratio_str); // Ratio
+                             
                              let state_str = match state {
                                 CompressionState::None => "-",
                                 CompressionState::Specific(algo) => match algo {
@@ -556,7 +582,7 @@ impl AppState {
                                 CompressionState::Mixed => "Mixed",
                              };
                              ctrls.file_list.update_item_text(pos as i32, 1, to_wstring(state_str));
-                             ctrls.file_list.update_item_text(pos as i32, 8, to_wstring("Pending"));
+                             ctrls.file_list.update_item_text(pos as i32, 9, to_wstring("Pending")); // Status is now 9
                              let count = self.batch_items.len();
                              let count_w = u64_to_wstring(count as u64);
                              let msg = concat_wstrings(&[&count_w, &to_wstring(" item(s) analyzed.")]);

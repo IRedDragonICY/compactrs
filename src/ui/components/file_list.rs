@@ -36,9 +36,10 @@ pub mod columns {
     pub const SIZE: i32 = 4;
     pub const EST_SIZE: i32 = 5;
     pub const ON_DISK: i32 = 6;
-    pub const PROGRESS: i32 = 7;
-    pub const STATUS: i32 = 8;
-    pub const START: i32 = 9;
+    pub const RATIO: i32 = 7;
+    pub const PROGRESS: i32 = 8;
+    pub const STATUS: i32 = 9;
+    pub const START: i32 = 10;
 }
 
 /// A high-level facade for the Win32 ListView control used to display batch items.
@@ -121,9 +122,10 @@ impl FileListView {
             ("Size", 75),
             ("Est. Size", 75),
             ("On Disk", 75),
+            ("Ratio", 60),
             ("Progress", 70),
             ("Status", 80),
-            ("▶ Start", 45),
+            ("▶ Start", 60),
         ];
 
         for (i, (name, width)) in columns.iter().enumerate() {
@@ -250,12 +252,58 @@ impl FileListView {
             lvi.pszText = disk_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
-            // Col 8 = Status (shows Pending)
-            lvi.iSubItem = columns::STATUS;
+            // Col 7 = Ratio
+            // Calculate initial ratio (if logic/disk are available, else "-")
+            // Note: pass strings usually, but here we might need to calculate if passed? 
+            // The caller passes strings, but we can't parse them easily back to u64 here.
+            // Let's rely on update or pass a default "-". 
+            // BETTER: Use what we have. We'll update add_item signature in next step if needed, 
+            // but for now let's just initialize with "-" and let subsequent updates handle it, 
+            // OR we can try to use the passed strings if they are non-empty/valid?
+            // Actually, the best way is to calculate it right here if we had the numbers. 
+            // Since we don't have the raw numbers passed in (only formatted strings), 
+            // let's initialize with "-" for now. Wait, `add_item` is called with `size_logical` etc as strings.
+            // I'll update it to "-" initially.
+            // Wait, the plan said "Update add_item signature OR initialize with -".
+            // Let's initialize with "-" for now as it's safer without changing signature widely yet.
+            // Actually, I can use the helper if I change the signature.
+            // Let's stick to "-" for now to minimize signature churn, 
+            // as `ingest_paths` calls this with "Calculating..." strings anyway.
+            let ratio_wide = to_wstring("-");
+            lvi.iSubItem = columns::RATIO;
+            lvi.pszText = ratio_wide.as_ptr() as *mut _;
+            SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
+
+            // Col 8 = Progress
+            lvi.iSubItem = columns::PROGRESS;
+            // ... (rest shifted)
+            // Wait, I need to match the previous indices? 
+            // Previous: Progress was 7. Now it is 8.
+            // So I need to set index to 8.
+            
+            // Col 8 = Progress (was 7)
+            // We need to provide empty progress initially or what was passed?
+            // `add_item` doesn't take progress string, it sets up defaults.
+            // Actually `add_item` doesn't take progress. It inits with nothing?
+            // Existing code:
+            // // Col 8 = Status (shows Pending)  <-- This was comment for old col 8? No, old col 8 was STATUS.
+            // Let's look at original code:
+            // // Col 8 = Status (shows Pending)
+            // lvi.iSubItem = columns::STATUS;
+            // So Progress col (idx 7 old) was skipped? 
+            // Let's check `setup_columns`:
+            // 7: Progress, 8: Status.
+            // Original `add_item` set `columns::STATUS` (which was 8). 
+            // Did it set Progress? No, it seems it didn't set Progress initially (maybe empty default).
+            
+            // So for new code:
+            // Ratio is 7. Progress is 8. Status is 9. Start is 10.
+            
+            lvi.iSubItem = columns::STATUS; // Now 9
             lvi.pszText = status_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
-            // Col 9 = Start button
+            // Col 10 = Start button
             lvi.iSubItem = columns::START;
             lvi.pszText = start_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
@@ -460,7 +508,7 @@ impl FileListView {
             state: u32,
         }
 
-        const COLUMN_COUNT: i32 = 10; // Total columns defined in setup_columns
+        const COLUMN_COUNT: i32 = 11; // Total columns defined in setup_columns
 
         unsafe {
             // Get the header control handle from the ListView

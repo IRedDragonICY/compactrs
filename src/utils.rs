@@ -113,3 +113,17 @@ pub fn reveal_path_in_explorer(path: &str) {
         );
     }
 }
+
+/// Calculates the compression ratio string (e.g. "40.5%")
+pub fn calculate_ratio_string(logical: u64, disk: u64) -> Vec<u16> {
+    if logical == 0 { return to_wstring("-"); }
+    
+    let ratio = if disk >= logical {
+        0.0
+    } else {
+        100.0 - ((disk as f64 / logical as f64) * 100.0)
+    };
+    
+    let s = format!("{:.1}%", ratio);
+    to_wstring(&s)
+}
