@@ -20,7 +20,7 @@ pub mod registry;
 pub mod utils;
 pub mod updater;
 mod logger;
-pub mod json;
+
 pub mod com;
 
 use crate::engine::wof::WofAlgorithm;

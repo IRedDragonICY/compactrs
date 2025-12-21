@@ -1,5 +1,5 @@
 use windows_sys::Win32::Networking::WinHttp::{
-    WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryDataAvailable,
+    WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
     WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
     WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_FLAG_SECURE,
     WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_LOCATION,
@@ -13,7 +13,40 @@ use std::ffi::c_void;
 use crate::utils::to_wstring;
 use crate::w;
 
-// Pointer Constants (Not always available in windows-sys as pointers)
+fn extract_json_string<'a>(json: &'a str, key_with_quotes: &str) -> Option<&'a str> {
+    let key_idx = json.find(key_with_quotes)?;
+    let after_key = &json[key_idx + key_with_quotes.len()..];
+    let colon_idx = after_key.find(':')?; 
+    let start_quote = after_key[colon_idx..].find('"')? + colon_idx;
+    let after_start_quote = &after_key[start_quote + 1..];
+    let end_quote = after_start_quote.find('"')?;
+    Some(&after_start_quote[..end_quote])
+}
+
+// Helper to find range of the JSON object containing a specific index
+fn find_object_range(json: &str, index: usize) -> Option<(usize, usize)> {
+    // Scan backwards for start '{'
+    let mut balance = 0;
+    let start = json[..index].char_indices().rev().find_map(|(i, c)| {
+        match c {
+            '}' => { balance += 1; None },
+            '{' => if balance == 0 { Some(i) } else { balance -= 1; None },
+            _ => None,
+        }
+    })?;
+
+    // Scan forwards for end '}'
+    let mut balance = 0;
+    let end_offset = json[index..].char_indices().find_map(|(i, c)| {
+        match c {
+            '{' => { balance += 1; None },
+            '}' => if balance == 0 { Some(i) } else { balance -= 1; None },
+            _ => None,
+        }
+    })?;
+
+    Some((start, index + end_offset + 1))
+}
 const WINHTTP_NO_PROXY_NAME: *const u16 = ptr::null();
 const WINHTTP_NO_PROXY_BYPASS: *const u16 = ptr::null();
 const WINHTTP_NO_REFERER: *const u16 = ptr::null();
@@ -60,15 +93,13 @@ struct WinHttpRequest {
 
 // Helper to parse "https://host/path" -> ("host", "/path")
 fn parse_url(url: &str) -> Result<(String, String), String> {
-    let parts: Vec<&str> = url.splitn(4, '/').collect();
-    if parts.len() < 3 {
-        return Err(format!("Invalid URL format: {}", url));
-    }
-    let host = parts[2].to_string();
-    let path = if parts.len() > 3 {
-        format!("/{}", parts[3])
-    } else {
-        "/".to_string()
+    // skip "https://"
+    let content = url.strip_prefix("https://").ok_or_else(|| format!("Invalid URL scheme: {}", url))?;
+    let slash_idx = content.find('/');
+    
+    let (host, path) = match slash_idx {
+        Some(idx) => (content[..idx].to_string(), content[idx..].to_string()),
+        None => (content.to_string(), "/".to_string()),
     };
     Ok((host, path))
 }
@@ -188,19 +219,11 @@ fn read_data_stream<F>(request_handle: &WinHttpHandle, mut writer: F) -> Result<
 where F: FnMut(&[u8]) -> Result<(), String>
 {
     let mut total_bytes = 0;
+    let mut buffer = [0u8; 8192]; // Stack buffer, zero allocation
+    
     loop {
-        let mut size: u32 = 0;
-        if unsafe { WinHttpQueryDataAvailable(request_handle.0, &mut size) } == 0 {
-             // If fails, check if error is expected?
-             // Usually returns FALSE on error.
-             let err = unsafe { GetLastError() };
-             return Err(format!("WinHttpQueryDataAvailable failed: {}", err));
-        }
-        if size == 0 { break; }
-        
-        let mut buffer = vec![0u8; size as usize];
         let mut read: u32 = 0;
-        if unsafe { WinHttpReadData(request_handle.0, buffer.as_mut_ptr() as *mut c_void, size, &mut read) } == 0 {
+        if unsafe { WinHttpReadData(request_handle.0, buffer.as_mut_ptr() as *mut c_void, buffer.len() as u32, &mut read) } == 0 {
              return Err(format!("WinHttpReadData failed: {}", unsafe { GetLastError() }));
         }
         if read == 0 { break; }
@@ -226,15 +249,18 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     })?;
     
     let json_str = String::from_utf8(body).map_err(|e| format!("Invalid UTF-8: {}", e))?;
-    let json = crate::json::parse(&json_str).map_err(|e| format!("JSON parse error: {:?}", e))?;
     
-    // Parse JSON logic
-    let tag_name = json["tag_name"].as_str().ok_or("Missing tag_name")?.to_string();
-    let assets = json["assets"].as_array().ok_or("Missing assets")?;
+    // Parse JSON logic (Zero-dependency string slicing)
+    let tag_name = extract_json_string(&json_str, "\"tag_name\"").ok_or("Missing tag_name")?;
     
-    let download_url = assets.iter()
-        .find(|asset| asset["name"].as_str() == Some("compactrs.exe"))
-        .and_then(|asset| asset["browser_download_url"].as_str())
+    // Asset Logic: Robust search
+    let target = "\"compactrs.exe\"";
+    let download_url = json_str.match_indices(target)
+        .find_map(|(idx, _)| {
+            let (start, end) = find_object_range(&json_str, idx)?;
+            let chunk = &json_str[start..end];
+            extract_json_string(chunk, "\"browser_download_url\"")
+        })
         .ok_or("No compactrs.exe asset found")?
         .to_string();
 
@@ -242,7 +268,7 @@ pub fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
     let remote_version = tag_name.trim_start_matches('v');
     
     if remote_version != current_version {
-         Ok(Some(UpdateInfo { version: tag_name, download_url }))
+         Ok(Some(UpdateInfo { version: tag_name.to_string(), download_url }))
     } else {
         Ok(None)
     }
