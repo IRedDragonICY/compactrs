@@ -187,8 +187,9 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
 pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     let current_theme = st.theme;
     let is_dark = theme::resolve_mode(st.theme);
-    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads) = crate::ui::dialogs::show_settings_modal(
-        hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard, st.low_power_mode, st.config.max_threads
+    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads, new_log_enabled, new_log_mask) = crate::ui::dialogs::show_settings_modal(
+        hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard, st.low_power_mode, st.config.max_threads,
+        st.config.log_enabled, st.config.log_level_mask
     );
     
     if let Some(t) = new_theme {
@@ -203,6 +204,15 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     st.config.enable_system_guard = new_guard;
     st.low_power_mode = new_low_power;
     st.config.max_threads = new_threads;
+    st.config.log_enabled = new_log_enabled;
+    st.config.log_level_mask = new_log_mask;
+    
+    // Update global logger state
+    if st.config.log_enabled {
+        crate::logger::set_log_level(st.config.log_level_mask);
+    } else {
+        crate::logger::set_log_level(0);
+    }
     
     // Apply Process Eco Mode immediately
     crate::engine::power::set_process_eco_mode(st.low_power_mode);

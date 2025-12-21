@@ -3,6 +3,7 @@ use crate::ui::controls::apply_button_theme;
 use crate::ui::builder::ButtonBuilder;
 use crate::ui::framework::{get_window_state, WindowHandler, WindowBuilder, WindowAlignment};
 use crate::utils::to_wstring;
+use crate::logger::LogEntry;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 
@@ -14,19 +15,25 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_SIZE, SetWindowPos, SWP_NOZORDER,
     WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL,
     SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW,
-    HMENU,
+    HMENU, WM_TIMER, SetTimer, KillTimer,
 };
-use windows_sys::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme};
+use windows_sys::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme, EM_SETLIMITTEXT};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData};
 use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows_sys::Win32::Graphics::Gdi::{COLOR_WINDOW, HBRUSH};
+use std::collections::VecDeque;
 
 const CONSOLE_TITLE: &str = "Debug Console";
 const IDC_EDIT_CONSOLE: i32 = 1001;
 const IDC_BTN_COPY: i32 = 1002;
 const IDC_BTN_CLEAR: i32 = 1003;
 const BUTTON_HEIGHT: i32 = 30;
+const TIMER_ID: usize = 1;
+const UPDATE_INTERVAL_MS: u32 = 150;
+const MAX_HISTORY: usize = 1000;
+// Win32 Edit Control Limit (64KB is default, let's bump to 1MB to be safe, but we truncate manually too)
+const EDIT_LIMIT: usize = 1024 * 1024; 
 
 // Registry to track singleton instance
 static mut CONSOLE_HWND: Option<HWND> = None;
@@ -36,9 +43,11 @@ struct ConsoleState {
     btn_copy_hwnd: Option<HWND>,
     btn_clear_hwnd: Option<HWND>,
     is_dark: bool,
+    history: VecDeque<LogEntry>,
+    pending: Vec<LogEntry>,
 }
 
-pub unsafe fn show_console_window(parent: HWND, initial_logs: &[Vec<u16>], is_dark: bool) {
+pub unsafe fn show_console_window(parent: HWND, initial_logs: &VecDeque<LogEntry>, is_dark: bool) {
     if let Some(hwnd) = CONSOLE_HWND {
         // Update theme if window exists
         if let Some(state) = get_window_state::<ConsoleState>(hwnd) {
@@ -55,14 +64,16 @@ pub unsafe fn show_console_window(parent: HWND, initial_logs: &[Vec<u16>], is_da
 
     let bg_brush = (COLOR_WINDOW + 1) as HBRUSH;
     
-    // CRITICAL: Modeless window state must persist after function returns.
-    // We Box and Leak the state. It will be cleaned up (conceptually) when the app exits
-    // or we could manually manage it, but for a Singleton that lasts program lifetime, leaking is acceptable.
+    let mut history = VecDeque::with_capacity(MAX_HISTORY);
+    history.extend(initial_logs.iter().cloned());
+
     let state = Box::new(ConsoleState {
         edit_hwnd: None,
         btn_copy_hwnd: None,
         btn_clear_hwnd: None,
         is_dark,
+        history, 
+        pending: Vec::new(), // Initial logs go into history, which we will force render on create
     });
     
     // Leak to get a 'static mutable reference
@@ -73,15 +84,11 @@ pub unsafe fn show_console_window(parent: HWND, initial_logs: &[Vec<u16>], is_da
         .size(600, 400)
         .align(WindowAlignment::Manual(CW_USEDEFAULT, CW_USEDEFAULT))
         .background(bg_brush)
-        .build(parent); // Note: Parent for modeless usually 0 or main, but we can pass it.
+        .build(parent);
         
     if let Ok(hwnd) = hwnd_res {
         if hwnd != std::ptr::null_mut() {
             CONSOLE_HWND = Some(hwnd);
-            // Populate initial logs
-            for log in initial_logs {
-                 append_log_msg(log.clone());
-            }
         }
     }
 }
@@ -109,6 +116,67 @@ impl ConsoleState {
         
         InvalidateRect(hwnd, std::ptr::null(), 1);
     }
+
+    /// Re-renders the entire history to the edit control
+    unsafe fn refresh_text(&self) {
+        if let Some(edit) = self.edit_hwnd {
+            let mut combined = String::with_capacity(self.history.len() * 100);
+            for entry in &self.history {
+                combined.push_str(&format_log_entry(entry));
+            }
+            let text_wide = to_wstring(&combined);
+            SetWindowTextW(edit, text_wide.as_ptr());
+            // Scroll to bottom
+            let len = GetWindowTextLengthW(edit);
+            SendMessageW(edit, EM_SETSEL, len as WPARAM, len as LPARAM);
+            SendMessageW(edit, EM_REPLACESEL, 0, to_wstring("").as_ptr() as LPARAM);
+        }
+    }
+    
+    unsafe fn flush_pending(&mut self) {
+        if self.pending.is_empty() { return; }
+        
+        if let Some(edit) = self.edit_hwnd {
+            let mut chunk = String::with_capacity(self.pending.len() * 100);
+            for entry in &self.pending {
+                // Add to history
+                if self.history.len() >= MAX_HISTORY {
+                    self.history.pop_front();
+                }
+                self.history.push_back(entry.clone());
+                
+                // Format for display
+                chunk.push_str(&format_log_entry(entry));
+            }
+            self.pending.clear();
+            
+            // Append to Edit
+            let len = GetWindowTextLengthW(edit);
+            SendMessageW(edit, EM_SETSEL, len as WPARAM, len as LPARAM);
+            
+            let chunk_wide = to_wstring(&chunk);
+            SendMessageW(edit, EM_REPLACESEL, 0, chunk_wide.as_ptr() as LPARAM);
+            
+            // Check limit and truncation
+            if self.history.len() >= MAX_HISTORY {
+                 // Simplistic check: If text length is huge, re-render from history to prune old text
+                 if len > (EDIT_LIMIT as i32) - 10000 {
+                     self.refresh_text();
+                 }
+            }
+        }
+    }
+}
+
+fn format_log_entry(entry: &LogEntry) -> String {
+    // [HH:MM:SS] [LEVEL] Message
+    // Simple UTC extraction from unix timestamp
+    let s = entry.timestamp % 86400;
+    let h = s / 3600;
+    let m = (s % 3600) / 60;
+    let s = s % 60;
+    
+    format!("[{:02}:{:02}:{:02}] [{}] {}\r\n", h, m, s, entry.level.as_str(), entry.message)
 }
 
 impl WindowHandler for ConsoleState {
@@ -139,9 +207,11 @@ impl WindowHandler for ConsoleState {
                  std::ptr::null()
              );
              
+             SendMessageW(edit, EM_SETLIMITTEXT, EDIT_LIMIT, 0);
+             
              self.edit_hwnd = Some(edit);
              
-             // Create Copy and Clear buttons using ButtonBuilder
+             // Create Buttons
              let btn_copy = ButtonBuilder::new(hwnd, IDC_BTN_COPY as u16)
                  .text("Copy").pos(0, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
              self.btn_copy_hwnd = Some(btn_copy);
@@ -151,6 +221,12 @@ impl WindowHandler for ConsoleState {
              self.btn_clear_hwnd = Some(btn_clear);
              
              self.update_theme(hwnd);
+             
+             // Initial render of history
+             self.refresh_text();
+             
+             // Start timer
+             SetTimer(hwnd, TIMER_ID, UPDATE_INTERVAL_MS, None);
         }
         0
     }
@@ -158,6 +234,12 @@ impl WindowHandler for ConsoleState {
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
             match msg {
+                WM_TIMER => {
+                    if wparam == TIMER_ID {
+                        self.flush_pending();
+                    }
+                    Some(0)
+                },
                 WM_SIZE => {
                     let width = (lparam & 0xFFFF) as i32;
                     let height = ((lparam >> 16) & 0xFFFF) as i32;
@@ -203,6 +285,9 @@ impl WindowHandler for ConsoleState {
                             }
                         },
                         IDC_BTN_CLEAR => {
+                            // Clear history and edit
+                            self.history.clear();
+                            self.pending.clear();
                             if let Some(edit) = self.edit_hwnd {
                                 let empty = to_wstring("");
                                 SetWindowTextW(edit, empty.as_ptr());
@@ -213,19 +298,11 @@ impl WindowHandler for ConsoleState {
                     Some(0)
                 },
                 WM_DESTROY => {
+                    KillTimer(hwnd, TIMER_ID);
                     CONSOLE_HWND = None;
-                    // Note: Default handler in framework does NOT PostQuitMessage because is_modal() is false.
                     Some(0)
                 },
-                WM_CTLCOLOREDIT => {
-                     // We still need to handle this manually for Edit control specifically, 
-                     // or framework default theme handler might not cover EDIT background correctly if it's special?
-                     // Framework default calls crate::ui::theme::handle_standard_colors.
-                     // That function handles WM_CTLCOLOREDIT.
-                     // So we can return None to let default handle it!
-                     None
-                },
-                // WM_APP + 2: Theme change broadcast
+                WM_CTLCOLOREDIT => None,
                 0x8002 => {
                     let new_is_dark = wparam == 1;
                     self.is_dark = new_is_dark;
@@ -238,31 +315,12 @@ impl WindowHandler for ConsoleState {
     }
 }
 
-pub unsafe fn append_log_msg(msg: Vec<u16>) {
+pub unsafe fn append_log_entry(entry: LogEntry) {
     if let Some(hwnd) = CONSOLE_HWND {
-        // We need to get the edit control.
-        // It's in the state.
         if let Some(state) = get_window_state::<ConsoleState>(hwnd) {
-            if let Some(edit) = state.edit_hwnd {
-                append_log_internal(edit, msg);
-            }
+            state.pending.push(entry);
         }
     }
-}
-
-unsafe fn append_log_internal(edit: HWND, mut text: Vec<u16>) {
-    // Move caret to end
-    let len = GetWindowTextLengthW(edit);
-    SendMessageW(edit, EM_SETSEL, len as WPARAM, len as LPARAM);
-    
-    if text.last() == Some(&0) {
-        text.pop();
-    }
-    text.push(13); // CR
-    text.push(10); // LF
-    text.push(0);  // Null
-    
-    SendMessageW(edit, EM_REPLACESEL, 0, text.as_ptr() as LPARAM);
 }
 
 pub unsafe fn close_console() {

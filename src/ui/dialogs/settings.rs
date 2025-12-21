@@ -38,6 +38,12 @@ const TBM_GETPOS: u32 = 0x0400;
 const TBM_SETPOS: u32 = 0x0405;
 const TBM_SETRANGE: u32 = 0x0406;
 const WM_HSCROLL: u32 = 0x0114;
+const IDC_GRP_LOGGING: u16 = 2020;
+const IDC_CHK_LOG_ENABLED: u16 = 2021;
+const IDC_CHK_LOG_ERRORS: u16 = 2022;
+const IDC_CHK_LOG_WARNS: u16 = 2023;
+const IDC_CHK_LOG_INFO: u16 = 2024;
+const IDC_CHK_LOG_TRACE: u16 = 2025;
 
 struct SettingsState {
     theme: AppTheme,
@@ -48,6 +54,8 @@ struct SettingsState {
     enable_system_guard: bool, // Track system guard checkbox state
     low_power_mode: bool,      // Track low power mode checkbox state
     max_threads: u32,          // Track max threads
+    log_enabled: bool,
+    log_level_mask: u8,
     update_status: UpdateStatus,
 }
 
@@ -67,14 +75,14 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 
 
 // Main settings modal function with proper data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool, max_threads: u32) -> (Option<AppTheme>, bool, bool, bool, bool, u32) {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool, max_threads: u32, log_enabled: bool, log_level_mask: u8) -> (Option<AppTheme>, bool, bool, bool, bool, u32, bool, u8) {
     // Check if window already exists
     let class_name = to_wstring("CompactRS_Settings");
     let existing_hwnd = FindWindowW(class_name.as_ptr(), std::ptr::null());
     if existing_hwnd != std::ptr::null_mut() {
         ShowWindow(existing_hwnd, SW_RESTORE);
         SetForegroundWindow(existing_hwnd);
-        return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads);
+        return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, log_enabled, log_level_mask);
     }
     
     let mut state = SettingsState {
@@ -86,6 +94,8 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         enable_system_guard,
         low_power_mode,
         max_threads,
+        log_enabled,
+        log_level_mask,
         update_status: UpdateStatus::Idle,
     };
 
@@ -101,7 +111,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         parent
     );
     
-    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads)
+    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.log_enabled, state.log_level_mask)
 }
 
 impl WindowHandler for SettingsState {
@@ -228,6 +238,80 @@ impl WindowHandler for SettingsState {
             // Set Position
             SendMessageW(h_slider, TBM_SETPOS, 1, current_val as isize);
 
+            // LOGGING SECTION (Above Updates)
+            // Group Box: Debug Logging
+            let _grp_log = ControlBuilder::new(hwnd, IDC_GRP_LOGGING)
+                .groupbox()
+                .text("Debug Logging")
+                .pos(280, 10) // Right side column
+                .size(200, 200) // Taller to fit options
+                .dark_mode(self.is_dark)
+                .build();
+            
+            // Re-size main window to accommodate right column?
+            // Old Width: 300. We need 500 now.
+            use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos;
+            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 520, 520, windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER);
+
+            // Checkbox: Enable Logging Console
+            let _chk_log = ControlBuilder::new(hwnd, IDC_CHK_LOG_ENABLED)
+                .checkbox()
+                .text("Enable Logging Console")
+                .pos(290, 40)
+                .size(180, 20)
+                .dark_mode(is_dark_mode)
+                .checked(self.log_enabled)
+                .build();
+            
+            // Bitmask options
+            let _chk_err = ControlBuilder::new(hwnd, IDC_CHK_LOG_ERRORS)
+                .checkbox()
+                .text("Show Errors")
+                .pos(300, 70) // Indented
+                .size(160, 20)
+                .dark_mode(is_dark_mode)
+                .checked(self.log_level_mask & crate::logger::LOG_LEVEL_ERROR != 0)
+                .build();
+
+            let _chk_warn = ControlBuilder::new(hwnd, IDC_CHK_LOG_WARNS)
+                .checkbox()
+                .text("Show Warnings")
+                .pos(300, 100)
+                .size(160, 20)
+                .dark_mode(is_dark_mode)
+                .checked(self.log_level_mask & crate::logger::LOG_LEVEL_WARN != 0)
+                .build();
+
+            let _chk_info = ControlBuilder::new(hwnd, IDC_CHK_LOG_INFO)
+                .checkbox()
+                .text("Show Info")
+                .pos(300, 130)
+                .size(160, 20)
+                .dark_mode(is_dark_mode)
+                .checked(self.log_level_mask & crate::logger::LOG_LEVEL_INFO != 0)
+                .build();
+            
+            let _chk_trace = ControlBuilder::new(hwnd, IDC_CHK_LOG_TRACE)
+                .checkbox()
+                .text("Show Trace (Verbose)")
+                .pos(300, 160)
+                .size(160, 20)
+                .dark_mode(is_dark_mode)
+                .checked(self.log_level_mask & crate::logger::LOG_LEVEL_TRACE != 0)
+                .build();
+            
+            // Disable child checkboxes if logging is not enabled
+            if !self.log_enabled {
+                use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+                let ids = [IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
+                for &id in &ids {
+                    let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id as i32);
+                    if h != std::ptr::null_mut() {
+                        EnableWindow(h, 0);
+                    }
+                }
+            }
+
             // Updates Section
             let _btn_update = ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
                 .button()
@@ -275,8 +359,9 @@ impl WindowHandler for SettingsState {
             // FORCE RE-APPLY THEME:
             let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, 
                            IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_CHK_LOW_POWER, 
-                           IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI, 
-                           IDC_SLIDER_THREADS, IDC_LBL_THREADS_VALUE,
+                            IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI, 
+                            IDC_SLIDER_THREADS, IDC_LBL_THREADS_VALUE,
+                            IDC_GRP_LOGGING, IDC_CHK_LOG_ENABLED, IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE,
                            // Label companions
                            IDC_RADIO_SYSTEM + 100, IDC_RADIO_DARK + 100, IDC_RADIO_LIGHT + 100];
             
@@ -284,8 +369,9 @@ impl WindowHandler for SettingsState {
                 let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, ctrl_id as i32);
                 if h_ctl != std::ptr::null_mut() {
                     let ctl_type = match ctrl_id {
-                        IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
-                        IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD | IDC_CHK_LOW_POWER => crate::ui::theme::ControlType::CheckBox,
+                        IDC_GRP_THEME | IDC_GRP_LOGGING => crate::ui::theme::ControlType::GroupBox,
+                        IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD | IDC_CHK_LOW_POWER |
+                        IDC_CHK_LOG_ENABLED | IDC_CHK_LOG_ERRORS | IDC_CHK_LOG_WARNS | IDC_CHK_LOG_INFO | IDC_CHK_LOG_TRACE => crate::ui::theme::ControlType::CheckBox,
                         IDC_BTN_CANCEL | IDC_BTN_CHECK_UPDATE | IDC_BTN_RESTART_TI => crate::ui::theme::ControlType::Button,
                         IDC_SLIDER_THREADS => crate::ui::theme::ControlType::Trackbar,
                         IDC_LBL_THREADS_VALUE | IDC_LBL_UPDATE_STATUS => crate::ui::theme::ControlType::Window, 
@@ -407,15 +493,17 @@ impl WindowHandler for SettingsState {
                                     
                                     // 5. Update controls theme
                                     use windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem;
-                                    let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_CHK_LOW_POWER, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI, IDC_SLIDER_THREADS, IDC_LBL_THREADS_VALUE];
+                                    let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_CHK_LOW_POWER, IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI, IDC_SLIDER_THREADS, IDC_LBL_THREADS_VALUE,
+                                                   IDC_GRP_LOGGING, IDC_CHK_LOG_ENABLED, IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
 
                                     for &ctrl_id in &controls {
                                         let h_ctl = GetDlgItem(hwnd, ctrl_id as i32);
                                         if h_ctl != std::ptr::null_mut() {
                                             // Map ID to ControlType roughly
                                             let ctl_type = match ctrl_id {
-                                                IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
-                                                IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD | IDC_CHK_LOW_POWER => crate::ui::theme::ControlType::CheckBox,
+                                                IDC_GRP_THEME | IDC_GRP_LOGGING => crate::ui::theme::ControlType::GroupBox,
+                                                IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD | IDC_CHK_LOW_POWER |
+                                                IDC_CHK_LOG_ENABLED | IDC_CHK_LOG_ERRORS | IDC_CHK_LOG_WARNS | IDC_CHK_LOG_INFO | IDC_CHK_LOG_TRACE => crate::ui::theme::ControlType::CheckBox,
                                                 IDC_BTN_CANCEL | IDC_BTN_CHECK_UPDATE | IDC_BTN_RESTART_TI => crate::ui::theme::ControlType::Button,
                                                 IDC_SLIDER_THREADS => crate::ui::theme::ControlType::Trackbar,
                                                 IDC_LBL_THREADS_VALUE | IDC_LBL_UPDATE_STATUS => crate::ui::theme::ControlType::Window, // Label behaves like static
@@ -613,6 +701,42 @@ impl WindowHandler for SettingsState {
                                           });
                                       }
                                   }
+                              }
+                          },
+                          IDC_CHK_LOG_ENABLED | IDC_CHK_LOG_ERRORS | IDC_CHK_LOG_WARNS | IDC_CHK_LOG_INFO | IDC_CHK_LOG_TRACE => {
+                              if (code as u32) == BN_CLICKED {
+                                   let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id as i32);
+                                   let checked = SendMessageW(h_ctl, BM_GETCHECK, 0, 0) == 1;
+                                   
+                                   match id {
+                                       IDC_CHK_LOG_ENABLED => {
+                                           self.log_enabled = checked;
+                                           // Enable/Disable child checkboxes
+                                           use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+                                           let ids = [IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
+                                           for &child_id in &ids {
+                                               let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, child_id as i32);
+                                               if h != std::ptr::null_mut() {
+                                                   EnableWindow(h, if checked { 1 } else { 0 });
+                                               }
+                                           }
+                                       },
+                                       IDC_CHK_LOG_ERRORS => if checked { self.log_level_mask |= crate::logger::LOG_LEVEL_ERROR; } else { self.log_level_mask &= !crate::logger::LOG_LEVEL_ERROR; },
+                                       IDC_CHK_LOG_WARNS => if checked { self.log_level_mask |= crate::logger::LOG_LEVEL_WARN; } else { self.log_level_mask &= !crate::logger::LOG_LEVEL_WARN; },
+                                       IDC_CHK_LOG_INFO => if checked { self.log_level_mask |= crate::logger::LOG_LEVEL_INFO; } else { self.log_level_mask &= !crate::logger::LOG_LEVEL_INFO; },
+                                       IDC_CHK_LOG_TRACE => if checked { self.log_level_mask |= crate::logger::LOG_LEVEL_TRACE; } else { self.log_level_mask &= !crate::logger::LOG_LEVEL_TRACE; },
+                                       _ => {}
+                                   }
+                                   
+                                   // Notify Parent immediately (WM_APP + 8)
+                                   // Send (Enabled: bool) in WPARAM, (Mask: u8) in LPARAM
+                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                   let parent = GetParent(hwnd);
+                                   if parent != std::ptr::null_mut() {
+                                       let w = if self.log_enabled { 1 } else { 0 };
+                                       let l = self.log_level_mask as isize;
+                                       SendMessageW(parent, 0x8000 + 8, w as WPARAM, l as LPARAM);
+                                   }
                               }
                           },
                           IDC_BTN_RESTART_TI => {

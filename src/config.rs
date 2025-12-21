@@ -23,6 +23,8 @@ pub struct AppConfig {
     pub enable_system_guard: bool,
     pub low_power_mode: bool,
     pub max_threads: u32,
+    pub log_enabled: bool,
+    pub log_level_mask: u8,
 }
 
 impl Default for AppConfig {
@@ -42,6 +44,8 @@ impl Default for AppConfig {
             enable_system_guard: true,
             low_power_mode: false,
             max_threads: 0, // 0 = Auto
+            log_enabled: true,
+            log_level_mask: 7, // Error | Warn | Info (1 | 2 | 4)
         }
     }
 }
@@ -62,12 +66,23 @@ impl AppConfig {
                 unsafe { 
                     let config: AppConfig = std::mem::transmute(buffer);
                     // Validate magic and version
-                    if config.magic == 0x43505253 && (config.version == 1 || config.version == 2) {
+                    if config.magic == 0x43505253 && (config.version >= 1 && config.version <= 3) {
                         if config.version == 1 {
-                             // Migrate v1 to v2 (default max_threads = 0)
+                             // Migrate v1 to v3
                              return AppConfig {
                                  max_threads: 0,
-                                 version: 2,
+                                 log_enabled: true,
+                                 log_level_mask: 7,
+                                 version: 3,
+                                 ..config
+                             };
+                        }
+                        if config.version == 2 {
+                             // Migrate v2 to v3
+                             return AppConfig {
+                                 log_enabled: true,
+                                 log_level_mask: 7,
+                                 version: 3,
                                  ..config
                              };
                         }

@@ -7,6 +7,7 @@ use crate::config::AppConfig;
 use crate::ui::components::{FileListView, Component};
 use crate::engine::worker::scan_path_streaming;
 use crate::utils::to_wstring;
+use crate::logger::LogEntry;
 use std::thread;
 
 /// Processing state for items (state machine)
@@ -60,7 +61,7 @@ pub enum UiMessage {
     RowUpdate(i32, Vec<u16>, Vec<u16>, Vec<u16>),
     /// Incremental scan progress: (id, logical_size, disk_size, file_count)
     ScanProgress(u32, u64, u64, u64),
-    Log(Vec<u16>),
+    Log(LogEntry),
     Status(Vec<u16>),
     Finished,
     /// Single item finished: (row_index, status_wide, size_after_wide, final_state)
@@ -69,7 +70,6 @@ pub enum UiMessage {
     BatchItemAnalyzed(u32, u64, u64, crate::engine::wof::CompressionState),
     /// Estimated size update: (id, algorithm, estimated_size, formatted_string)
     UpdateEstimate(u32, WofAlgorithm, u64, Vec<u16>),
-    Error(Vec<u16>),
 }
 
 /// Action to perform on a batch item
@@ -214,7 +214,7 @@ pub struct AppState {
     pub theme: AppTheme,
     
     // Console
-    pub logs: Vec<Vec<u16>>,
+    pub logs: std::collections::VecDeque<LogEntry>,
     pub console_hwnd: Option<HWND>,
     pub force_compress: bool,
     pub enable_force_stop: bool,
@@ -253,7 +253,7 @@ impl AppState {
             global_state: Arc::new(AtomicU8::new(ProcessingState::Idle as u8)),
             config,
             theme: config.theme,
-            logs: Vec::new(),
+            logs: std::collections::VecDeque::with_capacity(1000),
             console_hwnd: None,
             force_compress: config.force_compress,
             enable_force_stop: config.enable_force_stop,

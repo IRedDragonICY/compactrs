@@ -619,7 +619,7 @@ pub fn process_file_core(
     action: BatchAction,
     force: bool,
     main_hwnd: usize,
-    tx: &Sender<UiMessage>,
+    _tx: &Sender<UiMessage>,
     guard_enabled: bool,
 ) -> (ProcessResult, u64) {
     match action {
@@ -628,9 +628,7 @@ pub fn process_file_core(
             
             // Check System Critical Path Guard
             if guard_enabled && !force && is_critical_path(path) {
-                let p = to_wstring(path);
-                let msg = concat_wstrings(&[&to_wstring("Skipped (Critical System Path): "), &p]);
-                let _ = tx.send(UiMessage::Log(msg));
+                crate::log_info!("Skipped (Critical System Path): {}", path);
                 final_res = ProcessResult::Skipped("System Path".to_string());
             }
 
@@ -638,9 +636,7 @@ pub fn process_file_core(
             else if !force {
                 if let Some(current_algo) = crate::engine::wof::get_wof_algorithm(path) {
                     if current_algo == algo {
-                        let p = to_wstring(path);
-                        let msg = concat_wstrings(&[&to_wstring("Skipped (Already compressed): "), &p]);
-                        let _ = tx.send(UiMessage::Log(msg));
+                        crate::log_info!("Skipped (Already compressed): {}", path);
                         final_res = ProcessResult::Skipped("Already optimal".to_string());
                     }
                 }
@@ -650,9 +646,7 @@ pub fn process_file_core(
             if let ProcessResult::Success = final_res {
                  // Check extension filter (unless force is enabled)
                  if !force && should_skip_extension(path) {
-                    let p = to_wstring(path);
-                    let msg = concat_wstrings(&[&to_wstring("Skipped (filtered): "), &p]);
-                    let _ = tx.send(UiMessage::Log(msg));
+                    crate::log_info!("Skipped (filtered): {}", path);
                     final_res = ProcessResult::Skipped("Filtered extension".to_string());
                  }
             }
@@ -660,16 +654,17 @@ pub fn process_file_core(
             // Attempt compression
             if let ProcessResult::Success = final_res {
                 match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
-                    Ok(true) => { final_res = ProcessResult::Success; }
+                    Ok(true) => {
+                        crate::log_trace!("Compressed: {}", path);
+                        final_res = ProcessResult::Success;
+                    }
                     Ok(false) => {
                          // OS driver said compression not beneficial
-                        let p = to_wstring(path);
-                        let msg = concat_wstrings(&[&to_wstring("Skipped (OS: Not Beneficial): "), &p]);
-                        let _ = tx.send(UiMessage::Log(msg));
+                        crate::log_info!("Skipped (OS: Not Beneficial): {}", path);
                         final_res = ProcessResult::Skipped("Not beneficial".to_string());
                     }
                     Err(msg) => {
-                        let _ = tx.send(UiMessage::Error(to_wstring(&msg)));
+                        crate::log_error!("Failed {}: {}", path, msg);
                         final_res = ProcessResult::Failed(msg);
                     }
                 }
@@ -680,14 +675,13 @@ pub fn process_file_core(
         }
         BatchAction::Decompress => {
             match uncompress_file(path) {
-                Ok(_) => (ProcessResult::Success, get_real_file_size(path)),
+                Ok(_) => {
+                    crate::log_trace!("Decompressed: {}", path);
+                    (ProcessResult::Success, get_real_file_size(path))
+                },
                 Err(e) => {
-                    let mut s = "Failed ".to_string();
-                    s.push_str(path);
-                    s.push_str(": ");
-                    s.push_str(&e.to_string());
-                    let w = to_wstring(&s);
-                    let _ = tx.send(UiMessage::Error(w));
+                    let s = format!("Failed {}: {}", path, e);
+                    crate::log_error!("{}", s);
                     (ProcessResult::Failed(s), get_real_file_size(path))
                 }
             }
@@ -772,13 +766,14 @@ pub fn batch_process_worker(
         parallelism
     };
     
-    let total_w = u64_to_wstring(total_files);
-    let threads_w = u64_to_wstring(num_threads as u64);
-    let msg = concat_wstrings(&[
-        &to_wstring("Processing "), &total_w, &to_wstring(" files with "), &threads_w, &to_wstring(" CPU Threads...")
-    ]);
-    let _ = tx.send(UiMessage::Log(msg.clone())); // Log it for verification
-    let _ = tx.send(UiMessage::Status(msg));
+    let _total_w = u64_to_wstring(total_files);
+    let _threads_w = u64_to_wstring(num_threads as u64);
+    let msg = format!(
+        "Processing {} files with {} CPU Threads...",
+        total_files, num_threads
+    );
+    crate::log_info!("{}", msg);
+    let _ = tx.send(UiMessage::Status(to_wstring(&msg)));
     
     if total_files == 0 {
         let _ = tx.send(UiMessage::Status(to_wstring("No files found to process.")));
@@ -983,17 +978,9 @@ pub fn batch_process_worker(
     let p = s + f; // Calculate local processed from success + failed
     
     // "Batch complete! Processed: {} files | Success: {} | Failed: {}"
-    let p_w = u64_to_wstring(p);
-    let s_w = u64_to_wstring(s);
-    let f_w = u64_to_wstring(f);
-    let report_w = concat_wstrings(&[
-        &to_wstring("Batch complete! Processed: "), &p_w, 
-        &to_wstring(" files | Success: "), &s_w, 
-        &to_wstring(" | Failed: "), &f_w
-    ]);
-    
-    let _ = tx.send(UiMessage::Log(report_w.clone()));
-    let _ = tx.send(UiMessage::Status(report_w));
+    let report_msg = format!("Batch complete! Processed: {} files | Success: {} | Failed: {}", p, s, f);
+    crate::log_info!("{}", report_msg);
+    let _ = tx.send(UiMessage::Status(to_wstring(&report_msg)));
     
     // Only send Finished if global progress is complete
     let g_cur = global_current.load(Ordering::Relaxed);

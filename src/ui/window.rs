@@ -193,6 +193,14 @@ impl WindowHandler for AppState {
             
             // Process startup items (CLI args)
             self.handle_startup_items(hwnd);
+
+            // Initialize global logger
+            crate::logger::init_logger(self.tx.clone());
+            if self.config.log_enabled {
+                crate::logger::set_log_level(self.config.log_level_mask);
+            } else {
+                crate::logger::set_log_level(0);
+            }
         }
         0
     }
@@ -238,6 +246,22 @@ impl WindowHandler for AppState {
                 // Custom Message: Theme Changed
                 0x8001 => {
                     self.handle_theme_change_request(hwnd, wparam);
+                    Some(0)
+                },
+                
+                // Custom Message: Log Settings Changed (0x8008)
+                0x8008 => {
+                    let enabled = wparam != 0;
+                    let mask = lparam as u8;
+                    // Update state config (best effort, though handlers.rs does it usually on close)
+                    // But handlers.rs does it when modal returns.
+                    // This message allows immediate update if we wanted.
+                    // For now, let's just update the global atomic so it takes effect instantly.
+                    if enabled {
+                        crate::logger::set_log_level(mask);
+                    } else {
+                        crate::logger::set_log_level(0);
+                    }
                     Some(0)
                 },
                 
@@ -476,20 +500,22 @@ impl AppState {
                          SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
                      }
                  },
-                 UiMessage::Log(text) => {
-                     self.logs.push(text.clone());
-                     crate::ui::dialogs::append_log_msg(text);
-                 },
-                 UiMessage::Error(text) => {
-                     if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::Error); }
-                     let err_prefix = to_wstring("ERROR: ");
-                     let full_err = concat_wstrings(&[&err_prefix, &text]);
-                     self.logs.push(full_err.clone());
-                     crate::ui::dialogs::append_log_msg(full_err);
-                     
-                     if let Some(ctrls) = &self.controls {
-                         SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
+                 UiMessage::Log(entry) => {
+                     // Check if Error level to update Taskbar/Status
+                     if entry.level == crate::logger::LogLevel::Error {
+                         if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::Error); }
+                         
+                         let msg_w = to_wstring(&entry.message);
+                         if let Some(ctrls) = &self.controls {
+                             SetWindowTextW(ctrls.status_bar.label_hwnd(), msg_w.as_ptr());
+                         }
                      }
+                     
+                     self.logs.push_back(entry.clone());
+                     if self.logs.len() > 1000 {
+                         self.logs.pop_front();
+                     }
+                     crate::ui::dialogs::append_log_entry(entry);
                  },
                  UiMessage::Finished => {
                      self.global_state.store(crate::ui::state::ProcessingState::Idle as u8, std::sync::atomic::Ordering::Relaxed);
