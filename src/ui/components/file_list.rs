@@ -17,10 +17,35 @@ use windows_sys::Win32::UI::Controls::{
     LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, LVCFMT_LEFT, LVCF_FMT, LVCF_TEXT, LVCF_WIDTH,
     LVCOLUMNW, LVIF_PARAM, LVIF_TEXT, LVITEMW, LVNI_SELECTED, LVS_EX_DOUBLEBUFFER,
     LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, NM_CUSTOMDRAW, NMCUSTOMDRAW,
-    CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
+    CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW, CDRF_NOTIFYSUBITEMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
     LVM_GETITEMCOUNT, LVM_SETITEMSTATE, LVIS_SELECTED, LVM_SORTITEMS, LVM_SETCOLUMNWIDTH,
-    HDN_BEGINTRACKW, HDN_DIVIDERDBLCLICKW,
+    HDN_BEGINTRACKW, HDN_DIVIDERDBLCLICKW, LVM_GETITEMTEXTW,
 };
+// COLORREF is a type alias for u32 in Win32 (0x00BBGGRR format)
+type COLORREF = u32;
+
+// ============================================================================
+// Win32 Constants and Structures for Subitem Custom Draw
+// ============================================================================
+
+/// CDDS_SUBITEM flag: Combined with CDDS_ITEMPREPAINT to handle subitem-level drawing
+const CDDS_SUBITEM: u32 = 0x00020000;
+
+/// NMLVCUSTOMDRAW structure for ListView-specific custom draw
+/// This extends NMCUSTOMDRAW with ListView-specific fields like iSubItem.
+#[repr(C)]
+struct NMLVCUSTOMDRAW {
+    /// Embedded NMCUSTOMDRAW structure (must be first for layout compatibility)
+    nmcd: NMCUSTOMDRAW,
+    /// Text color for the item/subitem
+    clr_text: u32,
+    /// Background color for the item/subitem
+    clr_text_bk: u32,
+    /// For report mode: index of the subitem being drawn (0 = main item)
+    i_sub_item: i32,
+    // Additional fields exist but are not needed for this implementation:
+    // dwItemType, clrFace, iIconEffect, iIconPhase, iPartId, iStateId, rcText, uAlign
+}
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 
 use super::base::Component;
@@ -655,10 +680,234 @@ impl Component for FileListView {
     }
 }
 
-/// ListView subclass procedure to intercept Header's NM_CUSTOMDRAW notifications.
+// ============================================================================
+// Custom Draw Color Tier System
+// ============================================================================
+
+/// Color tier for compression ratio display
+#[derive(Clone, Copy)]
+enum RatioTier {
+    /// > 50% - Excellent compression
+    Ultra,
+    /// 20% - 50% - Good compression
+    Good,
+    /// 5% - 20% - Moderate compression
+    Moderate,
+    /// < 5% or negative - Negligible/failed compression
+    Negligible,
+}
+
+/// Parses a percentage value from a UTF-16 buffer without heap allocation.
+/// 
+/// Handles formats like "42.5%", "-5.2%", and returns None for invalid/empty strings.
+/// This is designed for hot-path usage in the draw loop.
+#[inline]
+fn parse_ratio_from_utf16(buffer: &[u16]) -> Option<f32> {
+    // Find the end of the string (null terminator or buffer end)
+    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    if len == 0 {
+        return None;
+    }
+    
+    // Convert to ASCII for parsing (percentages are ASCII-compatible)
+    // Stack buffer to avoid heap allocation
+    let mut ascii_buf = [0u8; 32];
+    let copy_len = len.min(31);
+    
+    for (i, &wc) in buffer[..copy_len].iter().enumerate() {
+        // Only handle ASCII range (0-127)
+        if wc > 127 {
+            return None;
+        }
+        ascii_buf[i] = wc as u8;
+    }
+    
+    // Parse the string, stripping '%' suffix if present
+    let s = std::str::from_utf8(&ascii_buf[..copy_len]).ok()?;
+    let s = s.trim();
+    
+    // Skip placeholder values
+    if s == "-" || s.is_empty() || s == "N/A" {
+        return None;
+    }
+    
+    // Strip '%' suffix if present
+    let s = s.strip_suffix('%').unwrap_or(s);
+    
+    // Parse as float
+    s.trim().parse::<f32>().ok()
+}
+
+/// Determines the color tier based on the parsed ratio percentage.
+#[inline]
+fn get_ratio_tier(ratio: f32) -> RatioTier {
+    if ratio > 50.0 {
+        RatioTier::Ultra
+    } else if ratio >= 20.0 {
+        RatioTier::Good
+    } else if ratio >= 5.0 {
+        RatioTier::Moderate
+    } else {
+        RatioTier::Negligible
+    }
+}
+
+/// Returns the appropriate COLORREF for the given tier and theme.
+/// 
+/// Colors are designed for optimal readability:
+/// - Light mode: Darker, saturated colors for good contrast on white
+/// - Dark mode: Brighter, vibrant colors for visibility on dark backgrounds
+#[inline]
+fn tier_to_color(tier: RatioTier, is_dark: bool) -> COLORREF {
+    // COLORREF format: 0x00BBGGRR (BGR order)
+    match (tier, is_dark) {
+        // Ultra (> 50%): Greens
+        (RatioTier::Ultra, false) => 0x0000A000,    // Light: Emerald Green RGB(0, 160, 0)
+        (RatioTier::Ultra, true) => 0x0080FF00,     // Dark: Neon/Spring Green RGB(0, 255, 128)
+        
+        // Good (20% - 50%): Blues
+        (RatioTier::Good, false) => 0x00C86400,     // Light: Teal/Sea Blue RGB(0, 100, 200)
+        (RatioTier::Good, true) => 0x00FFC850,      // Dark: Cyan/Sky Blue RGB(80, 200, 255)
+        
+        // Moderate (5% - 20%): Oranges/Golds
+        (RatioTier::Moderate, false) => 0x000064C8, // Light: Burnt Orange RGB(200, 100, 0)
+        (RatioTier::Moderate, true) => 0x0000D7FF,  // Dark: Gold RGB(255, 215, 0)
+        
+        // Negligible (< 5% or negative): Grays
+        (RatioTier::Negligible, false) => 0x00808080, // Light: Gray RGB(128, 128, 128)
+        (RatioTier::Negligible, true) => 0x00A0A0A0,  // Dark: Dim Gray RGB(160, 160, 160)
+    }
+}
+
+/// Retrieves the text of a ListView subitem into a stack-allocated buffer.
+/// 
+/// Returns the number of characters retrieved (excluding null terminator).
+#[inline]
+unsafe fn get_listview_item_text(hwnd: HWND, row: i32, col: i32, buffer: &mut [u16]) -> usize {
+    let mut lvi = LVITEMW {
+        mask: LVIF_TEXT,
+        iItem: row,
+        iSubItem: col,
+        pszText: buffer.as_mut_ptr(),
+        cchTextMax: buffer.len() as i32,
+        ..Default::default()
+    };
+    
+    // SAFETY: SendMessageW with LVM_GETITEMTEXTW requires valid HWND and LVITEMW pointer.
+    // The buffer is valid for the duration of this call.
+    let result = unsafe { SendMessageW(hwnd, LVM_GETITEMTEXTW, row as usize, &mut lvi as *mut _ as isize) };
+    result as usize
+}
+
+/// Handles NM_CUSTOMDRAW for the ListView to color the Ratio column.
+/// 
+/// This function should be called from the main window procedure when receiving
+/// WM_NOTIFY with NM_CUSTOMDRAW from the ListView control.
+/// 
+/// # Arguments
+/// * `list_hwnd` - Handle to the ListView control
+/// * `lparam` - The LPARAM from WM_NOTIFY (points to NMLVCUSTOMDRAW)
+/// * `is_dark` - Whether dark mode is active
+/// * `items` - The source list of BatchItems to derive data from
+/// 
+/// # Returns
+/// * `Some(LRESULT)` - If we handled the draw stage, return this value
+/// * `None` - Let default processing continue
+/// 
+/// # Safety
+/// Caller must ensure lparam points to a valid NMLVCUSTOMDRAW structure.
+pub unsafe fn handle_listview_customdraw(
+    _list_hwnd: HWND, 
+    lparam: LPARAM, 
+    is_dark: bool,
+    items: &[BatchItem]
+) -> Option<LRESULT> {
+    unsafe {
+        // SAFETY: For ListView NM_CUSTOMDRAW, lparam points to NMLVCUSTOMDRAW
+        let nmlvcd = &mut *(lparam as *mut NMLVCUSTOMDRAW);
+        let draw_stage = nmlvcd.nmcd.dwDrawStage;
+
+        // Stage 1: Pre-paint for entire control
+        // Return CDRF_NOTIFYITEMDRAW to receive per-item notifications
+        if draw_stage == CDDS_PREPAINT {
+            return Some(CDRF_NOTIFYITEMDRAW as LRESULT);
+        }
+
+        // Stage 2: Item pre-paint (before drawing each row)
+        // Return CDRF_NOTIFYSUBITEMDRAW to receive per-subitem (column) notifications
+        if draw_stage == CDDS_ITEMPREPAINT {
+            return Some(CDRF_NOTIFYSUBITEMDRAW as LRESULT);
+        }
+
+        // Stage 3: Subitem pre-paint (before drawing each cell)
+        // This is where we customize the Ratio column color
+        // Check if both CDDS_ITEM and CDDS_SUBITEM bits are set, and we are in PREPAINT
+        // CDDS_ITEMPREPAINT is (CDDS_ITEM | CDDS_PREPAINT)
+        // So we look for (CDDS_ITEM | CDDS_SUBITEM | CDDS_PREPAINT)
+        if (draw_stage & (CDDS_ITEMPREPAINT | CDDS_SUBITEM)) == (CDDS_ITEMPREPAINT | CDDS_SUBITEM) {
+            let sub_item = nmlvcd.i_sub_item;
+
+            // Only customize the Ratio column (index 7)
+            if sub_item == columns::RATIO {
+                // Get ID from lParam (stored in add_item)
+                // Note: NMCUSTOMDRAW.lItemlParam contains the item's lParam data
+                let id = nmlvcd.nmcd.lItemlParam as u32;
+                
+                // Optimized Lookup: O(log N) using binary search (items are sorted by ID)
+                // Fallback to row index only if ID lookup fails (e.g. invalid state)
+                let item_opt = items.binary_search_by_key(&id, |i| i.id)
+                    .ok()
+                    .map(|idx| &items[idx])
+                    .or_else(|| items.get(nmlvcd.nmcd.dwItemSpec as usize));
+
+                if let Some(item) = item_opt {
+                    // Use shared helper for consistency (DRY) and cast to f32 for tier logic
+                    let ratio = crate::utils::calculate_saved_percentage(item.logical_size, item.disk_size) as f32;
+
+                    let tier = get_ratio_tier(ratio);
+                    let color = tier_to_color(tier, is_dark);
+
+                    // Apply the color to the device context
+                    SetTextColor(nmlvcd.nmcd.hdc, color);
+                    SetBkMode(nmlvcd.nmcd.hdc, TRANSPARENT as i32);
+                    
+                    // Also update the struct fields, as some controls prefer this
+                    nmlvcd.clr_text = color;
+
+                    // CDRF_NEWFONT tells the control to use our color settings
+                    return Some(CDRF_NEWFONT as LRESULT);
+                }
+            }
+
+
+            // For non-Ratio columns or unparseable values, use default drawing
+            // Reset text color to default to prevent leaking custom colors to subsequent columns
+            let default_color = if is_dark {
+                crate::ui::theme::COLOR_LIST_TEXT_DARK
+            } else {
+                crate::ui::theme::COLOR_LIST_TEXT_LIGHT
+            };
+            
+            SetTextColor(nmlvcd.nmcd.hdc, default_color);
+            nmlvcd.clr_text = default_color;
+
+            // Return CDRF_NEWFONT to force the control to use our "reset" color
+            return Some(CDRF_NEWFONT as LRESULT);
+        }
+
+        // Other draw stages - let default processing handle them
+        None
+    }
+}
+
+/// ListView subclass procedure to intercept NM_CUSTOMDRAW notifications.
 ///
-/// Header sends NM_CUSTOMDRAW to its parent (ListView), not grandparent (main window).
-/// This subclass handles custom drawing for dark mode header text.
+/// This subclass handles:
+/// 1. Header control custom draw for dark mode text coloring
+/// 2. ListView item custom draw for Ratio column color tiers
+///
+/// The procedure distinguishes between notifications from the header control
+/// (for column headers) and the ListView itself (for cell content).
 ///
 /// # Safety
 /// This is a Win32 callback. The parameters are provided by the system.
@@ -672,36 +921,94 @@ unsafe extern "system" fn listview_subclass_proc(
 ) -> LRESULT { unsafe {
     // SAFETY: dwrefdata contains the main window HWND passed during subclass setup.
     let main_hwnd = dwrefdata as HWND;
+    let is_dark = crate::ui::theme::is_app_dark_mode(main_hwnd);
 
     if umsg == WM_NOTIFY {
         // SAFETY: lparam points to NMHDR struct provided by the system.
         let nmhdr = &*(lparam as *const NMHDR);
 
-        // Block manual column resizing
+        // Block manual column resizing (from header control)
         if nmhdr.code == HDN_BEGINTRACKW || nmhdr.code == HDN_DIVIDERDBLCLICKW {
             return 1; // Prevent resizing
         }
 
-        if crate::ui::theme::is_app_dark_mode(main_hwnd) {
-            if nmhdr.code == NM_CUSTOMDRAW {
-            // SAFETY: For NM_CUSTOMDRAW, lparam points to NMCUSTOMDRAW struct.
-            let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
+        if nmhdr.code == NM_CUSTOMDRAW {
+            // Determine if this is from the header control or the ListView itself
+            let header_hwnd = SendMessageW(hwnd, 0x101F, 0, 0) as HWND; // LVM_GETHEADER
+            let is_from_header = nmhdr.hwndFrom == header_hwnd;
 
-            if nmcd.dwDrawStage == CDDS_PREPAINT {
-                // Request item-level notifications
-                return CDRF_NOTIFYITEMDRAW as LRESULT;
-            }
+            if is_from_header {
+                // ========================================================
+                // Header Control Custom Draw (dark mode text)
+                // ========================================================
+                if is_dark {
+                    let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
 
-            if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
-                // Set text color to white for header items in dark mode
-                SetTextColor(nmcd.hdc, crate::ui::theme::COLOR_HEADER_TEXT_DARK);
-                SetBkMode(nmcd.hdc, TRANSPARENT as i32);
-                return CDRF_NEWFONT as LRESULT;
+                    if nmcd.dwDrawStage == CDDS_PREPAINT {
+                        // Request item-level notifications for header items
+                        return CDRF_NOTIFYITEMDRAW as LRESULT;
+                    }
+
+                    if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
+                        // Set text color to white for header items in dark mode
+                        SetTextColor(nmcd.hdc, crate::ui::theme::COLOR_HEADER_TEXT_DARK);
+                        SetBkMode(nmcd.hdc, TRANSPARENT as i32);
+                        return CDRF_NEWFONT as LRESULT;
+                    }
+                }
+            } else if nmhdr.hwndFrom == hwnd {
+                // ========================================================
+                // ListView Custom Draw (Ratio column color tiers)
+                // ========================================================
+                // SAFETY: For ListView NM_CUSTOMDRAW, lparam points to NMLVCUSTOMDRAW
+                let nmlvcd = &mut *(lparam as *mut NMLVCUSTOMDRAW);
+                let draw_stage = nmlvcd.nmcd.dwDrawStage;
+
+                if draw_stage == CDDS_PREPAINT {
+                    // Request item-level notifications
+                    return CDRF_NOTIFYITEMDRAW as LRESULT;
+                }
+
+                if draw_stage == CDDS_ITEMPREPAINT {
+                    // Request subitem-level notifications for per-column coloring
+                    return CDRF_NOTIFYSUBITEMDRAW as LRESULT;
+                }
+
+                // Handle subitem prepaint (specific column drawing)
+                if draw_stage == (CDDS_ITEMPREPAINT | CDDS_SUBITEM) {
+                    let sub_item = nmlvcd.i_sub_item;
+
+                    // Only customize the Ratio column (index 7)
+                    if sub_item == columns::RATIO {
+                        let row = nmlvcd.nmcd.dwItemSpec as i32;
+
+                        // Stack-allocated buffer for ratio text (e.g., "42.5%")
+                        let mut text_buffer = [0u16; 16];
+                        let _len = get_listview_item_text(hwnd, row, columns::RATIO, &mut text_buffer);
+
+                        // Parse the ratio and determine color tier
+                        if let Some(ratio) = parse_ratio_from_utf16(&text_buffer) {
+                            let tier = get_ratio_tier(ratio);
+                            let color = tier_to_color(tier, is_dark);
+
+                            // Apply the color
+                            SetTextColor(nmlvcd.nmcd.hdc, color);
+                            SetBkMode(nmlvcd.nmcd.hdc, TRANSPARENT as i32);
+
+                            // Return CDRF_NEWFONT to apply the color change
+                            return CDRF_NEWFONT as LRESULT;
+                        }
+                    }
+
+                    // For non-Ratio columns or unparseable values, continue with default drawing
+                    // Return CDRF_NEWFONT anyway to ensure proper rendering
+                    return CDRF_NEWFONT as LRESULT;
+                }
             }
         }
-    }
     }
 
     // SAFETY: DefSubclassProc is called with valid parameters.
     DefSubclassProc(hwnd, umsg, wparam, lparam)
 }}
+

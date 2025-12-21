@@ -114,16 +114,23 @@ pub fn reveal_path_in_explorer(path: &str) {
     }
 }
 
+/// Calculates the percentage of space saved.
+/// Returns a value between 0.0 and 100.0 (or higher if compressed is larger, though typically clamped or ignored for saving).
+/// 
+/// Formula: 100.0 - (disk / logical * 100.0)
+/// If logical is 0, returns 0.0.
+/// If disk >= logical, returns 0.0 (no saving).
+pub fn calculate_saved_percentage(logical: u64, disk: u64) -> f64 {
+    if logical == 0 { return 0.0; }
+    if disk >= logical { return 0.0; }
+    100.0 - ((disk as f64 / logical as f64) * 100.0)
+}
+
 /// Calculates the compression ratio string (e.g. "40.5%")
 pub fn calculate_ratio_string(logical: u64, disk: u64) -> Vec<u16> {
     if logical == 0 { return to_wstring("-"); }
     
-    let ratio = if disk >= logical {
-        0.0
-    } else {
-        100.0 - ((disk as f64 / logical as f64) * 100.0)
-    };
-    
+    let ratio = calculate_saved_percentage(logical, disk);
     let s = format!("{:.1}%", ratio);
     to_wstring(&s)
 }

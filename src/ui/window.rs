@@ -15,7 +15,7 @@ use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Shell::DragAcceptFiles;
 use windows_sys::Win32::UI::Controls::{
-    PBM_SETRANGE32, PBM_SETPOS, NMITEMACTIVATE, NMHDR, NM_CLICK, NM_DBLCLK,
+    PBM_SETRANGE32, PBM_SETPOS, NMITEMACTIVATE, NMHDR, NM_CLICK, NM_DBLCLK, NM_CUSTOMDRAW,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
     LVN_ITEMCHANGED, BST_CHECKED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NM_RCLICK,
 };
@@ -612,9 +612,9 @@ impl AppState {
                              ctrls.file_list.update_item_text(row, 7, ratio_str);
                          }
 
-                         ctrls.file_list.update_item_text(row, 10, to_wstring("▶ Start")); // Start is now 10
+                         ctrls.file_list.update_item_text(row, 10, to_wstring("")); 
                          if let Some(item) = self.batch_items.get_mut(row as usize) {
-                             item.status = BatchStatus::Pending;
+                             item.status = BatchStatus::Complete;
                              item.state_flag = None;
                          }
                      }
@@ -863,6 +863,17 @@ impl AppState {
                      if handlers::on_list_rclick(self, hwnd, nmia.iItem, nmia.iSubItem) {
                          return 1;
                      }
+                } else if nmhdr.code == NM_CUSTOMDRAW {
+                    // Handle custom draw for Ratio column color coding
+                    if let Some(ctrls) = &self.controls {
+                        let is_dark = theme::resolve_mode(self.theme);
+                        let list_hwnd = ctrls.file_list.hwnd();
+                        if let Some(result) = crate::ui::components::file_list::handle_listview_customdraw(
+                            list_hwnd, lparam, is_dark, &self.batch_items
+                        ) {
+                            return result;
+                        }
+                    }
                 }
             }
             0
