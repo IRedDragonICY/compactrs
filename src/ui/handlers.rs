@@ -65,6 +65,8 @@ pub unsafe fn on_remove_selected(st: &mut AppState) {
             ctrls.file_list.remove_item(idx as i32); 
         }
     }
+    
+    update_process_button_state(st);
 }
 
 pub unsafe fn on_clear_all(st: &mut AppState) {
@@ -79,6 +81,37 @@ pub unsafe fn on_clear_all(st: &mut AppState) {
     
     st.global_progress_current.store(0, std::sync::atomic::Ordering::Relaxed);
     st.global_progress_total.store(0, std::sync::atomic::Ordering::Relaxed);
+    
+    update_process_button_state(st);
+}
+
+pub unsafe fn update_process_button_state(st: &AppState) {
+    if let Some(ctrls) = &st.controls {
+        let btn = Button::new(ctrls.action_panel.process_hwnd());
+        
+        // This function must be safe to call even if lists are changing
+        let selected_count = ctrls.file_list.get_selection_count();
+        
+        if selected_count > 0 {
+            let text = format!("Process Selected ({})", selected_count);
+            btn.set_text(&text);
+            btn.set_enabled(true);
+        } else {
+            // Count pending items
+            let pending_count = st.batch_items.iter()
+                .filter(|i| i.status == BatchStatus::Pending || matches!(i.status, BatchStatus::Error(_)))
+                .count();
+                
+            if pending_count > 0 {
+                let text = format!("Process Pending ({})", pending_count);
+                btn.set_text(&text);
+                btn.set_enabled(true);
+            } else {
+                btn.set_text("Process All");
+                btn.set_enabled(false);
+            }
+        }
+    }
 }
 
 pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool) {
@@ -91,8 +124,30 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
     
     if let Some(ctrls) = &st.controls {
         let mut indices = ctrls.file_list.get_selected_indices();
-        if is_auto_start && indices.is_empty() { return; }
-        if indices.is_empty() { indices = (0..st.batch_items.len()).collect(); }
+        
+        // Auto-start logic implies processing "all" (or conceptually "all pending" which is usually everything at startup).
+        // If user manually clicks "Process All" (or "Process Pending"), selection might be empty.
+        
+        if indices.is_empty() {
+            // No selection: Filter for Pending/Error items
+           indices = st.batch_items.iter().enumerate()
+                .filter(|(_, item)| item.status == BatchStatus::Pending || matches!(item.status, BatchStatus::Error(_)))
+                .map(|(i, _)| i)
+                .collect();
+                
+            if indices.is_empty() && !is_auto_start {
+                 // Nothing selected and nothing pending -> Show message or just return
+                 // The button should be disabled ideally, but if forced:
+                 let w_info = to_wstring("Info");
+                 // Use a more generic message if we are in a weird state
+                 let w_msg = to_wstring("No pending items to process.");
+                 MessageBoxW(hwnd, w_msg.as_ptr(), w_info.as_ptr(), MB_OK | MB_ICONINFORMATION);
+                 return;
+            }
+        }
+        
+        if indices.is_empty() { return; }
+
         start_processing(st, hwnd, indices);
     }
 }
@@ -215,7 +270,14 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
 // --- Notification Handlers (ListView) ---
 
 pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, code: u32) {
-    if row < 0 { return; }
+    if row < 0 {
+        // Clicked on background/empty space -> Deselect All
+        if let Some(ctrls) = &st.controls {
+            ctrls.file_list.deselect_all();
+            update_process_button_state(st);
+        }
+        return; 
+    }
     
     if col == 0 && code == NM_DBLCLK { // Open Path
          if let Some(item) = st.batch_items.get(row as usize) {
@@ -542,7 +604,9 @@ pub unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM)
                     match _cmd {
                         1003 => { Button::new(windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CANCEL as i32)).set_enabled(false); on_stop_processing(st); },
                         1004 => { on_remove_selected(st); },
-                        1005 => start_processing(st, hwnd, selected.clone()),
+                        1005 => {
+                             start_processing(st, hwnd, selected.clone());
+                        },
                         1006 => {
                             if let Some(&first_idx) = selected.first() {
                                 if let Some(item) = st.batch_items.get(first_idx as usize) {
@@ -604,6 +668,7 @@ pub unsafe fn process_clipboard(hwnd: HWND, st: &mut AppState) {
                 let path_str = text.trim().trim_matches('"').to_string();
                 if std::path::Path::new(&path_str).exists() {
                     st.ingest_paths(vec![path_str]);
+                    update_process_button_state(st);
                 }
             }
         }

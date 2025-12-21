@@ -257,8 +257,8 @@ impl Component for ActionPanel {
         self.hwnd_process = ControlBuilder::new(parent, self.ids.btn_process)
             .button()
             .text_w(w!("Process All"))
-            .pos(500, btn_y)
-            .size(100, btn_h)
+            .pos(550, btn_y)
+            .size(160, btn_h)
             .dark_mode(is_dark)
             .build();
         // Apply accent button style for modern Windows 11 look
@@ -268,7 +268,7 @@ impl Component for ActionPanel {
         self.hwnd_cancel = ControlBuilder::new(parent, self.ids.btn_cancel)
             .button()
             .text_w(w!("Cancel"))
-            .pos(610, btn_y)
+            .pos(720, btn_y)
             .size(80, btn_h)
             .dark_mode(is_dark)
             .build();
@@ -410,7 +410,7 @@ impl Component for ActionPanel {
                 std::ptr::null_mut(),
                 padding + 540,
                 btn_y,
-                110, // Increased from 90 to fit "Process Selected"
+                160, // Increased to fit "Process Selected (NNN)"
                 btn_height,
                 SWP_NOZORDER,
             );
@@ -419,14 +419,15 @@ impl Component for ActionPanel {
             SetWindowPos(
                 self.hwnd_cancel,
                 std::ptr::null_mut(),
-                padding + 660, // Adjusted from 565 to account for wider Process button
+                padding + 710, // Adjusted Shift for wider Process button
                 btn_y,
-                70,
+                80,
                 btn_height,
                 SWP_NOZORDER,
             );
         }
     }
+
 
     unsafe fn on_theme_change(&mut self, is_dark: bool) {
         unsafe {

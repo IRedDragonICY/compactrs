@@ -6,7 +6,7 @@ use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_SIZE, WM_COMMAND,
     WM_DROPFILES, SendMessageW, SetWindowTextW, WM_TIMER, SetTimer,
-    WM_NOTIFY, GetClientRect, GetWindowRect, 
+    WM_NOTIFY, GetClientRect, GetWindowRect, WM_LBUTTONDOWN, WM_LBUTTONDBLCLK,
     ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA, WM_CONTEXTMENU, 
     SetForegroundWindow, GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, 
     WM_DESTROY, KillTimer, WM_SETTINGCHANGE, WM_CLOSE, MessageBoxW, MB_YESNO, MB_ICONWARNING, IDNO, DestroyWindow,
@@ -314,6 +314,14 @@ impl WindowHandler for AppState {
                 WM_NOTIFY => Some(self.handle_notify(hwnd, lparam)),
                 WM_CONTEXTMENU => Some(self.handle_context_menu(hwnd, wparam)),
                 0x0100 => Some(self.handle_keydown(hwnd, wparam)), // WM_KEYDOWN
+                WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+                    // Clicking on the window background (outside listview) deselects all
+                    if let Some(ctrls) = &self.controls {
+                        ctrls.file_list.deselect_all();
+                        handlers::update_process_button_state(self);
+                    }
+                    None
+                },
                 
                 _ => None,
             }
@@ -531,6 +539,7 @@ impl AppState {
                      if let Some(ctrls) = &self.controls {
                          windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
                      }
+                     handlers::update_process_button_state(self);
                  },
                  UiMessage::ScanProgress(id, logical, disk, count) => {
                      if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
@@ -619,6 +628,7 @@ impl AppState {
                          ctrls.file_list.update_item_text(row, 1, state_str);
                          ctrls.file_list.update_item_text(row, 10, w!("")); 
                      }
+                     handlers::update_process_button_state(self);
                  },
                  UiMessage::BatchItemAnalyzed(id, log, disk, state) => {
                      let log_str = format_size(log);
@@ -651,6 +661,7 @@ impl AppState {
                              let msg = concat_wstrings(&[&count_w, w!(" item(s) analyzed.")]);
                              SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
                          }
+                         handlers::update_process_button_state(self);
                      }
                  },
                  UiMessage::UpdateEstimate(id, algo, est_size) => {
@@ -852,11 +863,7 @@ impl AppState {
                 } else if nmhdr.code == LVN_COLUMNCLICK {
                     handlers::on_column_click(self, lparam);
                 } else if nmhdr.code == LVN_ITEMCHANGED {
-                    if let Some(ctrls) = &self.controls {
-                        let count = ctrls.file_list.get_selection_count();
-                        let text = if count > 0 { "Process Selected" } else { "Process All" };
-                        SetWindowTextW(ctrls.action_panel.process_hwnd(), to_wstring(text).as_ptr());
-                    }
+                   handlers::update_process_button_state(self);
                 } else if nmhdr.code == NM_RCLICK {
                      let nmia = &*(lparam as *const NMITEMACTIVATE);
                      if handlers::on_list_rclick(self, hwnd, nmia.iItem, nmia.iSubItem) {

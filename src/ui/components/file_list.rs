@@ -493,6 +493,14 @@ impl FileListView {
         unsafe { SendMessageW(self.hwnd, LVM_GETITEMCOUNT, 0, 0) as i32 }
     }
 
+    /// Deselects all items in the list.
+    pub fn deselect_all(&self) {
+        let selected = self.get_selected_indices();
+        for idx in selected {
+            self.set_selected(idx as i32, false);
+        }
+    }
+
     /// Sets the selection state for an item.
     ///
     /// # Arguments
