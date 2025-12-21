@@ -82,7 +82,8 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
     EnableWindow(parent, 0);
     
     // Message Loop
-    crate::ui::framework::run_message_loop();
+    // Message Loop
+    crate::ui::framework::run_message_loop(_hwnd);
     
     EnableWindow(parent, 1);
     

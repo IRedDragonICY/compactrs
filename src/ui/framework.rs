@@ -11,7 +11,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
     WM_CLOSE, WM_DESTROY, DestroyWindow, PostQuitMessage,
     MSG, GetMessageW, TranslateMessage, DispatchMessageW,
-    WS_VISIBLE, WS_OVERLAPPEDWINDOW,
+    WS_VISIBLE, WS_OVERLAPPEDWINDOW, IsDialogMessageW,
 };
 use crate::utils::to_wstring;
 
@@ -332,12 +332,14 @@ pub unsafe fn load_app_icon(instance: HINSTANCE) -> HICON { unsafe {
 }}
 
 /// Runs the standard Windows message loop.
-pub unsafe fn run_message_loop() {
+pub unsafe fn run_message_loop(hwnd: HWND) {
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     while unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) } > 0 {
         unsafe {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+            if IsDialogMessageW(hwnd, &msg) == 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
         }
     }
 }
@@ -351,7 +353,7 @@ pub unsafe fn show_modal<T: WindowHandler>(
     let hwnd_res = builder.build(parent);
     if let Ok(hwnd) = hwnd_res {
         if hwnd != std::ptr::null_mut() {
-            run_message_loop();
+            run_message_loop(hwnd);
         }
     }
 }

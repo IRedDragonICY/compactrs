@@ -3,18 +3,15 @@
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DispatchMessageW, GetMessageW, MessageBoxW, TranslateMessage, 
-    MB_ICONERROR, MB_OK, MSG, WM_QUIT, SW_SHOW, FindWindowW, SendMessageW,
-    WM_COPYDATA, WM_COMMAND, WM_KEYDOWN,
+    MessageBoxW, MB_ICONERROR, MB_OK, SW_SHOW, FindWindowW, SendMessageW,
+    WM_COPYDATA,
 };
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_DELETE};
 use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
 use windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW;
 use std::ptr;
 use std::sync::OnceLock;
 
-use crate::ui::controls::{IDC_BTN_ADD_FILES, IDC_BTN_ADD_FOLDER, IDC_BTN_REMOVE};
 
 pub mod ui;
 pub mod engine;
@@ -225,63 +222,8 @@ fn main() {
         };
 
         // Message Loop
-        let mut msg: MSG = std::mem::zeroed();
-        // GetMessageW returns BOOL (i32). strict > 0 check for success.
-        // HWND parameter should be NULL (0/null_mut) to retrieve messages for any window belonging to the current thread
-        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-            if msg.message == WM_QUIT {
-                break;
-            }
-
-            // Global Shortcuts Interception
-            if msg.message == WM_KEYDOWN {
-                let vk = msg.wParam as u16;
-                let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
-                let shift_pressed = (GetKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
-                
-                let mut handled = false;
-                
-                if ctrl_pressed {
-                    match vk {
-                        0x4F => { // 'O'
-                            if shift_pressed {
-                                // Ctrl+Shift+O -> Add Folder
-                                SendMessageW(hwnd_main, WM_COMMAND, IDC_BTN_ADD_FOLDER as usize, 0);
-                                handled = true;
-                            } else {
-                                // Ctrl+O -> Add Files
-                                SendMessageW(hwnd_main, WM_COMMAND, IDC_BTN_ADD_FILES as usize, 0);
-                                handled = true;
-                            }
-                        },
-                         0x41 => { // 'A' - Select All
-                             SendMessageW(hwnd_main, WM_KEYDOWN, vk as usize, 0);
-                             handled = true;
-                         },
-                         0x56 => { // 'V' - Paste
-                             // Forward to generic handler or rely on window procedures
-                             // Since our window.rs logic listens for WM_KEYDOWN with Ctrl+V, simply forwarding works
-                             SendMessageW(hwnd_main, WM_KEYDOWN, vk as usize, 0);
-                             handled = true;
-                         },
-                        _ => {}
-                    }
-                } else if vk == VK_DELETE as u16 {
-                     // Propagate Delete to main window to trigger removal
-                     // Send WM_COMMAND directly
-                     SendMessageW(hwnd_main, WM_COMMAND, IDC_BTN_REMOVE as usize, 0);
-                     handled = true;
-                }
-                
-                if handled {
-                    continue;
-                }
-            }
-            
-            // Dispatch key events manually if needed or just translate
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
+        // We now use the framework's run_message_loop which supports IsDialogMessageW
+        ui::framework::run_message_loop(hwnd_main);
 
         // Clean up COM
         windows_sys::Win32::System::Com::CoUninitialize();
