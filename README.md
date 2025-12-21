@@ -18,7 +18,7 @@
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
 <div align="center">
   <!-- Replace these with actual screenshots -->
