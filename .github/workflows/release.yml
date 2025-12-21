@@ -36,7 +36,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $fallbackVersion = "v4.2.4"
+          $fallbackVersion = "v5.0.2"
           try {
               $headers = @{ "Authorization" = "token $env:GITHUB_TOKEN" }
               $response = Invoke-RestMethod -Uri "https://api.github.com/repos/upx/upx/releases/latest" -Headers $headers -ErrorAction Stop
