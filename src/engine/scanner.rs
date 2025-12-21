@@ -35,15 +35,6 @@ pub struct PathMetrics {
 
 // ===== HEURISTICS =====
 
-/// Extensions that should be skipped (already compressed or incompressible).
-const SKIP_EXTENSIONS: &[&str] = &[
-    "zip", "7z", "rar", "gz", "bz2", "xz", "zst", "lz4",  // Archives
-    "jpg", "jpeg", "png", "gif", "webp", "avif", "heic",  // Images
-    "mp4", "mkv", "avi", "webm", "mov", "wmv",            // Video
-    "mp3", "flac", "aac", "ogg", "opus", "wma",           // Audio
-    "pdf",                                                 // Documents
-];
-
 /// Check if a file path is considered a critical system path that should be protected.
 pub fn is_critical_path(path: &str) -> bool {
     let lower = path.to_lowercase();
@@ -55,11 +46,15 @@ pub fn is_critical_path(path: &str) -> bool {
 }
 
 /// Check if a file should be skipped based on extension.
-pub fn should_skip_extension(path: &str) -> bool {
+pub fn should_skip_extension(path: &str, enabled: bool, custom_list: &str) -> bool {
+    if !enabled { return false; }
+    
     let path_obj = std::path::Path::new(path);
     if let Some(ext) = path_obj.extension().and_then(|s| s.to_str()) {
         let ext_lower = ext.to_lowercase();
-        SKIP_EXTENSIONS.iter().any(|&skip_ext| ext_lower == skip_ext)
+        custom_list.split(',')
+            .map(|s| s.trim())
+            .any(|skip_ext| skip_ext.eq_ignore_ascii_case(&ext_lower))
     } else {
         false
     }
@@ -297,5 +292,27 @@ fn resolve_mixed_state(algos: std::collections::HashSet<u32>) -> CompressionStat
         2 => CompressionState::Specific(WofAlgorithm::Xpress8K),
         3 => CompressionState::Specific(WofAlgorithm::Xpress16K),
         _ => CompressionState::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_skip_extension() {
+        let list = "zip,7z,rar";
+        
+        // Enabled, match
+        assert!(should_skip_extension("test.zip", true, list));
+        assert!(should_skip_extension("TEST.ZIP", true, list));
+        assert!(should_skip_extension("archive.7z", true, list));
+        
+        // Enabled, no match
+        assert!(!should_skip_extension("test.txt", true, list));
+        assert!(!should_skip_extension("image.jpg", true, list)); // Not in custom list
+        
+        // Disabled
+        assert!(!should_skip_extension("test.zip", false, list));
     }
 }

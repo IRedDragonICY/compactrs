@@ -43,6 +43,11 @@ const IDC_CHK_LOG_TRACE: u16 = 2025;
 const IDC_LBL_CONCURRENT: u16 = 2030;
 const IDC_EDIT_CONCURRENT: u16 = 2031;
 
+const IDC_GRP_FILTER: u16 = 2040;
+const IDC_CHK_SKIP_EXT: u16 = 2041;
+const IDC_EDIT_EXTENSIONS: u16 = 2042;
+const IDC_BTN_RESET_EXT: u16 = 2043;
+
 struct SettingsState {
     theme: AppTheme,
     result: Option<AppTheme>,
@@ -55,6 +60,8 @@ struct SettingsState {
     max_concurrent_items: u32, // Track max concurrent items
     log_enabled: bool,
     log_level_mask: u8,
+    enable_skip_heuristics: bool,
+    skip_extensions: String,
     update_status: UpdateStatus,
 }
 
@@ -74,7 +81,26 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 
 
 // Main settings modal function with proper data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool, max_threads: u32, max_concurrent_items: u32, log_enabled: bool, log_level_mask: u8) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8) {
+pub unsafe fn show_settings_modal(
+    parent: HWND, 
+    current_theme: AppTheme, 
+    is_dark: bool, 
+    enable_force_stop: bool, 
+    enable_context_menu: bool, 
+    enable_system_guard: bool, 
+    low_power_mode: bool, 
+    max_threads: u32, 
+    max_concurrent_items: u32, 
+    log_enabled: bool, 
+    log_level_mask: u8,
+    enable_skip_heuristics: bool,
+    skip_extensions_buf: [u16; 512]
+) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512]) {
+    // Convert buf to String for state
+    let skip_string = String::from_utf16_lossy(&skip_extensions_buf)
+        .trim_matches(char::from(0))
+        .to_string();
+
     // Use centralized helper
     let mut state = SettingsState {
         theme: current_theme,
@@ -88,6 +114,8 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         max_concurrent_items,
         log_enabled,
         log_level_mask,
+        enable_skip_heuristics,
+        skip_extensions: skip_string,
         update_status: UpdateStatus::Idle,
     };
     
@@ -96,17 +124,25 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         &mut state, 
         "CompactRS_Settings", 
         SETTINGS_TITLE, 
-        300, 
-        520, 
+        550, // Increased width slightly 
+        760, // Increased height for new group
         is_dark
     );
     
-    if !ran_modal {
-         // Existing window brought to front. Return "no result" values.
-         return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask);
+    let mut final_buf = [0u16; 512];
+    if ran_modal {
+        let mut i = 0;
+        for c in state.skip_extensions.encode_utf16() {
+            if i < 511 {
+                final_buf[i] = c;
+                i += 1;
+            }
+        }
+        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf)
+    } else {
+         // Return original values if cancelled/prevented
+         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf)
     }
-    
-    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask)
 }
 
 impl WindowHandler for SettingsState {
@@ -267,9 +303,79 @@ impl WindowHandler for SettingsState {
                 .dark_mode(is_dark_mode)
                 .build();
 
+            // File Filtering Group (Bottom Left)
+            // Use same layout context or new one? layout Y is currently at the concurrent items line.
             layout.add_space(30);
+
+            // Group Box
+            let (x_grp, y_grp) = (10, layout.cursor_y());
+            let _grp_filter = ControlBuilder::new(hwnd, IDC_GRP_FILTER)
+                .groupbox()
+                .text_w(w!("File Filtering (Skip Heuristics)"))
+                .pos(x_grp, y_grp)
+                .size(260, 150)
+                .dark_mode(is_dark_mode)
+                .build();
+            
+            // Re-init layout for inside group
+            let mut filter_layout = crate::ui::layout::LayoutContext::new(x_grp + 20, y_grp + 30, 220, 5);
+
+            // Checkbox: Skip incompressible
+            let (x, y, w, h) = filter_layout.row(25);
+            let _chk_skip = ControlBuilder::new(hwnd, IDC_CHK_SKIP_EXT)
+                .checkbox()
+                .text_w(w!("Skip incompressible files (Recommended)"))
+                .pos(x, y)
+                .size(w + 10, h)
+                .dark_mode(is_dark_mode)
+                .checked(self.enable_skip_heuristics)
+                .build();
+            
+            // Extensions Edit
+            let (x, y, w, h) = filter_layout.row(50); // Multiline? Single line is probably enough if horizontal scrolling works, but multiline is safer for long lists.
+            let h_edit_ext = ControlBuilder::new(hwnd, IDC_EDIT_EXTENSIONS)
+                .edit()
+                .text(&self.skip_extensions)
+                .pos(x, y)
+                .size(w, h)
+                .style((windows_sys::Win32::UI::WindowsAndMessaging::ES_AUTOVSCROLL | windows_sys::Win32::UI::WindowsAndMessaging::ES_MULTILINE) as u32) 
+                .dark_mode(is_dark_mode)
+                .build();
+            
+            // Disable if unchecked
+            if !self.enable_skip_heuristics {
+                Button::new(h_edit_ext).set_enabled(false);
+            }
+
+            // Reset Button
+            let (x, y, _, h) = filter_layout.row(25);
+            let h_btn_reset = ControlBuilder::new(hwnd, IDC_BTN_RESET_EXT)
+                .button()
+                .text_w(w!("Reset to Defaults"))
+                .pos(x, y)
+                .size(120, h)
+                .dark_mode(is_dark_mode)
+                .build();
+
+            if !self.enable_skip_heuristics {
+                 Button::new(h_btn_reset).set_enabled(false);
+            }
+
+            // Adjust layout for Close button (Needs to be below everything)
+            // The logic below originally put it at a relatively fixed layout position. 
+            // We need to push it down.
+            // Original code: Updates Section at layout.row(25).
+            // We injected File Filtering before it? 
+            // Actually, Updates Section was AFTER Concurrency. 
+            // I added File Filtering AFTER Concurrency. 
+            // So Updates Section needs to be AFTER File Filtering now.
+            // layout context Y is updated by add_space(30) but then I used manual Y for group.
+            // I need to sync layout.
+            
+            layout.add_space(160); // Space for GroupBox (150) + margin
             
             // Updates Section
+
             let (x, y, _w, h) = layout.row(25);
             let _btn_update = ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
                 .button()
@@ -309,9 +415,9 @@ impl WindowHandler for SettingsState {
                 .build();
 
             // LOGGING SECTION (Right Column)
-            // Re-size main window to accommodate right column
+            // Re-size main window to accommodate right column and increased height
             use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos;
-            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 520, 520, windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER);
+            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 550, 760, windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER);
 
             // Group Box: Debug Logging
             let _grp_log = ControlBuilder::new(hwnd, IDC_GRP_LOGGING)
@@ -565,6 +671,41 @@ impl WindowHandler for SettingsState {
                              }
                              DestroyWindow(hwnd);
                          },
+                          IDC_CHK_SKIP_EXT => {
+                              if (code as u32) == BN_CLICKED {
+                                  let h_chk = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_SKIP_EXT as i32);
+                                  let checked = Button::new(h_chk).is_checked();
+                                  self.enable_skip_heuristics = checked;
+                                  
+                                  // Enable/Disable Edit and Reset Button
+                                  let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                                  let h_reset = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_RESET_EXT as i32);
+                                  
+                                  if h_edit != std::ptr::null_mut() { Button::new(h_edit).set_enabled(checked); }
+                                  if h_reset != std::ptr::null_mut() { Button::new(h_reset).set_enabled(checked); }
+                              }
+                          },
+                          IDC_BTN_RESET_EXT => {
+                              if (code as u32) == BN_CLICKED {
+                                  // Reset text to default
+                                   let default_skip = "zip,7z,rar,gz,bz2,xz,zst,lz4,jpg,jpeg,png,gif,webp,avif,heic,mp4,mkv,avi,webm,mov,wmv,mp3,flac,aac,ogg,opus,wma,pdf";
+                                   let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                                   if h_edit != std::ptr::null_mut() {
+                                       windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW(h_edit, to_wstring(default_skip).as_ptr());
+                                   }
+                              }
+                          },
+                          IDC_EDIT_EXTENSIONS => {
+                               if (code as u32) == windows_sys::Win32::UI::WindowsAndMessaging::EN_CHANGE {
+                                   let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                                   if h_edit != std::ptr::null_mut() {
+                                       let len = windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(h_edit);
+                                       let mut buf = vec![0u16; (len + 1) as usize];
+                                       windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW(h_edit, buf.as_mut_ptr(), len + 1);
+                                       self.skip_extensions = String::from_utf16_lossy(&buf[..len as usize]);
+                                   }
+                               }
+                          },
                           IDC_CHK_FORCE_STOP => {
                               if (code as u32) == BN_CLICKED {
                                    let mut checked = false;

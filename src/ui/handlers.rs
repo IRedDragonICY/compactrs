@@ -15,7 +15,7 @@ use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP};
 use windows_sys::Win32::UI::Controls::{NM_CLICK, NM_DBLCLK, NMLISTVIEW};
-use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
+use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use std::thread;
 use std::sync::atomic::Ordering;
 use std::cmp::Ordering as CmpOrdering;
@@ -203,18 +203,24 @@ pub unsafe fn start_processing_internal(st: &mut AppState, hwnd: HWND, indices_t
             })
         }).collect();
         
+        // Prepare settings
         let force = st.force_compress;
         let guard = st.config.enable_system_guard;
         let low_power = st.low_power_mode;
         let max_threads = st.config.max_threads;
         let main_hwnd_usize = hwnd as usize;
+
+        let enable_skip = st.config.enable_skip_heuristics;
+        let skip_list = String::from_utf16_lossy(&st.config.skip_extensions_buf)
+            .trim_matches(char::from(0))
+            .to_string();
         
         // Launch Worker Thread
         let global_cur = st.global_progress_current.clone();
         let global_tot = st.global_progress_total.clone();
 
         thread::spawn(move || {
-            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard, low_power, max_threads, global_cur, global_tot);
+            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard, low_power, max_threads, global_cur, global_tot, enable_skip, skip_list);
         });
     }
 }
@@ -324,26 +330,33 @@ pub unsafe fn update_process_button_state(st: &AppState) {
 pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     let current_theme = st.theme;
     let is_dark = theme::resolve_mode(st.theme);
-    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads, new_concurrent, new_log_enabled, new_log_mask) = crate::ui::dialogs::show_settings_modal(
+    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads, new_concurrent, new_log_enabled, new_log_mask, new_skip, new_skip_buf) = crate::ui::dialogs::show_settings_modal(
         hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard, st.low_power_mode, st.config.max_threads,
-        st.config.max_concurrent_items, st.config.log_enabled, st.config.log_level_mask
+        st.config.max_concurrent_items, st.config.log_enabled, st.config.log_level_mask,
+        st.config.enable_skip_heuristics, st.config.skip_extensions_buf
     );
     
     if let Some(t) = new_theme {
         st.theme = t;
-        let new_is_dark = theme::resolve_mode(st.theme);
-        theme::set_window_frame_theme(hwnd, new_is_dark);
-        if let Some(ctrls) = &mut st.controls { ctrls.update_theme(new_is_dark, hwnd); }
-        InvalidateRect(hwnd, std::ptr::null(), 1);
+        st.config.theme = t;
+        // Theme application handled by dialog callbacks to parent
     }
+    
     st.enable_force_stop = new_force;
+    st.config.enable_force_stop = new_force; // Settings matches config field
+
     st.config.enable_context_menu = new_ctx;
     st.config.enable_system_guard = new_guard;
     st.low_power_mode = new_low_power;
+    st.config.low_power_mode = new_low_power; // Sync config
     st.config.max_threads = new_threads;
     st.config.max_concurrent_items = new_concurrent;
     st.config.log_enabled = new_log_enabled;
     st.config.log_level_mask = new_log_mask;
+    
+    // New fields
+    st.config.enable_skip_heuristics = new_skip;
+    st.config.skip_extensions_buf = new_skip_buf;
     
     // Update global logger state
     if st.config.log_enabled {

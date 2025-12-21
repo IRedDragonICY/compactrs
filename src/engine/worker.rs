@@ -79,6 +79,8 @@ pub fn batch_process_worker(
     max_threads: u32,
     global_current: Arc<AtomicU64>,
     global_total: Arc<AtomicU64>,
+    enable_skip: bool,
+    skip_extensions: String,
 ) {
     let _sleep_guard = ExecutionStateGuard::new();
     let _ = tx.send(UiMessage::StatusText("Discovering files...".to_string()));
@@ -173,6 +175,8 @@ pub fn batch_process_worker(
             let force = force;
             let hwnd = main_hwnd;
             let guard = guard_enabled;
+            let skip_en = enable_skip;
+            let skip_ext = skip_extensions.clone();
 
             s.spawn(move || {
                 crate::engine::wof::enable_backup_privileges();
@@ -183,7 +187,7 @@ pub fn batch_process_worker(
                     if st.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 { break; }
 
                     let (res, size) = process_file_core(
-                        &task.path, task.algorithm, task.action, force, hwnd, guard
+                        &task.path, task.algorithm, task.action, force, hwnd, guard, skip_en, &skip_ext
                     );
 
                     match res {
@@ -258,6 +262,8 @@ fn process_file_core(
     force: bool,
     main_hwnd: usize,
     guard_enabled: bool,
+    enable_skip: bool,
+    skip_ext_list: &str,
 ) -> (ProcessResult, u64) {
     match action {
         BatchAction::Compress => {
@@ -273,10 +279,10 @@ fn process_file_core(
                          return (ProcessResult::Skipped("Already optimal".to_string()), get_real_file_size(path));
                      }
                  }
-                 if should_skip_extension(path) {
-                     crate::log_info!("Skipped (Ext): {}", path);
-                     return (ProcessResult::Skipped("Filtered extension".to_string()), get_real_file_size(path));
-                 }
+                     if should_skip_extension(path, enable_skip, skip_ext_list) {
+                         crate::log_info!("Skipped (Ext): {}", path);
+                         return (ProcessResult::Skipped("Filtered extension".to_string()), get_real_file_size(path));
+                     }
             }
 
             // Attempt Compression
