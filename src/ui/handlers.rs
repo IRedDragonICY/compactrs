@@ -15,8 +15,8 @@ use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 
 
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP};
-use windows_sys::Win32::UI::Controls::{NM_CLICK, NM_DBLCLK, NMLISTVIEW};
-use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
+use windows_sys::Win32::UI::Controls::{NM_CLICK, NM_DBLCLK, NMLISTVIEW, LVM_GETSUBITEMRECT};
+use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
 use std::thread;
 use std::sync::atomic::Ordering;
 use std::cmp::Ordering as CmpOrdering;
@@ -175,6 +175,12 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
         windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
         let w_stop = to_wstring("Stopping...");
         SetWindowTextW(ctrls.status_bar.label_hwnd(), w_stop.as_ptr());
+        
+        // Reset all items' visuals
+        for (i, _item) in st.batch_items.iter().enumerate() {
+             ctrls.file_list.update_item_text(i as i32, 10, to_wstring("▶ Start"));
+             ctrls.file_list.update_item_text(i as i32, 9, to_wstring("Cancelled"));
+        }
     }
 }
 
@@ -261,13 +267,95 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
               };
               if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, to_wstring(name)); }
           }
-    } else if col == 9 && code == NM_CLICK { // Start/Pause Single Item (was col 8, now col 9)
-           if let Some(item) = st.batch_items.get_mut(row as usize) {
-                // Trigger single item processing
-                // Fix unused var warning by using the var
-                let _ = item; 
-                let indices = vec![row as usize];
-                start_processing(st, hwnd, indices);
+    } else if col == 10 && code == NM_CLICK { // Start/Pause/Stop (Column 10)
+           if let Some(_item) = st.batch_items.get_mut(row as usize) {
+               // Get correct ListView HWND
+               let list_hwnd = if let Some(ctrls) = &st.controls {
+                   ctrls.file_list.hwnd()
+               } else {
+                   return;
+               };
+
+                // Get subitem rect to determine click position (Left=Pause, Right=Stop)
+                let mut rect: windows_sys::Win32::Foundation::RECT = unsafe { std::mem::zeroed() };
+                rect.top = 10; // 0-based index of subitem (Column 10)
+                rect.left = windows_sys::Win32::UI::Controls::LVIR_BOUNDS as i32;
+                
+                unsafe {
+                    let _ = SendMessageW(list_hwnd, LVM_GETSUBITEMRECT, row as usize, &mut rect as *mut _ as isize);
+                }
+                
+                let mut pt: POINT = unsafe { std::mem::zeroed() };
+                unsafe {
+                    GetCursorPos(&mut pt);
+                    ScreenToClient(list_hwnd, &mut pt);
+                }
+                
+                // Determine width of the cell
+                let width = rect.right - rect.left;
+                // If retrieval failed practically (width <= 0), default to Left (Pause)
+                let is_right_half = if width > 0 {
+                    pt.x > (rect.left + width / 2)
+                } else {
+                    false
+                };
+                
+                // Current State
+                // Note: item.state_flag is Arc<AtomicU8>. We should check that or st.global_state if single job.
+                // For now, check item.state_flag if present, else global_state? 
+                // Actually, `start_processing` sets `st.global_state`.
+                // Single item logic should probably also respect global state or use specific flags.
+                // Let's assume global state for now as concurrent jobs aren't fully supported yet in UI.
+                
+                let current_state_val = st.global_state.load(Ordering::Relaxed);
+                let current_state = ProcessingState::from_u8(current_state_val);
+                
+                match current_state {
+                    ProcessingState::Idle | ProcessingState::Stopped => {
+                        // START
+                        let indices = vec![row as usize];
+                        start_processing(st, hwnd, indices);
+                        // Update text immediately to "⏸   ⏹"
+                        if let Some(ctrls) = &st.controls { 
+                             ctrls.file_list.update_item_text(row, 10, to_wstring("⏸   ⏹"));
+                        }
+                    },
+                    ProcessingState::Running => {
+                        if is_right_half {
+                            // STOP
+                            on_stop_processing(st);
+                            if let Some(ctrls) = &st.controls {
+                                 ctrls.file_list.update_item_text(row, 10, to_wstring("▶ Start"));
+                            }
+                        } else {
+                            // PAUSE
+                            st.global_state.store(ProcessingState::Paused as u8, Ordering::Relaxed);
+                             if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
+                             if let Some(ctrls) = &st.controls { 
+                                 ctrls.file_list.update_item_text(row, 10, to_wstring("▶   ⏹"));
+                                 ctrls.file_list.update_item_text(row, 9, to_wstring("Paused"));
+                                 let msg = to_wstring("Paused.");
+                                 SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
+                            }
+                        }
+                    },
+                    ProcessingState::Paused => {
+                        if is_right_half {
+                             // STOP
+                             on_stop_processing(st);
+                        } else {
+                            // RESUME
+                            st.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                            if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
+                            if let Some(ctrls) = &st.controls { 
+                                 ctrls.file_list.update_item_text(row, 10, to_wstring("⏸   ⏹"));
+                                 ctrls.file_list.update_item_text(row, 9, to_wstring("Processing"));
+                                 let msg = to_wstring("Resumed.");
+                                 SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
+                            }
+                        }
+                    },
+                }
            }
     }
 }

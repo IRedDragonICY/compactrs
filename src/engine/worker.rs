@@ -283,9 +283,17 @@ where
     F: FnMut(&str, bool, &WIN32_FIND_DATAW),
 {
     // Check stop signal immediately
+    // Check stop signal immediately
     if let Some(s) = state {
-        if s.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-            return;
+        loop {
+            let current_state = s.load(Ordering::Relaxed);
+            if current_state == ProcessingState::Stopped as u8 {
+                return;
+            } else if current_state == ProcessingState::Paused as u8 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            } else {
+                break;
+            }
         }
     }
 
@@ -322,10 +330,18 @@ where
 
         loop {
             // Check stop signal in loop
+            // Check stop signal in loop
             if let Some(s) = state {
-                if s.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-                    FindClose(handle);
-                    return;
+                 loop {
+                    let current_state = s.load(Ordering::Relaxed);
+                    if current_state == ProcessingState::Stopped as u8 {
+                        FindClose(handle);
+                        return;
+                    } else if current_state == ProcessingState::Paused as u8 {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    } else {
+                        break;
+                    }
                 }
             }
 
@@ -791,7 +807,17 @@ pub fn batch_process_worker(
     let items_for_producer = items.clone();
     let producer_handle = std::thread::spawn(move || {
         for (path, action, row, algo) in items_for_producer {
-            // Check if stopped
+            // Check if stopped or paused
+            loop {
+                let current_s = state_producer.load(Ordering::Relaxed);
+                if current_s == ProcessingState::Stopped as u8 {
+                    break;
+                } else if current_s == ProcessingState::Paused as u8 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                } else {
+                    break;
+                }
+            }
             if state_producer.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
                 break;
             }

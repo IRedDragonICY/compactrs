@@ -42,7 +42,7 @@ const COLUMN_DEFS: &[(&str, i32)] = &[
     ("Ratio", 60),
     ("Progress", 70),
     ("Status", 80),
-    ("▶ Start", 60),
+    ("▶ Start", 110),
 ];
 
 /// Column indices for the FileListView
@@ -133,9 +133,13 @@ impl FileListView {
     fn setup_columns(&self) {
         for (i, (name, width)) in COLUMN_DEFS.iter().enumerate() {
             let name_wide = to_wstring(name);
+            let mut fmt = LVCFMT_LEFT;
+            if i == columns::START as usize {
+                fmt = windows_sys::Win32::UI::Controls::LVCFMT_CENTER;
+            }
             let col = LVCOLUMNW {
                 mask: LVCF_WIDTH | LVCF_TEXT | LVCF_FMT,
-                fmt: LVCFMT_LEFT,
+                fmt,
                 cx: *width,
                 pszText: name_wide.as_ptr() as *mut _,
                 ..Default::default()

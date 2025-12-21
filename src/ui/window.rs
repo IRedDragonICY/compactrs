@@ -20,6 +20,7 @@ use windows_sys::Win32::UI::Controls::{
     LVN_ITEMCHANGED, BST_CHECKED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NM_RCLICK,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_DELETE};
+use std::sync::atomic::Ordering;
 
 #[link(name = "user32")]
 unsafe extern "system" {
@@ -32,7 +33,7 @@ use crate::ui::components::{
     HeaderPanel, HeaderPanelIds,
 };
 // FIX: Added BatchAction
-use crate::ui::state::{AppState, Controls, UiMessage, BatchStatus, AppTheme, BatchAction};
+use crate::ui::state::{AppState, Controls, UiMessage, BatchStatus, AppTheme, BatchAction, ProcessingState};
 use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
 use crate::ui::theme;
 use crate::ui::handlers; 
@@ -514,8 +515,15 @@ impl AppState {
                              ctrls.file_list.update_item_text(pos as i32, 6, disk_str);
                              ctrls.file_list.update_item_text(pos as i32, 7, ratio_str); // Ratio
                              
-                             let status_text = concat_wstrings(&[&to_wstring("Scanning... "), &count_str]);
-                             ctrls.file_list.update_item_text(pos as i32, 9, status_text); // Status is now 9
+                             let current_state = self.global_state.load(Ordering::Relaxed);
+                             if current_state == ProcessingState::Stopped as u8 {
+                                 ctrls.file_list.update_item_text(pos as i32, 9, to_wstring("Cancelled"));
+                             } else if current_state == ProcessingState::Paused as u8 {
+                                 ctrls.file_list.update_item_text(pos as i32, 9, to_wstring("Paused"));
+                             } else {
+                                 let status_text = concat_wstrings(&[&to_wstring("Scanning... "), &count_str]);
+                                 ctrls.file_list.update_item_text(pos as i32, 9, status_text); // Status is now 9
+                             }
 
                              if let Some(item) = self.batch_items.get(pos) {
                                  let sb_msg = concat_wstrings(&[
@@ -533,7 +541,16 @@ impl AppState {
                  UiMessage::RowUpdate(row, progress, status, _) => {
                      if let Some(ctrls) = &self.controls {
                          ctrls.file_list.update_item_text(row, 8, progress); // Progress is now 8
-                         ctrls.file_list.update_item_text(row, 9, status);   // Status is now 9
+                         
+                         let current_state = self.global_state.load(Ordering::Relaxed);
+                         if current_state == ProcessingState::Stopped as u8 {
+                              ctrls.file_list.update_item_text(row, 9, to_wstring("Cancelled"));
+                         } else if current_state == ProcessingState::Paused as u8 {
+                             // If effectively paused, don't let "Running" overwrite "Paused"
+                              ctrls.file_list.update_item_text(row, 9, to_wstring("Paused"));
+                         } else {
+                              ctrls.file_list.update_item_text(row, 9, status);   // Status is now 9
+                         }
                      }
                  },
                  UiMessage::ItemFinished(row, status, disk_size_vec, final_state) => {
