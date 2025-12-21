@@ -21,6 +21,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ};
 use windows_sys::Win32::UI::Controls::SetWindowTheme;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetWindow, GW_CHILD, GW_HWNDNEXT, GetClassNameW, GetWindowLongW, GWL_STYLE, 
+    BS_GROUPBOX, BS_CHECKBOX, BS_RADIOBUTTON, BS_AUTOCHECKBOX, BS_AUTORADIOBUTTON, BS_3STATE, BS_AUTO3STATE
+};
 
 use crate::utils::to_wstring;
 use crate::ui::state::AppTheme;
@@ -149,6 +153,48 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
         use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_THEMECHANGED};
         SendMessageW(hwnd, WM_THEMECHANGED, 0, 0);
     }
+}
+
+/// Recursively applies theme to child controls.
+pub unsafe fn apply_theme_recursive(parent: HWND, is_dark: bool) {
+    let mut child = GetWindow(parent, GW_CHILD);
+    while child != std::ptr::null_mut() {
+        // Apply to child
+        apply_theme_to_child(child, is_dark);
+        child = GetWindow(child, GW_HWNDNEXT);
+    }
+}
+
+unsafe fn apply_theme_to_child(hwnd: HWND, is_dark: bool) {
+     let mut name_buf = [0u16; 256];
+     let len = GetClassNameW(hwnd, name_buf.as_mut_ptr(), 256);
+     let class_name = String::from_utf16_lossy(&name_buf[..len as usize]).to_lowercase();
+     
+     let ctype = if class_name == "button" {
+         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+         let bs_typ = style & 0xF; 
+         if bs_typ == BS_GROUPBOX as u32 {
+             ControlType::GroupBox
+         } else if bs_typ == BS_CHECKBOX as u32 || bs_typ == BS_AUTOCHECKBOX as u32 || bs_typ == BS_3STATE as u32 || bs_typ == BS_AUTO3STATE as u32 {
+             ControlType::CheckBox
+         } else if bs_typ == BS_RADIOBUTTON as u32 || bs_typ == BS_AUTORADIOBUTTON as u32 {
+             ControlType::RadioButton
+         } else {
+             ControlType::Button
+         }
+     } else if class_name == "combobox" {
+         ControlType::ComboBox
+     } else if class_name == "syslistview32" {
+         ControlType::List
+     } else if class_name == "sysheader32" {
+         ControlType::Header
+     } else if class_name == "msctls_trackbar32" {
+         ControlType::Trackbar
+     } else {
+         return; // Unknown or ignored
+     };
+     
+     apply_theme(hwnd, ctype, is_dark);
 }
 
 /// Applies the application font to the specified window.

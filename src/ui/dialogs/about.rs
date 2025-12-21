@@ -2,15 +2,14 @@
 use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
 use crate::w;
-use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
+use crate::ui::framework::WindowHandler;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, 
-    WS_VISIBLE, WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
+    WS_VISIBLE, WS_CHILD,
     WM_NOTIFY,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
-    WS_TABSTOP,
-    ShowWindow, SetForegroundWindow, SW_RESTORE, WM_SETFONT, SendMessageW,
+    WS_TABSTOP, WM_SETFONT, SendMessageW,
 };
 
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -33,27 +32,16 @@ struct AboutState {
 }
 
 pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
-    let class_name = w!("CompactRS_About");
-
-    // Check if window already exists
-    let existing_hwnd = windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW(class_name.as_ptr(), std::ptr::null());
-    if existing_hwnd != std::ptr::null_mut() {    
-        ShowWindow(existing_hwnd, SW_RESTORE);
-        SetForegroundWindow(existing_hwnd);
-        return;
-    }
-
     let mut state = AboutState { is_dark };
     
-    let bg_brush = crate::ui::theme::get_background_brush(is_dark);
-
-    show_modal(
-        WindowBuilder::new(&mut state, "CompactRS_About", ABOUT_TITLE)
-            .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
-            .size(450, 500)
-            .align(WindowAlignment::CenterOnParent)
-            .background(bg_brush),
-        parent
+    crate::ui::dialogs::base::show_modal_singleton(
+        parent, 
+        &mut state, 
+        "CompactRS_About", 
+        ABOUT_TITLE, 
+        450, 
+        500, 
+        is_dark
     );
 }
 
@@ -126,48 +114,62 @@ impl WindowHandler for AboutState {
             // Set the icon image
             SendMessageW(icon_static, STM_SETICON, hicon as WPARAM, 0);
 
+            // Use LayoutBuilder for text content
+            // Start below icon (20 + 128 = 148). Let's start at 160.
+            let mut layout = crate::ui::layout::LayoutContext::new(margin, 160, content_width, 5);
+
             // App Name - Large bold title using ControlBuilder
+            let (x, y, w, h) = layout.row(40);
             let _app_name = ControlBuilder::new(hwnd, 0)
                 .label(true) // center-aligned
                 .text_w(w!("CompactRS"))
-                .pos(margin, 160)
-                .size(content_width, 40)
+                .pos(x, y)
+                .size(w, h)
                 .font(title_font)
                 .dark_mode(self.is_dark)
                 .build();
 
             // Version - Lighter font using ControlBuilder
             let ver_string = format!("Version {}", env!("APP_VERSION"));
+            let (x, y, w, h) = layout.row(20);
             let _version = ControlBuilder::new(hwnd, 0)
                 .label(true)
                 .text(&ver_string)
-                .pos(margin, 205)
-                .size(content_width, 20)
+                .pos(x, y)
+                .size(w, h)
                 .font(version_font)
                 .dark_mode(self.is_dark)
                 .build();
+            
+            layout.add_space(10);
 
             // Description - Regular body text using ControlBuilder
+            let (x, y, w, h) = layout.row(130);
             let _desc = ControlBuilder::new(hwnd, 0)
                 .label(true)
                 .text_w(w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."))
-                .pos(margin, 240)
-                .size(content_width, 130)
+                .pos(x, y)
+                .size(w, h)
                 .font(body_font)
                 .dark_mode(self.is_dark)
                 .build();
+            
+            layout.add_space(10);
 
             // Created by - Italic style using ControlBuilder
+            let (x, y, w, h) = layout.row(40);
             let _creator = ControlBuilder::new(hwnd, 0)
                 .label(true)
                 .text_w(w!("Created by IRedDragonICY\n(Mohammad Farid Hendianto)"))
-                .pos(margin, 385)
-                .size(content_width, 40)
+                .pos(x, y)
+                .size(w, h)
                 .font(creator_font)
                 .dark_mode(self.is_dark)
                 .build();
 
             // GitHub Link (SysLink) - Centered (still raw CreateWindowExW as it's a special control)
+            layout.add_space(10);
+            let (x, y, w, h) = layout.row(25);
             let link_text = to_wstring("<a href=\"https://github.com/IRedDragonICY/compactrs\">GitHub</a>  •  <a href=\"https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE\">License</a>");
             let link_cls = WC_LINK;
             let link = CreateWindowExW(
@@ -175,7 +177,7 @@ impl WindowHandler for AboutState {
                 link_cls,
                 link_text.as_ptr(),
                 WS_VISIBLE | WS_CHILD | WS_TABSTOP,
-                margin, 440, content_width, 25,
+                x, y, w, h,
                 hwnd,
                 std::ptr::null_mut(),
                 instance,

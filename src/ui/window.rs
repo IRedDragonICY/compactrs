@@ -5,8 +5,8 @@ use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, R
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_SIZE, WM_COMMAND,
-    WM_DROPFILES, SendMessageW, CB_ADDSTRING, CB_SETCURSEL, CB_GETCURSEL, SetWindowTextW, WM_TIMER, SetTimer,
-    WM_NOTIFY, BM_GETCHECK, GetClientRect, GetWindowRect, BM_SETCHECK, 
+    WM_DROPFILES, SendMessageW, SetWindowTextW, WM_TIMER, SetTimer,
+    WM_NOTIFY, GetClientRect, GetWindowRect, 
     ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA, WM_CONTEXTMENU, 
     SetForegroundWindow, GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, 
     WM_DESTROY, KillTimer, WM_SETTINGCHANGE, WM_CLOSE, MessageBoxW, MB_YESNO, MB_ICONWARNING, IDNO, DestroyWindow,
@@ -15,9 +15,9 @@ use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Shell::DragAcceptFiles;
 use windows_sys::Win32::UI::Controls::{
-    PBM_SETRANGE32, PBM_SETPOS, NMITEMACTIVATE, NMHDR, NM_CLICK, NM_DBLCLK, NM_CUSTOMDRAW,
+    NMITEMACTIVATE, NMHDR, NM_CLICK, NM_DBLCLK, NM_CUSTOMDRAW,
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
-    LVN_ITEMCHANGED, BST_CHECKED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NM_RCLICK,
+    LVN_ITEMCHANGED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NM_RCLICK,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_DELETE};
 use std::sync::atomic::Ordering;
@@ -28,6 +28,7 @@ unsafe extern "system" {
 }
 
 use crate::ui::controls::*;
+use crate::ui::wrappers::{Button, ComboBox, Label, ProgressBar};
 use crate::ui::components::{
     Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
     HeaderPanel, HeaderPanelIds,
@@ -328,30 +329,31 @@ impl AppState {
         // Algorithm Combo
         let h_combo = action_panel.combo_hwnd();
         let algos = [w!("As Listed"), w!("XPRESS4K"), w!("XPRESS8K"), w!("XPRESS16K"), w!("LZX")];
-        unsafe {
-            for alg in algos {
-                SendMessageW(h_combo, CB_ADDSTRING, 0, alg.as_ptr() as isize);
-            }
-            let algo_index = match self.config.default_algo {
-                WofAlgorithm::Xpress4K => 1,
-                WofAlgorithm::Xpress8K => 2,
-                WofAlgorithm::Xpress16K => 3,
-                WofAlgorithm::Lzx => 4,
-            };
-            SendMessageW(h_combo, CB_SETCURSEL, algo_index as usize, 0);
-            
-            // Action Mode Combo
-            let h_action_mode = action_panel.action_mode_hwnd();
-            let action_modes = [w!("As Listed"), w!("Compress All"), w!("Decompress All")];
-            for mode in action_modes {
-                SendMessageW(h_action_mode, CB_ADDSTRING, 0, mode.as_ptr() as isize);
-            }
-            SendMessageW(h_action_mode, CB_SETCURSEL, 0, 0);
-            
-            // Force Checkbox
-            if self.force_compress {
-                SendMessageW(action_panel.force_hwnd(), BM_SETCHECK, BST_CHECKED as usize, 0);
-            }
+        
+        let combo = ComboBox::new(h_combo);
+        for alg in algos {
+            combo.add_string(String::from_utf16_lossy(alg).as_str());
+        }
+        let algo_index = match self.config.default_algo {
+            WofAlgorithm::Xpress4K => 1,
+            WofAlgorithm::Xpress8K => 2,
+            WofAlgorithm::Xpress16K => 3,
+            WofAlgorithm::Lzx => 4,
+        };
+        combo.set_selected_index(algo_index);
+        
+        // Action Mode Combo
+        let h_action_mode = action_panel.action_mode_hwnd();
+        let action_mode_combo = ComboBox::new(h_action_mode);
+        let action_modes = ["As Listed", "Compress All", "Decompress All"];
+        for mode in action_modes {
+            action_mode_combo.add_string(mode);
+        }
+        action_mode_combo.set_selected_index(0);
+        
+        // Force Checkbox
+        if self.force_compress {
+            Button::new(action_panel.force_hwnd()).set_checked(true);
         }
     }
 
@@ -389,7 +391,7 @@ impl AppState {
                 }
                 
                 if let Some(ctrls) = &self.controls {
-                     SendMessageW(ctrls.action_panel.combo_hwnd(), CB_SETCURSEL, 0, 0);
+                     ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(0);
                 }
                 SetTimer(hwnd, 2, 500, None);
             }
@@ -428,8 +430,7 @@ impl AppState {
                  },
                  IDC_CHK_FORCE => {
                        let hwnd_ctl = lparam as HWND;
-                       let state = SendMessageW(hwnd_ctl, BM_GETCHECK, 0, 0);
-                       self.force_compress = state as u32 == BST_CHECKED;
+                       self.force_compress = Button::new(hwnd_ctl).is_checked();
                  },
                  IDC_COMBO_ALGO => {
                      // Re-estimate all items when global algorithm changes
@@ -489,14 +490,22 @@ impl AppState {
             match msg {
                  UiMessage::Progress(cur, total) => {
                      if let Some(ctrls) = &self.controls {
-                         SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETRANGE32, 0, total as isize);
-                         SendMessageW(ctrls.status_bar.progress_hwnd(), PBM_SETPOS, cur as usize, 0);
+                         let pb = ProgressBar::new(ctrls.status_bar.progress_hwnd());
+                         pb.set_range(0, total as i32);
+                         pb.set_pos(cur as i32);
+                         
+                         // Update Status Bar Text
+                         let cur_w = u64_to_wstring(cur);
+                         let tot_w = u64_to_wstring(total);
+                         let msg = concat_wstrings(&[&to_wstring("Processed "), &cur_w, &to_wstring("/"), &tot_w]);
+                         Label::new(ctrls.status_bar.label_hwnd()).set_text(&String::from_utf16_lossy(&msg));
                      }
                      if let Some(tb) = &self.taskbar { tb.set_value(cur, total); }
                  },
-                 UiMessage::Status(text) => {
+                 UiMessage::StatusText(text) => {
                      if let Some(ctrls) = &self.controls {
-                         SetWindowTextW(ctrls.status_bar.label_hwnd(), text.as_ptr());
+                         let text_w = to_wstring(&text);
+                         SetWindowTextW(ctrls.status_bar.label_hwnd(), text_w.as_ptr());
                      }
                  },
                  UiMessage::Log(entry) => {
@@ -551,22 +560,26 @@ impl AppState {
                              }
 
                              if let Some(item) = self.batch_items.get(pos) {
-                                 let sb_msg = concat_wstrings(&[
-                                     w!("Scanning: "), 
-                                     &to_wstring(&item.path), 
-                                     w!("... ("), 
-                                     &count_str, 
-                                     w!(" files)")
-                                 ]);
-                                 SetWindowTextW(ctrls.status_bar.label_hwnd(), sb_msg.as_ptr());
+                                 let sb_msg = format!("Scanning: {}... ({} files)", item.path, count);
+                                 Label::new(ctrls.status_bar.label_hwnd()).set_text(&sb_msg);
                              }
                          }
                      }
                  },
-                 UiMessage::RowUpdate(row, progress, status, _) => {
+                 UiMessage::RowProgress(row, cur, tot, bytes) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 8, &progress); // Progress is now 8
+                         // Update Progress Text (Column 8)
+                         let cur_w = u64_to_wstring(cur);
+                         let tot_w = u64_to_wstring(tot);
+                         let prog_str = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
+                         ctrls.file_list.update_item_text(row, 8, &prog_str);
                          
+                         // Update Size (Column 6) - Live update
+                         if bytes > 0 {
+                             let size_str = format_size(bytes);
+                             ctrls.file_list.update_item_text(row, 6, &size_str);
+                         }
+
                          let current_state = self.global_state.load(Ordering::Relaxed);
                          if current_state == ProcessingState::Stopped as u8 {
                               ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
@@ -574,27 +587,27 @@ impl AppState {
                              // If effectively paused, don't let "Running" overwrite "Paused"
                               ctrls.file_list.update_item_text(row, 9, w!("Paused"));
                          } else {
-                              ctrls.file_list.update_item_text(row, 9, &status);   // Status is now 9
+                              ctrls.file_list.update_item_text(row, 9, w!("Running"));
                          }
                      }
                  },
-                 UiMessage::ItemFinished(row, status, disk_size_vec, final_state) => {
+                 UiMessage::RowFinished(row, final_bytes, final_state) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 9, &status); // Status is now 9
+                         ctrls.file_list.update_item_text(row, 9, w!("Done"));
                          
-                         // Update disk size and ratio if we have a valid disk size string?
-                         // The message passes `disk_size` as Vec<u16> (string).
-                         // We need the numeric values to calculate ratio. 
-                         // Check `self.batch_items[row]`.
-                         // Update Ratio using stored values (Best Effort)
-                         if let Some(item) = self.batch_items.get(row as usize) {
-                             let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, item.disk_size);
+                         // Update disk size (Col 6) and Ratio (Col 7)
+                         let size_str = format_size(final_bytes);
+                         ctrls.file_list.update_item_text(row, 6, &size_str);
+                         
+                         if let Some(item) = self.batch_items.get_mut(row as usize) {
+                             item.disk_size = final_bytes;
+                             item.status = BatchStatus::Complete;
+                             item.state_flag = None;
+                             
+                             let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, final_bytes);
                              ctrls.file_list.update_item_text(row, 7, &ratio_str);
                          }
-                         
-                         if !disk_size_vec.is_empty() && disk_size_vec.len() > 1 { 
-                             ctrls.file_list.update_item_text(row, 6, &disk_size_vec); 
-                         }
+
                          let state_str = match final_state {
                              CompressionState::None => w!("-"),
                              CompressionState::Specific(algo) => match algo {
@@ -604,18 +617,7 @@ impl AppState {
                              CompressionState::Mixed => w!("Mixed"),
                          };
                          ctrls.file_list.update_item_text(row, 1, state_str);
-                         
-                         // Update Ratio using stored values (Best Effort)
-                         if let Some(item) = self.batch_items.get(row as usize) {
-                             let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, item.disk_size);
-                             ctrls.file_list.update_item_text(row, 7, &ratio_str);
-                         }
-
                          ctrls.file_list.update_item_text(row, 10, w!("")); 
-                         if let Some(item) = self.batch_items.get_mut(row as usize) {
-                             item.status = BatchStatus::Complete;
-                             item.state_flag = None;
-                         }
                      }
                  },
                  UiMessage::BatchItemAnalyzed(id, log, disk, state) => {
@@ -651,14 +653,15 @@ impl AppState {
                          }
                      }
                  },
-                 UiMessage::UpdateEstimate(id, algo, est_size, est_str) => {
+                 UiMessage::UpdateEstimate(id, algo, est_size) => {
                      if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
                          if let Some(item) = self.batch_items.get_mut(pos) {
                              // Cache the result for this algorithm
                              item.cache_estimate(algo, est_size);
                          }
                          if let Some(ctrls) = &self.controls {
-                             ctrls.file_list.update_item_text(pos as i32, 5, &est_str);
+                             let est_str_local = crate::utils::format_size(est_size);
+                             ctrls.file_list.update_item_text(pos as i32, 5, &est_str_local);
                          }
                      }
                  },
@@ -684,10 +687,9 @@ impl AppState {
 
     /// Re-estimate all items when the global algorithm ComboBox changes
     unsafe fn on_global_algo_changed(&mut self) {
-        unsafe {
-            // Get the selected algorithm from the ComboBox
-            let algo = if let Some(ctrls) = &self.controls {
-                let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
+        // Get the selected algorithm from the ComboBox
+        let algo = if let Some(ctrls) = &self.controls {
+                let idx = ComboBox::new(ctrls.action_panel.combo_hwnd()).get_selected_index();
                 match idx {
                     0 => None, // "As Listed" - use per-item algorithm
                     1 => Some(WofAlgorithm::Xpress4K),
@@ -732,11 +734,10 @@ impl AppState {
             std::thread::spawn(move || {
                 for (id, path, algo) in items_to_estimate {
                     let estimated = crate::engine::estimator::estimate_path(&path, algo);
-                    let est_str = crate::utils::format_size(estimated);
-                    let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated, est_str));
+                    let _est_str = crate::utils::format_size(estimated);
+                    let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated));
                 }
             });
-        }
     }
 
     unsafe fn handle_destroy(&mut self, hwnd: HWND) {
@@ -749,15 +750,14 @@ impl AppState {
                 self.config.window_height = rect.bottom - rect.top;
             }
             if let Some(ctrls) = &self.controls {
-                let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
+                let idx = ComboBox::new(ctrls.action_panel.combo_hwnd()).get_selected_index();
                 self.config.default_algo = match idx {
                     1 => WofAlgorithm::Xpress4K,
                     3 => WofAlgorithm::Xpress16K, 
                     4 => WofAlgorithm::Lzx,
                     _ => WofAlgorithm::Xpress8K,
                 };
-                let force = SendMessageW(ctrls.action_panel.force_hwnd(), BM_GETCHECK, 0, 0);
-                self.config.force_compress = force as u32 == BST_CHECKED;
+                self.config.force_compress = Button::new(ctrls.action_panel.force_hwnd()).is_checked();
             }
             self.config.theme = self.theme;
             self.config.enable_force_stop = self.enable_force_stop;
@@ -804,7 +804,7 @@ impl AppState {
                               }
                               
                               if let Some(ctrls) = &self.controls {
-                                   SendMessageW(ctrls.action_panel.combo_hwnd(), CB_SETCURSEL, 0, 0); // Reset Global Combo
+                                   ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(0); // Reset Global Combo
                                    
                                    // Update UI for Algo/Action
                                    let algo_name = match algo {

@@ -3,10 +3,9 @@
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, WPARAM, POINT};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SendMessageW, MessageBoxW, SetWindowTextW, MB_OK, MB_ICONINFORMATION,
+    MessageBoxW, MB_OK, MB_ICONINFORMATION,
     GetCursorPos, TrackPopupMenu, CreatePopupMenu, AppendMenuW, DestroyMenu,
-    TPM_RETURNCMD, TPM_LEFTALIGN, MF_STRING, CB_GETCURSEL, 
-    WM_COMMAND,
+    TPM_RETURNCMD, TPM_LEFTALIGN, MF_STRING,
 };
 use windows_sys::Win32::System::DataExchange::{
     OpenClipboard, CloseClipboard, GetClipboardData, IsClipboardFormatAvailable
@@ -15,15 +14,16 @@ use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 
 
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP};
-use windows_sys::Win32::UI::Controls::{NM_CLICK, NM_DBLCLK, NMLISTVIEW, LVM_GETSUBITEMRECT};
+use windows_sys::Win32::UI::Controls::{NM_CLICK, NM_DBLCLK, NMLISTVIEW};
 use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, ScreenToClient};
 use std::thread;
 use std::sync::atomic::Ordering;
 use std::cmp::Ordering as CmpOrdering;
 
 use crate::ui::state::{AppState, BatchAction, ProcessingState, BatchStatus};
-use crate::ui::taskbar::TaskbarState; // Fixed Import
+use crate::ui::taskbar::TaskbarState;
 use crate::ui::controls::*;
+use crate::ui::wrappers::{Button, ComboBox, Label};
 use crate::ui::theme;
 use crate::engine::wof::WofAlgorithm;
 use crate::engine::worker::batch_process_worker;
@@ -102,7 +102,8 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
 
     if let Some(ctrls) = &st.controls {
         // Read Global Settings
-        let idx = SendMessageW(ctrls.action_panel.combo_hwnd(), CB_GETCURSEL, 0, 0);
+        let combo = ComboBox::new(ctrls.action_panel.combo_hwnd());
+        let idx = combo.get_selected_index();
         let use_as_listed = idx == 0;
         let global_algo = match idx {
             1 => WofAlgorithm::Xpress4K,
@@ -113,31 +114,25 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
         
         // Update UI if overriding per-item settings
         if !use_as_listed {
-            let algo_name = match global_algo {
-                WofAlgorithm::Xpress4K => "XPRESS4K",
-                WofAlgorithm::Xpress8K => "XPRESS8K",
-                WofAlgorithm::Xpress16K => "XPRESS16K",
-                WofAlgorithm::Lzx => "LZX",
-            };
             for &row in &indices_to_process {
-                ctrls.file_list.update_item_text(row as i32, 2, &to_wstring(algo_name));
+                ctrls.file_list.update_algorithm(row as i32, global_algo);
             }
         }
         
         // Prepare UI state
         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
-        windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 1);
+        Button::new(ctrls.action_panel.cancel_hwnd()).set_enabled(true);
 
         let count_w = u64_to_wstring(indices_to_process.len() as u64);
         let status_msg = concat_wstrings(&[&to_wstring("Processing "), &count_w, &to_wstring(" items...")]);
-        SetWindowTextW(ctrls.status_bar.label_hwnd(), status_msg.as_ptr());
+        Label::new(ctrls.status_bar.label_hwnd()).set_text(&String::from_utf16_lossy(&status_msg));
         
         // Prepare Data for Worker
         let tx = st.tx.clone();
         let state_global = st.global_state.clone();
         state_global.store(ProcessingState::Running as u8, Ordering::Relaxed);
         
-        let action_mode_idx = SendMessageW(ctrls.action_panel.action_mode_hwnd(), CB_GETCURSEL, 0, 0);
+        let action_mode_idx = ComboBox::new(ctrls.action_panel.action_mode_hwnd()).get_selected_index();
         
         let items: Vec<_> = indices_to_process.into_iter().filter_map(|idx| {
             st.batch_items.get(idx).map(|item| {
@@ -172,14 +167,13 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
     }
     if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
     if let Some(ctrls) = &st.controls {
-        windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
-        let w_stop = to_wstring("Stopping...");
-        SetWindowTextW(ctrls.status_bar.label_hwnd(), w_stop.as_ptr());
+        Button::new(ctrls.action_panel.cancel_hwnd()).set_enabled(false);
+        Label::new(ctrls.status_bar.label_hwnd()).set_text("Stopping...");
         
         // Reset all items' visuals
         for (i, _item) in st.batch_items.iter().enumerate() {
-             ctrls.file_list.update_item_text(i as i32, 10, &to_wstring("▶ Start"));
-             ctrls.file_list.update_item_text(i as i32, 9, &to_wstring("Cancelled"));
+             ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Stopped);
+             ctrls.file_list.update_status_text(i as i32, "Cancelled");
         }
     }
 }
@@ -235,138 +229,136 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                   WofAlgorithm::Xpress16K => WofAlgorithm::Lzx,
                   WofAlgorithm::Lzx => WofAlgorithm::Xpress4K,
               };
-              let name = match item.algorithm {
+              let _name = match item.algorithm {
                   WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
                   WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
               };
               let algo = item.algorithm;
               
-              // Check cache first
-              if let Some(cached) = item.get_cached_estimate(algo) {
-                  // Use cached value instantly
-                  item.estimated_size = cached;
-                  let est_str = crate::utils::format_size(cached);
-                  if let Some(ctrls) = &st.controls { 
-                      ctrls.file_list.update_item_text(row, 2, &to_wstring(name)); 
-                      ctrls.file_list.update_item_text(row, 5, &est_str);
-                  }
-              } else {
-                  // Need to calculate - trigger async estimation
-                  let path = item.path.clone();
-                  let id = item.id;
-                  if let Some(ctrls) = &st.controls { 
-                      ctrls.file_list.update_item_text(row, 2, &to_wstring(name)); 
-                      ctrls.file_list.update_item_text(row, 5, &to_wstring("Estimating..."));
-                  }
+                  // Check cache first
+                  if let Some(cached) = item.get_cached_estimate(algo) {
+                      // Use cached value instantly
+                      item.estimated_size = cached;
+                      let est_str = crate::utils::format_size(cached);
+                      if let Some(ctrls) = &st.controls { 
+                          ctrls.file_list.update_algorithm(row, algo); 
+                          ctrls.file_list.update_item_text(row, 5, &est_str);
+                      }
+                  } else {
+                      // Need to calculate - trigger async estimation
+                      let path = item.path.clone();
+                      let id = item.id;
+                      if let Some(ctrls) = &st.controls { 
+                          ctrls.file_list.update_algorithm(row, algo); 
+                          ctrls.file_list.update_item_text(row, 5, &to_wstring("Estimating..."));
+                      }
                   let tx = st.tx.clone();
                   thread::spawn(move || {
                       let estimated = crate::engine::estimator::estimate_path(&path, algo);
-                      let est_str = crate::utils::format_size(estimated);
-                      let _ = tx.send(crate::ui::state::UiMessage::UpdateEstimate(id, algo, estimated, est_str));
+                      let _est_str = crate::utils::format_size(estimated);
+                      let _ = tx.send(crate::ui::state::UiMessage::UpdateEstimate(id, algo, estimated));
                   });
               }
           }
     } else if col == 3 && code == NM_DBLCLK { // Toggle Action
           if let Some(item) = st.batch_items.get_mut(row as usize) {
-              item.action = match item.action {
+              let new_action = match item.action {
                   BatchAction::Compress => BatchAction::Decompress,
                   BatchAction::Decompress => BatchAction::Compress,
               };
-              let name = match item.action {
-                  BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
-              };
-              if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, &to_wstring(name)); }
+              item.action = new_action;
+              
+              if let Some(ctrls) = &st.controls { ctrls.file_list.update_action(row, new_action); }
           }
     } else if col == 10 && code == NM_CLICK { // Start/Pause/Stop (Column 10)
-           if let Some(_item) = st.batch_items.get_mut(row as usize) {
-               // Get correct ListView HWND
-               let list_hwnd = if let Some(ctrls) = &st.controls {
-                   ctrls.file_list.hwnd()
-               } else {
-                   return;
-               };
-
-                // Get subitem rect to determine click position (Left=Pause, Right=Stop)
-                let mut rect: windows_sys::Win32::Foundation::RECT = unsafe { std::mem::zeroed() };
-                rect.top = 10; // 0-based index of subitem (Column 10)
-                rect.left = windows_sys::Win32::UI::Controls::LVIR_BOUNDS as i32;
-                
-                unsafe {
-                    let _ = SendMessageW(list_hwnd, LVM_GETSUBITEMRECT, row as usize, &mut rect as *mut _ as isize);
-                }
+            // 1. Determine exact click location and needed action using immutable borrow
+            let mut action_to_take = None; // (IsStop, IsSystemStateChange, Row)
+            
+            if let Some(ctrls) = &st.controls {
+                let rect = ctrls.file_list.get_subitem_rect(row, 10);
                 
                 let mut pt: POINT = unsafe { std::mem::zeroed() };
                 unsafe {
                     GetCursorPos(&mut pt);
-                    ScreenToClient(list_hwnd, &mut pt);
+                    ScreenToClient(ctrls.file_list.hwnd(), &mut pt);
                 }
                 
-                // Determine width of the cell
                 let width = rect.right - rect.left;
-                // If retrieval failed practically (width <= 0), default to Left (Pause)
                 let is_right_half = if width > 0 {
                     pt.x > (rect.left + width / 2)
                 } else {
                     false
                 };
                 
-                // Current State
-                // Note: item.state_flag is Arc<AtomicU8>. We should check that or st.global_state if single job.
-                // For now, check item.state_flag if present, else global_state? 
-                // Actually, `start_processing` sets `st.global_state`.
-                // Single item logic should probably also respect global state or use specific flags.
-                // Let's assume global state for now as concurrent jobs aren't fully supported yet in UI.
-                
                 let current_state_val = st.global_state.load(Ordering::Relaxed);
                 let current_state = ProcessingState::from_u8(current_state_val);
                 
                 match current_state {
                     ProcessingState::Idle | ProcessingState::Stopped => {
-                        // START
-                        let indices = vec![row as usize];
-                        start_processing(st, hwnd, indices);
-                        // Update text immediately to "⏸   ⏹"
-                        if let Some(ctrls) = &st.controls { 
-                             ctrls.file_list.update_item_text(row, 10, &to_wstring("⏸   ⏹"));
-                        }
+                        // Start
+                        action_to_take = Some((false, true, row)); 
                     },
                     ProcessingState::Running => {
                         if is_right_half {
-                            // STOP
-                            on_stop_processing(st);
-                            if let Some(ctrls) = &st.controls {
-                                 ctrls.file_list.update_item_text(row, 10, &to_wstring("▶ Start"));
-                            }
+                             // Stop
+                             action_to_take = Some((true, false, row));
                         } else {
-                            // PAUSE
-                            st.global_state.store(ProcessingState::Paused as u8, Ordering::Relaxed);
-                             if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
-                             if let Some(ctrls) = &st.controls { 
-                                 ctrls.file_list.update_item_text(row, 10, &to_wstring("▶   ⏹"));
-                                 ctrls.file_list.update_item_text(row, 9, &to_wstring("Paused"));
-                                 let msg = to_wstring("Paused.");
-                                 SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
-                            }
+                             // Pause
+                             action_to_take = Some((false, false, row));
                         }
                     },
                     ProcessingState::Paused => {
                         if is_right_half {
-                             // STOP
-                             on_stop_processing(st);
+                             // Stop
+                             action_to_take = Some((true, false, row));
                         } else {
-                            // RESUME
-                            st.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
-                            if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
-                            if let Some(ctrls) = &st.controls { 
-                                 ctrls.file_list.update_item_text(row, 10, &to_wstring("⏸   ⏹"));
-                                 ctrls.file_list.update_item_text(row, 9, &to_wstring("Processing"));
-                                 let msg = to_wstring("Resumed.");
-                                 SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
-                            }
+                             // Resume
+                             action_to_take = Some((false, true, row));
                         }
                     },
                 }
-           }
+            }
+            
+            // 2. Execute Action (Mutable Borrow of st)
+            if let Some((is_stop, is_start_resume, r)) = action_to_take {
+                if is_stop {
+                    on_stop_processing(st);
+                    if let Some(ctrls) = &st.controls {
+                         ctrls.file_list.update_playback_controls(r, ProcessingState::Stopped);
+                    }
+                } else if is_start_resume {
+                    // Check if it's Start or Resume based on current global state
+                    let global = ProcessingState::from_u8(st.global_state.load(Ordering::Relaxed));
+                    if global == ProcessingState::Paused {
+                         // RESUME
+                         st.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
+                         
+                         if let Some(ctrls) = &st.controls {
+                             ctrls.file_list.update_playback_controls(r, ProcessingState::Running);
+                             ctrls.file_list.update_status_text(r, "Processing");
+                             Label::new(ctrls.status_bar.label_hwnd()).set_text("Resumed.");
+                         }
+                    } else {
+                         // START
+                         let indices = vec![r as usize];
+                         start_processing(st, hwnd, indices);
+                         if let Some(ctrls) = &st.controls {
+                             ctrls.file_list.update_playback_controls(r, ProcessingState::Running);
+                         }
+                    }
+                } else {
+                     // PAUSE
+                     st.global_state.store(ProcessingState::Paused as u8, Ordering::Relaxed);
+                     if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
+                     
+                     if let Some(ctrls) = &st.controls {
+                         ctrls.file_list.update_playback_controls(r, ProcessingState::Paused);
+                         ctrls.file_list.update_status_text(r, "Paused");
+                         Label::new(ctrls.status_bar.label_hwnd()).set_text("Paused.");
+                     }
+                }
+            }
     }
 }
 
@@ -418,15 +410,8 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                     if item.algorithm != new_algo {
                         item.algorithm = new_algo;
                         
-                        let name = match item.algorithm {
-                            WofAlgorithm::Xpress4K => "XPRESS4K", 
-                            WofAlgorithm::Xpress8K => "XPRESS8K",
-                            WofAlgorithm::Xpress16K => "XPRESS16K", 
-                            WofAlgorithm::Lzx => "LZX",
-                        };
-                        
                         if let Some(ctrls) = &st.controls { 
-                            ctrls.file_list.update_item_text(row, 2, &to_wstring(name)); 
+                            ctrls.file_list.update_algorithm(row, item.algorithm);
                         }
 
                         if let Some(cached) = item.get_cached_estimate(new_algo) {
@@ -444,8 +429,8 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                             let tx = st.tx.clone();
                             thread::spawn(move || {
                                 let estimated = crate::engine::estimator::estimate_path(&path, new_algo);
-                                let est_str = crate::utils::format_size(estimated);
-                                let _ = tx.send(crate::ui::state::UiMessage::UpdateEstimate(id, new_algo, estimated, est_str));
+                                let _est_str = crate::utils::format_size(estimated);
+                                let _ = tx.send(crate::ui::state::UiMessage::UpdateEstimate(id, new_algo, estimated));
                             });
                         }
                     }
@@ -486,12 +471,8 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                 if let Some(item) = st.batch_items.get_mut(row as usize) {
                     if item.action != new_action {
                         item.action = new_action;
-                        let name = match item.action {
-                            crate::ui::state::BatchAction::Compress => "Compress", 
-                            crate::ui::state::BatchAction::Decompress => "Decompress",
-                        };
                          if let Some(ctrls) = &st.controls { 
-                            ctrls.file_list.update_item_text(row, 3, &to_wstring(name)); 
+                            ctrls.file_list.update_action(row, new_action); 
                         }
                     }
                 }
@@ -559,8 +540,8 @@ pub unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM)
                     DestroyMenu(menu);
                     
                     match _cmd {
-                        1003 => { let _ = SendMessageW(hwnd, WM_COMMAND, IDC_BTN_CANCEL as usize, 0); },
-                        1004 => { let _ = SendMessageW(hwnd, WM_COMMAND, IDC_BTN_REMOVE as usize, 0); },
+                        1003 => { Button::new(windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CANCEL as i32)).set_enabled(false); on_stop_processing(st); },
+                        1004 => { on_remove_selected(st); },
                         1005 => start_processing(st, hwnd, selected.clone()),
                         1006 => {
                             if let Some(&first_idx) = selected.first() {

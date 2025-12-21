@@ -1,12 +1,9 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
-use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
+use crate::ui::framework::WindowHandler;
 
 use crate::w;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    WS_VISIBLE, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-};
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
     DEFAULT_PITCH, FF_DONTCARE, HFONT,
@@ -20,15 +17,14 @@ struct ShortcutsState {
 
 pub unsafe fn show_shortcuts_modal(parent: HWND, is_dark: bool) {
     let mut state = ShortcutsState { is_dark };
-    let bg_brush = crate::ui::theme::get_background_brush(is_dark);
-
-    show_modal(
-        WindowBuilder::new(&mut state, "CompactRS_Shortcuts", SHORTCUTS_TITLE)
-            .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
-            .size(500, 320)
-            .align(WindowAlignment::CenterOnParent)
-            .background(bg_brush),
-        parent
+    crate::ui::dialogs::base::show_modal_singleton(
+        parent, 
+        &mut state, 
+        "CompactRS_Shortcuts", 
+        SHORTCUTS_TITLE, 
+        500, 
+        320, 
+        is_dark
     );
 }
 

@@ -57,19 +57,28 @@ pub enum UiMessage {
     Progress(u64, u64), // current, total (global progress)
     BatchItemStatus(u32, BatchStatus),   // Individual item status update
     BatchItemProgress(u32, u64, u64),    // Individual item progress (id, current, total)
-    /// Row update for ListView: (row_index, progress_wide, status_wide, size_after_wide)
-    RowUpdate(i32, Vec<u16>, Vec<u16>, Vec<u16>),
+    
+    /// Raw row progress: (row_index, current, total, bytes_processed)
+    RowProgress(i32, u64, u64, u64),
+    
     /// Incremental scan progress: (id, logical_size, disk_size, file_count)
     ScanProgress(u32, u64, u64, u64),
+    
     Log(LogEntry),
-    Status(Vec<u16>),
+    
+    /// Status text message (UTF-8)
+    StatusText(String),
+    
     Finished,
-    /// Single item finished: (row_index, status_wide, size_after_wide, final_state)
-    ItemFinished(i32, Vec<u16>, Vec<u16>, crate::engine::wof::CompressionState),
+    
+    /// Single item finished: (row_index, final_size_bytes, final_state)
+    RowFinished(i32, u64, crate::engine::wof::CompressionState),
+    
     /// Item analyzed (id, logical_size, disk_size, compression_state)
     BatchItemAnalyzed(u32, u64, u64, crate::engine::wof::CompressionState),
-    /// Estimated size update: (id, algorithm, estimated_size, formatted_string)
-    UpdateEstimate(u32, WofAlgorithm, u64, Vec<u16>),
+    
+    /// Estimated size update: (id, algorithm, estimated_size)
+    UpdateEstimate(u32, WofAlgorithm, u64),
 }
 
 /// Action to perform on a batch item
@@ -168,8 +177,8 @@ impl Controls {
     /// # Safety
     /// Calls Win32 APIs for theme updates.
     pub unsafe fn update_theme(&mut self, is_dark: bool, main_hwnd: HWND) {
-        use windows_sys::Win32::Foundation::{LPARAM, WPARAM};
-        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_SETFONT};
+        
+
         
         unsafe {
             // Get the cached app font
@@ -187,9 +196,8 @@ impl Controls {
             self.header_panel.set_font(hfont);
             
             // Set font on ListView
-            let wparam = hfont as WPARAM;
-            let lparam = 1 as LPARAM;
-            SendMessageW(self.file_list.hwnd(), WM_SETFONT, wparam, lparam);
+            // Set font on ListView
+            self.file_list.set_font(hfont);
             
             // Apply subclass for header theming
             self.file_list.apply_subclass(main_hwnd);
@@ -357,10 +365,10 @@ impl AppState {
                  
                  // Estimate compressed size
                  let estimated = crate::engine::estimator::estimate_path(&path, algo);
-                 let est_str = crate::utils::format_size(estimated);
-                 let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated, est_str));
+                 let _est_str = crate::utils::format_size(estimated);
+                 let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated));
             }
-            let _ = tx.send(UiMessage::Status(to_wstring("Ready.")));
+            let _ = tx.send(UiMessage::StatusText("Ready.".to_string()));
         });
     }
 }

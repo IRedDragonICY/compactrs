@@ -606,6 +606,59 @@ impl FileListView {
 
     // Local allow_dark_mode_for_window removed in favor of theme::allow_dark_mode_for_window
 
+    /// Updates the playback controls (Start/Pause/Stop) for a row based on state.
+    pub fn update_playback_controls(&self, row: i32, state: crate::ui::state::ProcessingState) {
+        let icon = match state {
+             crate::ui::state::ProcessingState::Idle | crate::ui::state::ProcessingState::Stopped => crate::w!("▶ Start"),
+             crate::ui::state::ProcessingState::Running => crate::w!("⏸   ⏹"),
+             crate::ui::state::ProcessingState::Paused => crate::w!("▶   ⏹"),
+        };
+        self.update_item_text(row, columns::START, icon);
+    }
+
+    /// Updates the status text for a row.
+    pub fn update_status_text(&self, row: i32, text: &str) {
+        self.update_item_text(row, columns::STATUS, &to_wstring(text));
+    }
+    
+    /// Updates the algorithm text for a row.
+    pub fn update_algorithm(&self, row: i32, algo: WofAlgorithm) {
+         let name = match algo {
+            WofAlgorithm::Xpress4K => w!("XPRESS4K"),
+            WofAlgorithm::Xpress8K => w!("XPRESS8K"),
+            WofAlgorithm::Xpress16K => w!("XPRESS16K"),
+            WofAlgorithm::Lzx => w!("LZX"),
+        };
+        self.update_item_text(row, columns::ALGORITHM, name);
+    }
+
+    /// Updates the action text for a row.
+    pub fn update_action(&self, row: i32, action: crate::ui::state::BatchAction) {
+        let name = match action {
+            crate::ui::state::BatchAction::Compress => w!("Compress"),
+            crate::ui::state::BatchAction::Decompress => w!("Decompress"),
+        };
+        self.update_item_text(row, columns::ACTION, name);
+    }
+
+    /// Gets the bounding rectangle of a subitem.
+    pub fn get_subitem_rect(&self, row: i32, col: i32) -> RECT {
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        rect.top = col; // weird API: top holds the subitem index
+        rect.left = windows_sys::Win32::UI::Controls::LVIR_BOUNDS as i32;
+        unsafe {
+            SendMessageW(self.hwnd, windows_sys::Win32::UI::Controls::LVM_GETSUBITEMRECT, row as usize, &mut rect as *mut _ as isize);
+        }
+        rect
+    }
+
+    /// Sets the font for the ListView.
+    pub fn set_font(&self, hfont: windows_sys::Win32::Graphics::Gdi::HFONT) {
+        unsafe {
+            SendMessageW(self.hwnd, windows_sys::Win32::UI::WindowsAndMessaging::WM_SETFONT, hfont as usize, 1);
+        }
+    }
+
     /// Removes all items from the ListView.
     pub fn clear_all(&self) {
         unsafe {

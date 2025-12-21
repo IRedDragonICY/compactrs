@@ -7,6 +7,7 @@ pub mod about;
 pub mod shortcuts;
 pub mod console;
 pub mod force_stop;
+pub mod base;
 
 // Flatten the API for consumers
 pub use settings::show_settings_modal;

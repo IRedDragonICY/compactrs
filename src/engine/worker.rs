@@ -4,10 +4,9 @@ use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
 use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
 
-use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings, format_size};
+use crate::utils::to_wstring;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
 use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, smart_compress};
-use crate::w;
 
 // Correctly import form scanner
 use crate::engine::scanner::{
@@ -82,7 +81,7 @@ pub fn batch_process_worker(
     global_total: Arc<AtomicU64>,
 ) {
     let _sleep_guard = ExecutionStateGuard::new();
-    let _ = tx.send(UiMessage::Status(w!("Discovering files...").to_vec()));
+    let _ = tx.send(UiMessage::StatusText("Discovering files...".to_string()));
     
     // 1. Discovery Phase
     let mut row_totals = std::collections::HashMap::new();
@@ -102,9 +101,8 @@ pub fn batch_process_worker(
         row_paths.insert(*row, path.clone());
         total_files += count;
         
-        let row_cnt_w = u64_to_wstring(count);
-        let prog_str = concat_wstrings(&[w!("0/"), &row_cnt_w]);
-        let _ = tx.send(UiMessage::RowUpdate(*row as i32, prog_str, w!("Running").to_vec(), vec![0;1]));
+        // Initial Row Progress (0/count)
+        let _ = tx.send(UiMessage::RowProgress(*row as i32, 0, count, 0));
     }
     
     global_total.fetch_add(total_files, Ordering::Relaxed);
@@ -118,7 +116,7 @@ pub fn batch_process_worker(
     crate::log_info!("Processing {} files with {} CPU Threads...", total_files, num_threads);
     
     if total_files == 0 {
-        let _ = tx.send(UiMessage::Status(w!("No files found.").to_vec()));
+        let _ = tx.send(UiMessage::StatusText("No files found.".to_string()));
         let _ = tx.send(UiMessage::Finished);
         return;
     }
@@ -199,10 +197,7 @@ pub fn batch_process_worker(
                     
                     if cur % 20 == 0 || cur >= tot {
                          let _ = tx.send(UiMessage::Progress(cur, tot));
-                         let cur_w = u64_to_wstring(cur);
-                         let tot_w = u64_to_wstring(tot);
-                         let msg = concat_wstrings(&[&to_wstring("Processed "), &cur_w, &to_wstring("/"), &tot_w]);
-                         let _ = tx.send(UiMessage::Status(msg));
+                         // Status update "Processed X/Y" is now handled by UI window.rs
                     }
 
                     // Row Progress
@@ -214,27 +209,24 @@ pub fn batch_process_worker(
                             sz.fetch_add(size, Ordering::Relaxed);
                         }
 
-                        if r_cur % 5 == 0 || r_cur == r_tot {
-                             let cur_w = u64_to_wstring(r_cur);
-                             let tot_w = u64_to_wstring(r_tot);
-                             let msg = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
-                             
-                             if r_cur == r_tot {
-                                 // Row Finished
-                                 let final_sz = row_size.get(task.row_idx).map(|a| a.load(Ordering::Relaxed)).unwrap_or(0);
-                                 let sz_w = format_size(final_sz);
-                                 let algo_st = if let Some(p) = row_p.get(&task.row_idx) {
-                                     detect_path_algorithm(p)
-                                 } else {
-                                     crate::engine::wof::CompressionState::None
-                                 };
-                                 
-                                 let _ = tx.send(UiMessage::RowUpdate(task.row_idx as i32, msg, w!("Finishing...").to_vec(), vec![0;1]));
-                                 let _ = tx.send(UiMessage::ItemFinished(task.row_idx as i32, w!("Done").to_vec(), sz_w, algo_st));
-                             } else {
-                                 let _ = tx.send(UiMessage::RowUpdate(task.row_idx as i32, msg, w!("Running").to_vec(), vec![0;1]));
-                             }
-                        }
+                         if r_cur % 5 == 0 || r_cur == r_tot {
+                              // Current processed bytes
+                              let current_bytes = row_size.get(task.row_idx).map(|a| a.load(Ordering::Relaxed)).unwrap_or(0);
+                              
+                              if r_cur == r_tot {
+                                  // Row Finished
+                                  let algo_st = if let Some(p) = row_p.get(&task.row_idx) {
+                                      detect_path_algorithm(p)
+                                  } else {
+                                      crate::engine::wof::CompressionState::None
+                                  };
+                                  
+                                  // Final progress update implies finished
+                                  let _ = tx.send(UiMessage::RowFinished(task.row_idx as i32, current_bytes, algo_st));
+                              } else {
+                                  let _ = tx.send(UiMessage::RowProgress(task.row_idx as i32, r_cur, r_tot, current_bytes));
+                              }
+                         }
                     }
                 }
             });
@@ -244,7 +236,7 @@ pub fn batch_process_worker(
     let _ = producer_handle.join();
 
     if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-        let _ = tx.send(UiMessage::Status(w!("Cancelled.").to_vec()));
+        let _ = tx.send(UiMessage::StatusText("Cancelled.".to_string()));
         let _ = tx.send(UiMessage::Finished);
         return;
     }
