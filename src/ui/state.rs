@@ -240,6 +240,10 @@ pub struct AppState {
     // Global Progress
     pub global_progress_current: Arc<AtomicU64>,
     pub global_progress_total: Arc<AtomicU64>,
+    
+    // File Lock Dialog State
+    pub active_lock_dialog: Option<String>,
+    pub ignored_lock_processes: std::collections::HashSet<String>,
 }
 
 impl AppState {
@@ -273,6 +277,8 @@ impl AppState {
             pending_ipc_ids: Vec::new(),
             global_progress_current: Arc::new(AtomicU64::new(0)),
             global_progress_total: Arc::new(AtomicU64::new(0)),
+            active_lock_dialog: None,
+            ignored_lock_processes: std::collections::HashSet::new(),
         }
     }
     

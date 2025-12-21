@@ -936,7 +936,7 @@ impl AppState {
         }
     }
     
-    unsafe fn handle_force_stop_request(&self, hwnd: HWND, wparam: WPARAM) -> bool {
+    unsafe fn handle_force_stop_request(&mut self, hwnd: HWND, wparam: WPARAM) -> bool {
          unsafe {
              if self.enable_force_stop { return true; }
              
@@ -945,8 +945,33 @@ impl AppState {
              let slice = std::slice::from_raw_parts(name_ptr, len);
              let name = String::from_utf16_lossy(slice);
              
+             // 1. Check if ignored
+             if self.ignored_lock_processes.contains(&name) {
+                 return false;
+             }
+             
+             // 2. Check if dialog already active for this process
+             if self.active_lock_dialog.as_deref() == Some(&name) {
+                 // Prevent stacking dialogs for the same process.
+                 // Return false (don't force stop) to let this specific file fail graciously 
+                 // while the user decides on the main dialog.
+                 return false;
+             }
+             
+             // 3. Show dialog
+             self.active_lock_dialog = Some(name.clone());
+             
              let is_dark = theme::resolve_mode(self.theme);
-             crate::ui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark)
+             let result = crate::ui::dialogs::show_force_stop_dialog(hwnd, &name, is_dark);
+             
+             self.active_lock_dialog = None;
+             
+             if !result {
+                 // User said No (Cancel), ignore this process for the rest of the session/batch
+                 self.ignored_lock_processes.insert(name);
+             }
+             
+             result
          }
     }
 

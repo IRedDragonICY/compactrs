@@ -84,6 +84,10 @@ pub unsafe fn on_clear_all(st: &mut AppState) {
     st.global_progress_current.store(0, std::sync::atomic::Ordering::Relaxed);
     st.global_progress_total.store(0, std::sync::atomic::Ordering::Relaxed);
     
+    // Reset Lock Dialog State
+    st.active_lock_dialog = None;
+    st.ignored_lock_processes.clear();
+    
     update_process_button_state(st);
 }
 
@@ -130,6 +134,10 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
 
     pub unsafe fn start_processing(st: &mut AppState, hwnd: HWND, indices_to_process: Vec<usize>) {
     if indices_to_process.is_empty() { return; }
+
+    // Reset Lock Dialog State for new run
+    st.active_lock_dialog = None;
+    st.ignored_lock_processes.clear();
 
     if let Some(ctrls) = &st.controls {
         // Read Global Settings
@@ -491,6 +499,16 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
 pub unsafe fn on_list_keydown(st: &mut AppState, _hwnd: HWND, key: u16) {
     if key == windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_DELETE as u16 {
         on_remove_selected(st);
+    } else if key == 0x41 { // 'A' key
+        let ctrl_pressed = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState(windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL as i32) as u16 & 0x8000) != 0;
+        if ctrl_pressed {
+             if let Some(ctrls) = &st.controls {
+                 let count = ctrls.file_list.get_item_count();
+                 for i in 0..count {
+                     ctrls.file_list.set_selected(i, true);
+                 }
+             }
+        }
     }
 }
 
