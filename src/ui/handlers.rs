@@ -76,6 +76,9 @@ pub unsafe fn on_clear_all(st: &mut AppState) {
     if let Some(ctrls) = &st.controls {
         ctrls.file_list.clear_all();
     }
+    
+    st.global_progress_current.store(0, std::sync::atomic::Ordering::Relaxed);
+    st.global_progress_total.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool) {
@@ -153,8 +156,11 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
         let main_hwnd_usize = hwnd as usize;
         
         // Launch Worker Thread
+        let global_cur = st.global_progress_current.clone();
+        let global_tot = st.global_progress_total.clone();
+
         thread::spawn(move || {
-            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard, low_power, max_threads);
+            batch_process_worker(items, tx, state_global, force, main_hwnd_usize, guard, low_power, max_threads, global_cur, global_tot);
         });
     }
 }

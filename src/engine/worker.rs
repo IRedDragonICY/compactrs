@@ -711,6 +711,8 @@ pub fn batch_process_worker(
     guard_enabled: bool,
     low_power_mode: bool,
     max_threads: u32,
+    global_current: Arc<AtomicU64>,
+    global_total: Arc<AtomicU64>,
 ) {
     // RAII guard: Prevent system sleep for the duration of batch processing.
     // Automatically resets on drop (panic-safe).
@@ -742,7 +744,9 @@ pub fn batch_process_worker(
         let _ = tx.send(UiMessage::RowUpdate(*row as i32, prog_str, to_wstring("Running"), vec![0;1])); // Empty vec for size
     }
     
-    let _ = tx.send(UiMessage::Progress(0, total_files));
+    // Update global total
+    global_total.fetch_add(total_files, Ordering::Relaxed);
+    let _ = tx.send(UiMessage::Progress(global_current.load(Ordering::Relaxed), global_total.load(Ordering::Relaxed)));
     let parallelism = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let num_threads = if max_threads > 0 {
         max_threads as usize
@@ -771,7 +775,7 @@ pub fn batch_process_worker(
     let shared_rx = Arc::new(SharedReceiver::new(file_rx));
     
     // Counters
-    let processed = Arc::new(AtomicU64::new(0));
+    // processed removed, use global_current
     let success = Arc::new(AtomicU64::new(0));
     let failed = Arc::new(AtomicU64::new(0));
     
@@ -820,7 +824,8 @@ pub fn batch_process_worker(
     std::thread::scope(|s| {
         for _ in 0..num_threads {
             let shared_rx_clone = Arc::clone(&shared_rx);
-            let processed_ref = Arc::clone(&processed);
+            let global_cur_ref = Arc::clone(&global_current);
+            let global_tot_ref = Arc::clone(&global_total);
             let success_ref = Arc::clone(&success);
             let failed_ref = Arc::clone(&failed);
             let row_counts_ref = Arc::clone(&row_processed_counts);
@@ -832,7 +837,8 @@ pub fn batch_process_worker(
             let force_copy = force;
             let hwnd_val = main_hwnd;
             let guard_enabled_copy = guard_enabled;
-            let total_files_copy = total_files;
+
+
 
             s.spawn(move || {
                 // Enable backup privileges ONCE per thread (reduces syscalls)
@@ -877,7 +883,8 @@ pub fn batch_process_worker(
                     }
                     
                     // Global progress
-                    let current_global = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
+                    let current_val = global_cur_ref.fetch_add(1, Ordering::Relaxed) + 1;
+                    let total_val = global_tot_ref.load(Ordering::Relaxed);
                     
                     // Row progress
                     if let Some(counter) = row_counts_ref.get(task.row_idx) {
@@ -921,10 +928,10 @@ pub fn batch_process_worker(
                     }
                     
                     // Throttled Global updates
-                    if current_global % 20 == 0 || current_global == total_files_copy {
-                         let _ = tx_clone.send(UiMessage::Progress(current_global, total_files_copy));
-                         let cur_w = u64_to_wstring(current_global);
-                         let tot_w = u64_to_wstring(total_files_copy);
+                    if current_val % 20 == 0 || current_val >= total_val {
+                         let _ = tx_clone.send(UiMessage::Progress(current_val, total_val));
+                         let cur_w = u64_to_wstring(current_val);
+                         let tot_w = u64_to_wstring(total_val);
                          let stat_w = concat_wstrings(&[&to_wstring("Processed "), &cur_w, &to_wstring("/"), &tot_w, &to_wstring(" files...")]);
                          let _ = tx_clone.send(UiMessage::Status(stat_w));
                     }
@@ -947,7 +954,7 @@ pub fn batch_process_worker(
 
     let s = success.load(Ordering::Relaxed);
     let f = failed.load(Ordering::Relaxed);
-    let p = processed.load(Ordering::Relaxed);
+    let p = s + f; // Calculate local processed from success + failed
     
     // "Batch complete! Processed: {} files | Success: {} | Failed: {}"
     let p_w = u64_to_wstring(p);
@@ -961,8 +968,15 @@ pub fn batch_process_worker(
     
     let _ = tx.send(UiMessage::Log(report_w.clone()));
     let _ = tx.send(UiMessage::Status(report_w));
-    let _ = tx.send(UiMessage::Progress(total_files, total_files));
-    let _ = tx.send(UiMessage::Finished);
+    
+    // Only send Finished if global progress is complete
+    let g_cur = global_current.load(Ordering::Relaxed);
+    let g_tot = global_total.load(Ordering::Relaxed);
+    let _ = tx.send(UiMessage::Progress(g_cur, g_tot));
+    
+    if g_cur >= g_tot {
+        let _ = tx.send(UiMessage::Finished);
+    }
 }
 
 /// Worker to process a single file or folder with its own algorithm setting
@@ -976,6 +990,8 @@ pub fn single_item_worker(
     force: bool,
     main_hwnd: usize,
     guard_enabled: bool,
+    global_current: Arc<AtomicU64>,
+    global_total: Arc<AtomicU64>,
 ) {
 
     let mut success = 0u64;
@@ -990,7 +1006,8 @@ pub fn single_item_worker(
         scan_directory_optimized(&path, false, None).file_count
     };
     
-    let _ = tx.send(UiMessage::Progress(0, total_files));
+    global_total.fetch_add(total_files, Ordering::Relaxed);
+    let _ = tx.send(UiMessage::Progress(global_current.load(Ordering::Relaxed), global_total.load(Ordering::Relaxed)));
     let action_str = match action {
         BatchAction::Compress => "Compressing",
         BatchAction::Decompress => "Decompressing",
@@ -1045,7 +1062,11 @@ pub fn single_item_worker(
         }
 
         let _ = tx.send(UiMessage::RowUpdate(row, to_wstring("1/1"), to_wstring("Running"), vec![0;1]));
-        let _ = tx.send(UiMessage::Progress(1, 1));
+        
+        global_current.fetch_add(1, Ordering::Relaxed);
+        let g_cur = global_current.load(Ordering::Relaxed);
+        let g_tot = global_total.load(Ordering::Relaxed);
+        let _ = tx.send(UiMessage::Progress(g_cur, g_tot));
     } else {
         // Process folder using streaming producer-consumer model
         let num_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
@@ -1055,7 +1076,7 @@ pub fn single_item_worker(
         let shared_rx = Arc::new(SharedReceiver::new(file_rx));
         
         // Counters
-        let processed = Arc::new(AtomicU64::new(0));
+        // processed removed
         let success_atomic = Arc::new(AtomicU64::new(0));
         let failed_atomic = Arc::new(AtomicU64::new(0));
         
@@ -1080,7 +1101,8 @@ pub fn single_item_worker(
         std::thread::scope(|s| {
             for _ in 0..num_threads {
                 let shared_rx_clone = Arc::clone(&shared_rx);
-                let processed_ref = Arc::clone(&processed);
+                let global_cur_ref = Arc::clone(&global_current);
+                let global_tot_ref = Arc::clone(&global_total);
                 let success_ref = Arc::clone(&success_atomic);
                 let failed_ref = Arc::clone(&failed_atomic);
                 let state_ref = Arc::clone(&state);
@@ -1091,7 +1113,8 @@ pub fn single_item_worker(
                 let force_copy = force;
                 let hwnd_val = main_hwnd;
                 let guard_enabled_copy = guard_enabled;
-                let total_files_copy = total_files;
+
+
 
                 s.spawn(move || {
                     // Enable backup privileges ONCE per thread (reduces syscalls)
@@ -1129,17 +1152,18 @@ pub fn single_item_worker(
                             }
                         }
                          
-                        let current = processed_ref.fetch_add(1, Ordering::Relaxed) + 1;
+                        let g_cur = global_cur_ref.fetch_add(1, Ordering::Relaxed) + 1;
+                        let g_tot = global_tot_ref.load(Ordering::Relaxed);
                         
                         // Throttled updates
-                        if current % 100 == 0 || current == total_files_copy {
+                        if g_cur % 100 == 0 || g_cur >= g_tot {
                              // format!("{}/{}", current, total)
-                             let cur_w = u64_to_wstring(current);
-                             let tot_w = u64_to_wstring(total_files_copy);
+                             let cur_w = u64_to_wstring(g_cur);
+                             let tot_w = u64_to_wstring(g_tot);
                              let prog_w = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
                              let _ = tx_clone.send(UiMessage::RowUpdate(row_copy, prog_w, to_wstring("Running"), vec![0;1])); 
                         }
-                        let _ = tx_clone.send(UiMessage::Progress(current, total_files_copy));
+                        let _ = tx_clone.send(UiMessage::Progress(g_cur, g_tot));
                     }
                 });
             }
@@ -1188,6 +1212,13 @@ pub fn single_item_worker(
     ]);
     
     let _ = tx.send(UiMessage::Status(report_w));
-    let _ = tx.send(UiMessage::Progress(total_files, total_files));
-    let _ = tx.send(UiMessage::Finished);
+
+    
+    let g_cur = global_current.load(Ordering::Relaxed);
+    let g_tot = global_total.load(Ordering::Relaxed);
+    let _ = tx.send(UiMessage::Progress(g_cur, g_tot));
+    
+    if g_cur >= g_tot {
+        let _ = tx.send(UiMessage::Finished);
+    }
 }

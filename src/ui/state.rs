@@ -1,6 +1,6 @@
 use windows_sys::Win32::Foundation::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, atomic::AtomicU8};
+use std::sync::{Arc, atomic::{AtomicU8, AtomicU64}};
 use std::collections::HashMap;
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
@@ -228,6 +228,10 @@ pub struct AppState {
     // IPC state
     pub ipc_active: bool,
     pub pending_ipc_ids: Vec<u32>,
+
+    // Global Progress
+    pub global_progress_current: Arc<AtomicU64>,
+    pub global_progress_total: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -259,6 +263,8 @@ impl AppState {
             sort_ascending: true,
             ipc_active: false,
             pending_ipc_ids: Vec::new(),
+            global_progress_current: Arc::new(AtomicU64::new(0)),
+            global_progress_total: Arc::new(AtomicU64::new(0)),
         }
     }
     
