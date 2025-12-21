@@ -33,11 +33,24 @@ jobs:
 
       - name: Check latest UPX version
         id: upx-version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $latest = (Invoke-RestMethod -Uri "https://api.github.com/repos/upx/upx/releases/latest").tag_name
+          $fallbackVersion = "v4.2.4"
+          try {
+              $headers = @{ "Authorization" = "token $env:GITHUB_TOKEN" }
+              $response = Invoke-RestMethod -Uri "https://api.github.com/repos/upx/upx/releases/latest" -Headers $headers -ErrorAction Stop
+              $latest = $response.tag_name
+              if ([string]::IsNullOrWhiteSpace($latest)) { throw "Empty tag name returned" }
+          } catch {
+              Write-Warning "GitHub API Request Failed: $_"
+              Write-Warning "Rate limit might be exceeded or API is down."
+              Write-Warning "Using fallback version: $fallbackVersion"
+              $latest = $fallbackVersion
+          }
           $version = $latest -replace '^v', ''
           echo "UPX_VERSION=$version" >> $env:GITHUB_ENV
-          Write-Host "Detected latest UPX version: $version"
+          Write-Host "Selected UPX version: $version"
         shell: pwsh
 
       - name: Cache UPX
