@@ -9,7 +9,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_NOTIFY, BM_GETCHECK, GetClientRect, GetWindowRect, BM_SETCHECK, 
     ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA, WM_CONTEXTMENU, 
     SetForegroundWindow, GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, 
-    WM_DESTROY, KillTimer, WM_SETTINGCHANGE,
+    WM_DESTROY, KillTimer, WM_SETTINGCHANGE, WM_CLOSE, MessageBoxW, MB_YESNO, MB_ICONWARNING, IDNO, DestroyWindow,
 };
 use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -244,6 +244,24 @@ impl WindowHandler for AppState {
                 WM_TIMER => Some(self.handle_timer(hwnd, wparam)),
                 // FIX: handle_resize -> handle_size
                 WM_SIZE => Some(self.handle_size(hwnd)),
+                WM_CLOSE => {
+                    // Check if processing is active
+                    let state = self.global_state.load(std::sync::atomic::Ordering::Relaxed);
+                    if state == crate::ui::state::ProcessingState::Running as u8 {
+                        let msg = to_wstring("A compression job is currently running.\n\nAre you sure you want to quit?");
+                        let title = to_wstring("Confirm Exit");
+                        let res = MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), 
+                            MB_YESNO | MB_ICONWARNING);
+                        
+                        if res == IDNO {
+                            return Some(0); // Cancel closure
+                        }
+                        // If YES, signal worker to stop before destroying to ensure resources clean up
+                        self.global_state.store(crate::ui::state::ProcessingState::Stopped as u8, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    DestroyWindow(hwnd);
+                    Some(0)
+                },
                 WM_DESTROY => {
                     self.handle_destroy(hwnd);
                     Some(0)
@@ -473,6 +491,7 @@ impl AppState {
                      }
                  },
                  UiMessage::Finished => {
+                     self.global_state.store(crate::ui::state::ProcessingState::Idle as u8, std::sync::atomic::Ordering::Relaxed);
                      if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::NoProgress); }
                      if let Some(ctrls) = &self.controls {
                          windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
