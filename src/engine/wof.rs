@@ -24,11 +24,11 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-use crate::utils::{to_wstring, to_wstring_long_path};
+use crate::utils::{to_wstring, PathBuffer};
 
 pub fn get_real_file_size(path: &str) -> u64 {
     unsafe {
-        let wide = to_wstring_long_path(path);
+        let wide = PathBuffer::from(path);
         let mut high: u32 = 0;
         let low = GetCompressedFileSizeW(wide.as_ptr(), &mut high);
         
@@ -45,7 +45,7 @@ pub fn get_real_file_size(path: &str) -> u64 {
 /// Returns None if file is not WOF-compressed, Some(algorithm) if it is
 pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
     unsafe {
-        let wide = to_wstring_long_path(path);
+        let wide = PathBuffer::from(path);
         let handle = CreateFileW(
             wide.as_ptr(),
             0x80000000, // GENERIC_READ
@@ -297,7 +297,7 @@ fn smart_compress_with_backup_semantics(path: &str, algo: WofAlgorithm, force: b
     
     // Try direct Win32 API with backup semantics
     unsafe {
-        let wide = to_wstring_long_path(path);
+        let wide = PathBuffer::from(path);
         let access = 0x80000000 | 0x40000000; // GENERIC_READ | GENERIC_WRITE
         
         let handle = CreateFileW(
@@ -335,7 +335,7 @@ fn smart_compress_with_backup_semantics(path: &str, algo: WofAlgorithm, force: b
 /// Force remove read-only attribute from a file
 fn force_remove_readonly(path: &str) {
     unsafe {
-        let wide = to_wstring_long_path(path);
+        let wide = PathBuffer::from(path);
         
         let attrs = GetFileAttributesW(wide.as_ptr());
         if attrs != u32::MAX { // INVALID_FILE_ATTRIBUTES
@@ -395,7 +395,7 @@ pub fn enable_backup_privileges() {
 /// Compress file using CreateFileW with FILE_FLAG_BACKUP_SEMANTICS
 fn compress_file_with_backup_semantics(path: &str, algo: WofAlgorithm, force: bool) -> Option<Result<bool, u32>> {
     unsafe {
-        let wide = to_wstring_long_path(path);
+        let wide = PathBuffer::from(path);
         
         // GENERIC_READ (0x80000000) | GENERIC_WRITE (0x40000000)
         let access = 0x80000000 | 0x40000000;

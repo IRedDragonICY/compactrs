@@ -4,7 +4,7 @@ use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use crate::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
 use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm, smart_compress};
-use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
+use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings, PathBuffer};
 use crate::w;
 use windows_sys::Win32::Foundation::{HWND, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
@@ -283,7 +283,18 @@ fn walk_directory_generic<F>(
 where
     F: FnMut(&str, bool, &WIN32_FIND_DATAW),
 {
-    // Check stop signal immediately
+    let mut buffer = PathBuffer::from(path);
+    walk_recursive(&mut buffer, state, visitor);
+}
+
+fn walk_recursive<F>(
+    buffer: &mut PathBuffer,
+    state: Option<&Arc<AtomicU8>>,
+    visitor: &mut F,
+)
+where
+    F: FnMut(&str, bool, &WIN32_FIND_DATAW),
+{
     // Check stop signal immediately
     if let Some(s) = state {
         loop {
@@ -298,24 +309,15 @@ where
         }
     }
 
-    let pattern = if path.ends_with('\\') || path.ends_with('/') {
-        let mut p = path.to_string();
-        p.push('*');
-        p
-    } else {
-        let mut p = path.to_string();
-        p.push_str("\\*");
-        p
-    };
-    let pattern_wide = to_wstring(&pattern);
-
-    // Default isn't implemented for WIN32_FIND_DATAW in windows-sys usually without feature, 
-    // but zero-init is safe.
+    let original_len = buffer.len();
+    buffer.push("*");
+    
+    // Default isn't implemented for WIN32_FIND_DATAW in windows-sys
     let mut find_data: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
 
     unsafe {
         let handle = FindFirstFileExW(
-            pattern_wide.as_ptr(),
+            buffer.as_ptr(),
             FindExInfoBasic,
             &mut find_data as *mut _ as *mut _,
             FindExSearchNameMatch,
@@ -323,27 +325,25 @@ where
             FIND_FIRST_EX_LARGE_FETCH,
         );
 
+        // Restore buffer path for recursion
+        buffer.truncate(original_len);
+
         if handle == INVALID_HANDLE_VALUE {
-            // Check if it's just "file not found" or actual error? 
-            // In Rust `ignore` crate logic, we just return.
             return;
         }
 
         loop {
             // Check stop signal in loop
-            // Check stop signal in loop
             if let Some(s) = state {
-                 loop {
-                    let current_state = s.load(Ordering::Relaxed);
-                    if current_state == ProcessingState::Stopped as u8 {
-                        FindClose(handle);
-                        return;
-                    } else if current_state == ProcessingState::Paused as u8 {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    } else {
-                        break;
-                    }
-                }
+                 let current_state = s.load(Ordering::Relaxed);
+                 if current_state == ProcessingState::Stopped as u8 {
+                     FindClose(handle);
+                     return;
+                 }
+                 // If paused, we sleep inside the loop or re-check
+                 if current_state == ProcessingState::Paused as u8 {
+                      std::thread::sleep(std::time::Duration::from_millis(100));
+                 }
             }
 
             let filename_len = find_data
@@ -351,31 +351,28 @@ where
                 .iter()
                 .position(|&c| c == 0)
                 .unwrap_or(find_data.cFileName.len());
-            let filename = String::from_utf16_lossy(&find_data.cFileName[..filename_len]);
+            // No need to create String for filename here unless we visit
+            
+            let is_dot = filename_len == 1 && find_data.cFileName[0] == b'.' as u16;
+            let is_dot_dot = filename_len == 2 && find_data.cFileName[0] == b'.' as u16 && find_data.cFileName[1] == b'.' as u16;
 
-            if filename != "." && filename != ".." {
-                let full_path = if path.ends_with('\\') || path.ends_with('/') {
-                    let mut p = path.to_string();
-                    p.push_str(&filename);
-                    p
-                } else {
-                    let mut p = path.to_string();
-                    p.push('\\');
-                    p.push_str(&filename);
-                    p
-                };
-
+            if !is_dot && !is_dot_dot {
+                let len_before = buffer.len();
+                buffer.push_u16_slice(&find_data.cFileName[..filename_len]);
+                
                 let is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                // CRITICAL: Check for Junctions/Symlinks to prevent infinite loops
                 let is_reparse = (find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-
-                // Invoke visitor
-                visitor(&full_path, is_dir, &find_data);
+                
+                // Visitor needs string (legacy API compatibility)
+                let full_path_str = buffer.to_string_lossy();
+                visitor(&full_path_str, is_dir, &find_data);
 
                 // Recurse into directories ONLY if they are real directories (not reparse points)
                 if is_dir && !is_reparse {
-                    walk_directory_generic(&full_path, state, visitor);
+                    walk_recursive(buffer, state, visitor);
                 }
+                
+                buffer.truncate(len_before);
             }
 
             if FindNextFileW(handle, &mut find_data) == 0 {
