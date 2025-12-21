@@ -106,6 +106,13 @@ impl ControlBuilder {
         self
     }
 
+    pub fn edit(mut self) -> Self {
+        self.class_name = Cow::Borrowed(w!("EDIT"));
+        // WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL (0x0080)
+        self.style |= 0x00800000 | WS_TABSTOP | 0x0080; 
+        self
+    }
+
     pub fn build(self) -> HWND {
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());
@@ -151,6 +158,7 @@ impl ControlBuilder {
             else { ControlType::Button }
         } else if self.class_name == w!("COMBOBOX") { ControlType::ComboBox }
         else if self.class_name == w!("msctls_trackbar32") { ControlType::Trackbar }
+        else if self.class_name == w!("EDIT") { ControlType::Edit }
         else { ControlType::Button }
     }
 }

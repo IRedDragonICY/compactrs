@@ -40,6 +40,9 @@ const IDC_CHK_LOG_WARNS: u16 = 2023;
 const IDC_CHK_LOG_INFO: u16 = 2024;
 const IDC_CHK_LOG_TRACE: u16 = 2025;
 
+const IDC_LBL_CONCURRENT: u16 = 2030;
+const IDC_EDIT_CONCURRENT: u16 = 2031;
+
 struct SettingsState {
     theme: AppTheme,
     result: Option<AppTheme>,
@@ -49,6 +52,7 @@ struct SettingsState {
     enable_system_guard: bool, // Track system guard checkbox state
     low_power_mode: bool,      // Track low power mode checkbox state
     max_threads: u32,          // Track max threads
+    max_concurrent_items: u32, // Track max concurrent items
     log_enabled: bool,
     log_level_mask: u8,
     update_status: UpdateStatus,
@@ -70,7 +74,7 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 
 
 // Main settings modal function with proper data passing
-pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool, max_threads: u32, log_enabled: bool, log_level_mask: u8) -> (Option<AppTheme>, bool, bool, bool, bool, u32, bool, u8) {
+pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool, max_threads: u32, max_concurrent_items: u32, log_enabled: bool, log_level_mask: u8) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8) {
     // Use centralized helper
     let mut state = SettingsState {
         theme: current_theme,
@@ -81,6 +85,7 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
         enable_system_guard,
         low_power_mode,
         max_threads,
+        max_concurrent_items,
         log_enabled,
         log_level_mask,
         update_status: UpdateStatus::Idle,
@@ -98,10 +103,10 @@ pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark
     
     if !ran_modal {
          // Existing window brought to front. Return "no result" values.
-         return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, log_enabled, log_level_mask);
+         return (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask);
     }
     
-    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.log_enabled, state.log_level_mask)
+    (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask)
 }
 
 impl WindowHandler for SettingsState {
@@ -240,7 +245,29 @@ impl WindowHandler for SettingsState {
             // Set Position
             Trackbar::new(h_slider).set_pos(current_val);
 
-            layout.add_space(10);
+            layout.add_space(15);
+            
+            // Max Concurrent Items
+            let (x, y, w, h) = layout.row(25);
+            let _lbl_conc = ControlBuilder::new(hwnd, IDC_LBL_CONCURRENT)
+                .label(false)
+                .text("Queue Limit (0=Unlimited):")
+                .pos(x, y + 3)
+                .size(w - 60, h) // Label takes available width minus input
+                .dark_mode(is_dark_mode)
+                .build();
+                
+            let _edit_conc = ControlBuilder::new(hwnd, IDC_EDIT_CONCURRENT)
+                .edit()
+                .text(&self.max_concurrent_items.to_string())
+                // Right aligned input
+                .pos(x + w - 50, y)
+                .size(50, h)
+                .style((windows_sys::Win32::UI::WindowsAndMessaging::ES_NUMBER | windows_sys::Win32::UI::WindowsAndMessaging::ES_CENTER) as u32)
+                .dark_mode(is_dark_mode)
+                .build();
+
+            layout.add_space(30);
             
             // Updates Section
             let (x, y, _w, h) = layout.row(25);
@@ -520,6 +547,22 @@ impl WindowHandler for SettingsState {
                              }
                          },
                          IDC_BTN_CANCEL => {
+                             // Read concurrent items from edit box before closing
+                             let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_CONCURRENT as i32);
+                             if h_edit != std::ptr::null_mut() {
+                                 let len = windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(h_edit);
+                                 if len > 0 {
+                                     let mut buf = vec![0u16; (len + 1) as usize];
+                                     windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW(h_edit, buf.as_mut_ptr(), len + 1);
+                                     let s = String::from_utf16_lossy(&buf[..len as usize]);
+                                     let clean: String = s.chars().take_while(|c| c.is_digit(10)).collect();
+                                     if let Ok(val) = clean.parse::<u32>() {
+                                         self.max_concurrent_items = val;
+                                     }
+                                 } else {
+                                     self.max_concurrent_items = 0; // Treat empty as unlimited
+                                 }
+                             }
                              DestroyWindow(hwnd);
                          },
                           IDC_CHK_FORCE_STOP => {

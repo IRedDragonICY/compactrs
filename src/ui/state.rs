@@ -209,6 +209,7 @@ impl Controls {
 pub struct AppState {
     // New batch processing state
     pub batch_items: Vec<BatchItem>,
+    pub processing_queue: Vec<usize>, // Queue of item indices waiting for processing
     pub next_item_id: u32,
     
     // UI and communication
@@ -258,6 +259,7 @@ impl AppState {
 
         Self {
             batch_items: Vec::new(),
+            processing_queue: Vec::new(),
             next_item_id: 1,
             controls: None,
             tx,

@@ -132,12 +132,29 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
     }
 }
 
-    pub unsafe fn start_processing(st: &mut AppState, hwnd: HWND, indices_to_process: Vec<usize>) {
+    pub unsafe fn start_processing(st: &mut AppState, hwnd: HWND, mut indices_to_process: Vec<usize>) {
     if indices_to_process.is_empty() { return; }
 
     // Reset Lock Dialog State for new run
     st.active_lock_dialog = None;
     st.ignored_lock_processes.clear();
+
+    // Queue Logic
+    let max = st.config.max_concurrent_items as usize;
+    
+    if max > 0 && indices_to_process.len() > max {
+        let queued = indices_to_process.split_off(max);
+        st.processing_queue = queued;
+        // status bar update ("Queued X items") happens in internal or via internal's status msg
+    } else {
+        st.processing_queue.clear();
+    }
+    
+    start_processing_internal(st, hwnd, indices_to_process);
+}
+
+pub unsafe fn start_processing_internal(st: &mut AppState, hwnd: HWND, indices_to_process: Vec<usize>) {
+    if indices_to_process.is_empty() { return; }
 
     if let Some(ctrls) = &st.controls {
         // Read Global Settings
@@ -161,9 +178,6 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
         // Prepare UI state
         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
         Button::new(ctrls.action_panel.cancel_hwnd()).set_enabled(true);
-        // Start processing logic enables pause implicitly, but let's be explicit
-        // Actually, update_process_button_state checks global_state. 
-        // We set global_state below, then calling update_process_button_state is better.
         
         let count_w = u64_to_wstring(indices_to_process.len() as u64);
         let status_msg = concat_wstrings(&[&to_wstring("Processing "), &count_w, &to_wstring(" items...")]);
@@ -207,6 +221,8 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
 
 pub unsafe fn on_stop_processing(st: &mut AppState) {
     st.global_state.store(ProcessingState::Stopped as u8, Ordering::Relaxed);
+    st.processing_queue.clear();
+    
     for item in &st.batch_items {
         if let Some(flag) = &item.state_flag { flag.store(ProcessingState::Stopped as u8, Ordering::Relaxed); }
     }
@@ -308,9 +324,9 @@ pub unsafe fn update_process_button_state(st: &AppState) {
 pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     let current_theme = st.theme;
     let is_dark = theme::resolve_mode(st.theme);
-    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads, new_log_enabled, new_log_mask) = crate::ui::dialogs::show_settings_modal(
+    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads, new_concurrent, new_log_enabled, new_log_mask) = crate::ui::dialogs::show_settings_modal(
         hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard, st.low_power_mode, st.config.max_threads,
-        st.config.log_enabled, st.config.log_level_mask
+        st.config.max_concurrent_items, st.config.log_enabled, st.config.log_level_mask
     );
     
     if let Some(t) = new_theme {
@@ -325,6 +341,7 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     st.config.enable_system_guard = new_guard;
     st.low_power_mode = new_low_power;
     st.config.max_threads = new_threads;
+    st.config.max_concurrent_items = new_concurrent;
     st.config.log_enabled = new_log_enabled;
     st.config.log_level_mask = new_log_mask;
     

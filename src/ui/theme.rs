@@ -64,6 +64,7 @@ pub enum ControlType {
     RadioButton, // New type for distinct styling
     ItemsView, // For specialized ListView themes
     Trackbar, 
+    Edit,
 }
 
 /// Trait for components that need to react to theme changes.
@@ -111,6 +112,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::RadioButton => ("Explorer", None),
             ControlType::ItemsView => ("DarkMode_ItemsView", None),
             ControlType::Trackbar => ("", None), // Use default drawing but with dark background
+            ControlType::Edit => ("DarkMode_Explorer", None),
         }
     } else {
         match control_type {
@@ -125,6 +127,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::RadioButton => ("Explorer", None),
             ControlType::ItemsView => ("Explorer", None),
             ControlType::Trackbar => ("Explorer", None),
+            ControlType::Edit => ("Explorer", None),
         }
     };
 

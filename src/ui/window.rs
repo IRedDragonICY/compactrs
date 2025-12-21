@@ -492,7 +492,7 @@ impl AppState {
             // Timer 1: Main UI Refresh Loop
             loop {
                 match self.rx.try_recv() {
-                    Ok(msg) => self.process_ui_message(msg),
+                    Ok(msg) => self.process_ui_message(hwnd, msg),
                     Err(_) => break,
                 }
             }
@@ -501,7 +501,7 @@ impl AppState {
     }
 
     /// Process messages from worker threads and update UI
-    unsafe fn process_ui_message(&mut self, msg: UiMessage) {
+    unsafe fn process_ui_message(&mut self, hwnd: HWND, msg: UiMessage) {
         unsafe {
             match msg {
                  UiMessage::Progress(cur, total) => {
@@ -542,12 +542,37 @@ impl AppState {
                      crate::ui::dialogs::append_log_entry(entry);
                  },
                  UiMessage::Finished => {
-                     self.global_state.store(crate::ui::state::ProcessingState::Idle as u8, std::sync::atomic::Ordering::Relaxed);
-                     if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::NoProgress); }
-                     if let Some(ctrls) = &self.controls {
-                         windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
+                     // Check queue for more items
+                     if !self.processing_queue.is_empty() {
+                         let max = self.config.max_concurrent_items as usize;
+                         // Determine next batch
+                         let next_indices: Vec<usize> = if max > 0 && self.processing_queue.len() > max {
+                             self.processing_queue.drain(0..max).collect()
+                         } else {
+                             self.processing_queue.drain(..).collect()
+                         };
+                         
+                         // Start next batch without going Idle
+                         // Note: We are already in 'Running' state, so we just spawn the next thread
+                         handlers::start_processing_internal(self, hwnd, next_indices);
+                         
+                         // Update queue status in status bar
+                         let queued_count = self.processing_queue.len();
+                         if queued_count > 0 {
+                             if let Some(ctrls) = &self.controls {
+                                 let q_msg = format!("Processing... ({} queued)", queued_count);
+                                 Label::new(ctrls.status_bar.label_hwnd()).set_text(&q_msg);
+                             }
+                         }
+                     } else {
+                         // Queue empty, really finished
+                         self.global_state.store(crate::ui::state::ProcessingState::Idle as u8, std::sync::atomic::Ordering::Relaxed);
+                         if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::NoProgress); }
+                         if let Some(ctrls) = &self.controls {
+                             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
+                         }
+                         handlers::update_process_button_state(self);
                      }
-                     handlers::update_process_button_state(self);
                  },
                  UiMessage::ScanProgress(id, logical, disk, count) => {
                      if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
