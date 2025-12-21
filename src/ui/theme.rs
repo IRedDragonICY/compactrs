@@ -101,10 +101,10 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::CheckBox => ("DarkMode_Explorer", None),
             ControlType::ComboBox => ("DarkMode_CFD", None),
             ControlType::Header => ("DarkMode_ItemsView", None), 
-            // GroupBox and RadioButton: use empty theme in dark mode to force GDI rendering
-            // This ensures WM_CTLCOLORSTATIC text color (white) is respected.
+            // GroupBox: native for readable text. 
+            // RadioButton: Explorer for Blue Accent (text must be handled via separate label).
             ControlType::GroupBox => ("", None),
-            ControlType::RadioButton => ("", None),
+            ControlType::RadioButton => ("Explorer", None),
             ControlType::ItemsView => ("DarkMode_ItemsView", None),
             ControlType::Trackbar => ("", None), // Use default drawing but with dark background
         }
@@ -138,7 +138,17 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
          }
     };
     
+    // IMPORTANT: Allow Dark Mode *BEFORE* setting the theme.
+    // This ensures that when SetWindowTheme triggers a resource load, it sees the dark mode flag.
+    allow_dark_mode_for_window(hwnd, is_dark);
+    
     SetWindowTheme(hwnd, theme_w.as_ptr(), psz_sub_app_name);
+
+    if is_dark {
+        // Force the control to update its theme data immediately
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_THEMECHANGED};
+        SendMessageW(hwnd, WM_THEMECHANGED, 0, 0);
+    }
 }
 
 /// Applies the application font to the specified window.
@@ -179,6 +189,11 @@ pub fn set_preferred_app_mode(allow_dark: bool) {
 // ============================================================================
 // Internal Initializers
 // ============================================================================
+
+/// Initialize Uxtheme hooks explicitly. Code can call this early to ensure hooks are ready.
+pub fn init() {
+    UXTHEME_API.get_or_init(|| init_uxtheme());
+}
 
 fn init_uxtheme() -> UxthemeApi {
     unsafe {

@@ -99,6 +99,10 @@ fn is_admin() -> bool {
 }
 
 fn main() {
+    // Initialize Theme System early
+    crate::ui::theme::init();
+    crate::ui::theme::set_preferred_app_mode(true);
+
     // 0. Single Instance Check (Before Admin Check)
     unsafe {
         let class_name = to_wstring("CompactRS_Class");

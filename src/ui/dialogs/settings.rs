@@ -127,18 +127,31 @@ impl WindowHandler for SettingsState {
             let is_dark_mode = self.is_dark;
             let theme = self.theme;
             
-            // Helper to create and configure radio button
+            // Helper to create and configure radio button with separate label (to fix dark mode text)
             let create_radio = |text: &str, id: u16, y: i32, checked: bool| {
-                let h = ControlBuilder::new(hwnd, id)
+                // Radio Button (Icon only effectively)
+                let h_radio = ControlBuilder::new(hwnd, id)
                     .radio()
-                    .text(text)
+                    .text("") // Empty text to avoid black text issue
                     .pos(30, y)
-                    .size(200, 25)
+                    .size(20, 25) // Small width just for the circle
                     .dark_mode(is_dark_mode)
                     .build();
+                
                 if checked {
-                    SendMessageW(h, BM_SETCHECK, 1, 0);
+                    SendMessageW(h_radio, BM_SETCHECK, 1, 0);
                 }
+
+                // Companion Label
+                // Use a derived ID for the label (e.g. id + 100) or just ignore it if no interaction needed yet.
+                // For now, static label is fine.
+                let _lbl = ControlBuilder::new(hwnd, id + 100)
+                    .label(false)
+                    .text(text)
+                    .pos(55, y + 2) // Offset text
+                    .size(200, 20)
+                    .dark_mode(is_dark_mode)
+                    .build();
             };
             
             create_radio("System Default", IDC_RADIO_SYSTEM, 40, theme == AppTheme::System);
@@ -258,6 +271,32 @@ impl WindowHandler for SettingsState {
                 .size(80, 25)
                 .dark_mode(self.is_dark)
                 .build();
+
+            // FORCE RE-APPLY THEME:
+            let controls = [IDC_GRP_THEME, IDC_RADIO_SYSTEM, IDC_RADIO_DARK, IDC_RADIO_LIGHT, 
+                           IDC_CHK_FORCE_STOP, IDC_CHK_CONTEXT_MENU, IDC_CHK_SYSTEM_GUARD, IDC_CHK_LOW_POWER, 
+                           IDC_BTN_CANCEL, IDC_BTN_CHECK_UPDATE, IDC_LBL_UPDATE_STATUS, IDC_BTN_RESTART_TI, 
+                           IDC_SLIDER_THREADS, IDC_LBL_THREADS_VALUE,
+                           // Label companions
+                           IDC_RADIO_SYSTEM + 100, IDC_RADIO_DARK + 100, IDC_RADIO_LIGHT + 100];
+            
+            for &ctrl_id in &controls {
+                let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, ctrl_id as i32);
+                if h_ctl != std::ptr::null_mut() {
+                    let ctl_type = match ctrl_id {
+                        IDC_GRP_THEME => crate::ui::theme::ControlType::GroupBox,
+                        IDC_CHK_FORCE_STOP | IDC_CHK_CONTEXT_MENU | IDC_CHK_SYSTEM_GUARD | IDC_CHK_LOW_POWER => crate::ui::theme::ControlType::CheckBox,
+                        IDC_BTN_CANCEL | IDC_BTN_CHECK_UPDATE | IDC_BTN_RESTART_TI => crate::ui::theme::ControlType::Button,
+                        IDC_SLIDER_THREADS => crate::ui::theme::ControlType::Trackbar,
+                        IDC_LBL_THREADS_VALUE | IDC_LBL_UPDATE_STATUS => crate::ui::theme::ControlType::Window, 
+                        // Our new labels
+                        id if id > 2100 => crate::ui::theme::ControlType::Window, 
+                        _ => crate::ui::theme::ControlType::RadioButton,
+                    };
+                    crate::ui::theme::apply_theme(h_ctl, ctl_type, self.is_dark);
+                    InvalidateRect(h_ctl, std::ptr::null(), 1);
+                }
+            }
         }
         0
     }

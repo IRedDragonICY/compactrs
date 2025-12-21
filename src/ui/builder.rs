@@ -109,8 +109,11 @@ impl ControlBuilder {
             let text_wide = to_wstring(&self.text);
             let class_wide = to_wstring(&self.class_name);
 
+            let wants_visible = (self.style & WS_VISIBLE) != 0;
+            let style_initial = self.style & !WS_VISIBLE;
+
             let hwnd = CreateWindowExW(
-                self.ex_style, class_wide.as_ptr(), text_wide.as_ptr(), self.style,
+                self.ex_style, class_wide.as_ptr(), text_wide.as_ptr(), style_initial,
                 self.x, self.y, self.w, self.h,
                 self.parent, self.id as isize as HMENU, instance, std::ptr::null(),
             );
@@ -124,6 +127,11 @@ impl ControlBuilder {
             if self.checked {
                  use windows_sys::Win32::UI::WindowsAndMessaging::BM_SETCHECK;
                  SendMessageW(hwnd, BM_SETCHECK, 1, 0);
+            }
+
+            if wants_visible {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
+                ShowWindow(hwnd, SW_SHOW);
             }
 
             hwnd
