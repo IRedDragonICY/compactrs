@@ -30,6 +30,7 @@ pub struct ActionPanelIds {
     pub chk_force: u16,
     pub btn_process: u16,
     pub btn_cancel: u16,
+    pub btn_pause: u16,
 }
 
 /// ActionPanel component containing all action buttons and controls.
@@ -50,6 +51,7 @@ pub struct ActionPanel {
     hwnd_force: HWND,
     hwnd_process: HWND,
     hwnd_cancel: HWND,
+    hwnd_pause: HWND,
     ids: ActionPanelIds,
 }
 
@@ -71,6 +73,7 @@ impl ActionPanel {
             hwnd_force: std::ptr::null_mut(),
             hwnd_process: std::ptr::null_mut(),
             hwnd_cancel: std::ptr::null_mut(),
+            hwnd_pause: std::ptr::null_mut(),
             ids,
         }
     }
@@ -127,6 +130,12 @@ impl ActionPanel {
     #[inline]
     pub fn cancel_hwnd(&self) -> HWND {
         self.hwnd_cancel
+    }
+
+    /// Returns the Pause button HWND.
+    #[inline]
+    pub fn pause_hwnd(&self) -> HWND {
+        self.hwnd_pause
     }
 
     /// Sets the font for all child controls.
@@ -273,6 +282,15 @@ impl Component for ActionPanel {
             .dark_mode(is_dark)
             .build();
 
+        // Create Pause button
+        self.hwnd_pause = ControlBuilder::new(parent, self.ids.btn_pause)
+            .button()
+            .text_w(w!("Pause")) // Text will be dynamic
+            .pos(640, btn_y) // Temporary pos
+            .size(80, btn_h)
+            .dark_mode(is_dark)
+            .build();
+
         Ok(())
     }}
 
@@ -404,24 +422,43 @@ impl Component for ActionPanel {
                 SWP_NOZORDER,
             );
 
-            // Process All button
+            // Process All button (Anchored Right)
+            let process_width = 160;
+            let cancel_width = 80;
+            let pause_width = 80;
+            
+            let cancel_x = (parent_rect.right - parent_rect.left) - cancel_width - padding;
+            let process_x = cancel_x - process_width - padding;
+            let pause_x = process_x - pause_width - padding;
+
             SetWindowPos(
                 self.hwnd_process,
                 std::ptr::null_mut(),
-                padding + 540,
+                process_x,
                 btn_y,
-                160, // Increased to fit "Process Selected (NNN)"
+                process_width,
                 btn_height,
                 SWP_NOZORDER,
             );
 
-            // Cancel button
+            // Cancel button (Anchored Right)
             SetWindowPos(
                 self.hwnd_cancel,
                 std::ptr::null_mut(),
-                padding + 710, // Adjusted Shift for wider Process button
+                cancel_x,
                 btn_y,
-                80,
+                cancel_width,
+                btn_height,
+                SWP_NOZORDER,
+            );
+
+            // Pause button (Left of Process)
+            SetWindowPos(
+                self.hwnd_pause,
+                std::ptr::null_mut(),
+                pause_x,
+                btn_y,
+                pause_width,
                 btn_height,
                 SWP_NOZORDER,
             );
@@ -438,6 +475,7 @@ impl Component for ActionPanel {
             apply_button_theme(self.hwnd_clear, is_dark);
             apply_accent_button_theme(self.hwnd_process, is_dark);
             apply_button_theme(self.hwnd_cancel, is_dark);
+            apply_button_theme(self.hwnd_pause, is_dark);
             apply_button_theme(self.hwnd_force, is_dark); // Checkbox uses button theme
 
             // Apply theme to ComboBoxes

@@ -71,8 +71,8 @@ pub enum UiMessage {
     
     Finished,
     
-    /// Single item finished: (row_index, final_size_bytes, final_state)
-    RowFinished(i32, u64, crate::engine::wof::CompressionState),
+    /// Single item finished: (row_index, final_size_bytes, total_count, final_state)
+    RowFinished(i32, u64, u64, crate::engine::wof::CompressionState),
     
     /// Item analyzed (id, logical_size, disk_size, compression_state)
     BatchItemAnalyzed(u32, u64, u64, crate::engine::wof::CompressionState),

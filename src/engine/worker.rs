@@ -222,7 +222,7 @@ pub fn batch_process_worker(
                                   };
                                   
                                   // Final progress update implies finished
-                                  let _ = tx.send(UiMessage::RowFinished(task.row_idx as i32, current_bytes, algo_st));
+                                  let _ = tx.send(UiMessage::RowFinished(task.row_idx as i32, current_bytes, r_tot, algo_st));
                               } else {
                                   let _ = tx.send(UiMessage::RowProgress(task.row_idx as i32, r_cur, r_tot, current_bytes));
                               }

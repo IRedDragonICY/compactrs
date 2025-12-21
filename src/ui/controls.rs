@@ -23,6 +23,7 @@ pub const IDC_LBL_ACTION_MODE: u16 = 121;
 pub const IDC_LBL_ALGO: u16 = 122;
 pub const IDC_LBL_INPUT: u16 = 123;
 pub const IDC_BTN_CLEAR: u16 = 124;
+pub const IDC_BTN_PAUSE: u16 = 125;
 
 // Helper untuk update tema dinamis (digunakan saat switch theme)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
@@ -56,8 +57,10 @@ pub const COLOR_ACCENT_BLUE_PRESSED: u32 = 0x00C06000; // Darker blue for presse
 
 /// Draws an accent button with Windows 11 Fluent blue style.
 /// Call this from WM_DRAWITEM handler.
+/// Draws an accent button with Windows 11 Fluent blue style.
+/// Call this from WM_DRAWITEM handler.
 pub unsafe fn draw_accent_button(lparam: isize) {
-    use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_SELECTED};
+    use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_SELECTED, ODS_DISABLED};
     use windows_sys::Win32::Graphics::Gdi::{
         CreateSolidBrush, DeleteObject, SetBkMode, SetTextColor, 
         SelectObject, TRANSPARENT, RoundRect, CreatePen, PS_SOLID,
@@ -67,12 +70,21 @@ pub unsafe fn draw_accent_button(lparam: isize) {
     
     // Determine button state
     let is_pressed = (dis.itemState & ODS_SELECTED) != 0;
+    let is_disabled = (dis.itemState & ODS_DISABLED) != 0;
     
     // Choose color based on state
-    let bg_color = if is_pressed {
+    let bg_color = if is_disabled {
+        0x00505050 // Dark grey for disabled state
+    } else if is_pressed {
         COLOR_ACCENT_BLUE_PRESSED
     } else {
         COLOR_ACCENT_BLUE
+    };
+    
+    let text_color = if is_disabled {
+        0x00A0A0A0 // Light grey text for disabled
+    } else {
+        0x00FFFFFF // White text
     };
     
     // Create rounded rect brush and pen
@@ -93,7 +105,7 @@ pub unsafe fn draw_accent_button(lparam: isize) {
     
     // Draw text
     SetBkMode(dis.hDC, TRANSPARENT as i32);
-    SetTextColor(dis.hDC, 0x00FFFFFF); // White text
+    SetTextColor(dis.hDC, text_color);
     
     // Get button text
     use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;

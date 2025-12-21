@@ -152,6 +152,7 @@ impl WindowHandler for AppState {
                 chk_force: IDC_CHK_FORCE,
                 btn_process: IDC_BTN_PROCESS_ALL,
                 btn_cancel: IDC_BTN_CANCEL,
+                btn_pause: IDC_BTN_PAUSE,
             });
             let _ = action_panel.create(hwnd);
             
@@ -164,8 +165,9 @@ impl WindowHandler for AppState {
             });
             let _ = header_panel.create(hwnd);
             
-            // Disable cancel button initially
-            windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(action_panel.cancel_hwnd(), 0);
+            // Disable cancel and pause buttons initially
+            crate::ui::wrappers::Button::new(action_panel.cancel_hwnd()).set_enabled(false);
+            crate::ui::wrappers::Button::new(action_panel.pause_hwnd()).set_enabled(false);
 
             // Populate Combos
             self.populate_ui_combos(&action_panel);
@@ -176,6 +178,9 @@ impl WindowHandler for AppState {
                 action_panel,
                 header_panel,
             });
+            
+            // Set initial state of buttons (Disabled if empty)
+            handlers::update_process_button_state(self);
 
             // Timer for UI updates
             SetTimer(hwnd, 1, 100, None);
@@ -436,6 +441,9 @@ impl AppState {
                        let is_dark = theme::resolve_mode(self.theme);
                        crate::ui::dialogs::show_console_window(hwnd, &self.logs, is_dark);
                  },
+                 IDC_BTN_PAUSE => {
+                       handlers::on_pause_clicked(self);
+                 },
                  IDC_CHK_FORCE => {
                        let hwnd_ctl = lparam as HWND;
                        self.force_compress = Button::new(hwnd_ctl).is_checked();
@@ -600,9 +608,14 @@ impl AppState {
                          }
                      }
                  },
-                 UiMessage::RowFinished(row, final_bytes, final_state) => {
+                 UiMessage::RowFinished(row, final_bytes, total_count, final_state) => {
                      if let Some(ctrls) = &self.controls {
                          ctrls.file_list.update_item_text(row, 9, w!("Done"));
+                         
+                         // Update Progress Text (Column 8)
+                         let tot_w = u64_to_wstring(total_count);
+                         let prog_str = concat_wstrings(&[&tot_w, &to_wstring("/"), &tot_w]);
+                         ctrls.file_list.update_item_text(row, 8, &prog_str);
                          
                          // Update disk size (Col 6) and Ratio (Col 7)
                          let size_str = format_size(final_bytes);

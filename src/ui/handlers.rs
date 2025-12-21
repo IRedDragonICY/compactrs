@@ -35,12 +35,14 @@ use crate::ui::file_dialog::{pick_files, pick_folder};
 pub unsafe fn on_add_files(st: &mut AppState) {
     if let Ok(files) = pick_files() {
         st.ingest_paths(files);
+        update_process_button_state(st);
     }
 }
 
 pub unsafe fn on_add_folder(st: &mut AppState) {
     if let Ok(folder) = pick_folder() {
         st.ingest_paths(vec![folder]);
+        update_process_button_state(st);
     }
 }
 
@@ -85,34 +87,8 @@ pub unsafe fn on_clear_all(st: &mut AppState) {
     update_process_button_state(st);
 }
 
-pub unsafe fn update_process_button_state(st: &AppState) {
-    if let Some(ctrls) = &st.controls {
-        let btn = Button::new(ctrls.action_panel.process_hwnd());
-        
-        // This function must be safe to call even if lists are changing
-        let selected_count = ctrls.file_list.get_selection_count();
-        
-        if selected_count > 0 {
-            let text = format!("Process Selected ({})", selected_count);
-            btn.set_text(&text);
-            btn.set_enabled(true);
-        } else {
-            // Count pending items
-            let pending_count = st.batch_items.iter()
-                .filter(|i| i.status == BatchStatus::Pending || matches!(i.status, BatchStatus::Error(_)))
-                .count();
-                
-            if pending_count > 0 {
-                let text = format!("Process Pending ({})", pending_count);
-                btn.set_text(&text);
-                btn.set_enabled(true);
-            } else {
-                btn.set_text("Process All");
-                btn.set_enabled(false);
-            }
-        }
-    }
-}
+// Old update_process_button_state replaced by newer implementation below
+
 
 pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool) {
     if st.batch_items.is_empty() {
@@ -177,7 +153,10 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
         // Prepare UI state
         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
         Button::new(ctrls.action_panel.cancel_hwnd()).set_enabled(true);
-
+        // Start processing logic enables pause implicitly, but let's be explicit
+        // Actually, update_process_button_state checks global_state. 
+        // We set global_state below, then calling update_process_button_state is better.
+        
         let count_w = u64_to_wstring(indices_to_process.len() as u64);
         let status_msg = concat_wstrings(&[&to_wstring("Processing "), &count_w, &to_wstring(" items...")]);
         Label::new(ctrls.status_bar.label_hwnd()).set_text(&String::from_utf16_lossy(&status_msg));
@@ -186,6 +165,9 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
         let tx = st.tx.clone();
         let state_global = st.global_state.clone();
         state_global.store(ProcessingState::Running as u8, Ordering::Relaxed);
+        
+        // Update button states now that we are running
+        update_process_button_state(st);
         
         let action_mode_idx = ComboBox::new(ctrls.action_panel.action_mode_hwnd()).get_selected_index();
         
@@ -223,12 +205,94 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
     if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
     if let Some(ctrls) = &st.controls {
         Button::new(ctrls.action_panel.cancel_hwnd()).set_enabled(false);
+        let btn_pause = Button::new(ctrls.action_panel.pause_hwnd());
+        btn_pause.set_enabled(false);
+        btn_pause.set_text("Pause");
+        
         Label::new(ctrls.status_bar.label_hwnd()).set_text("Stopping...");
         
         // Reset all items' visuals
         for (i, _item) in st.batch_items.iter().enumerate() {
              ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Stopped);
              ctrls.file_list.update_status_text(i as i32, "Cancelled");
+        }
+    }
+}
+
+pub unsafe fn on_pause_clicked(st: &mut AppState) {
+    let current = st.global_state.load(Ordering::Relaxed);
+    let new_state = if current == ProcessingState::Running as u8 {
+        ProcessingState::Paused
+    } else if current == ProcessingState::Paused as u8 {
+        ProcessingState::Running
+    } else {
+        return; // Should be disabled if not running/paused
+    };
+
+    st.global_state.store(new_state as u8, Ordering::Relaxed);
+    
+    // Update Taskbar
+    if let Some(tb) = &st.taskbar {
+        match new_state {
+            ProcessingState::Paused => tb.set_state(TaskbarState::Paused),
+            ProcessingState::Running => tb.set_state(TaskbarState::Normal),
+            _ => {}
+        }
+    }
+    
+    update_process_button_state(st);
+}
+
+pub unsafe fn update_process_button_state(st: &AppState) {
+    if let Some(ctrls) = &st.controls {
+        let btn_process = Button::new(ctrls.action_panel.process_hwnd());
+        let btn_remove = Button::new(ctrls.action_panel.remove_hwnd());
+        let btn_clear = Button::new(ctrls.action_panel.clear_hwnd());
+        let btn_pause = Button::new(ctrls.action_panel.pause_hwnd());
+        
+        let selected_count = ctrls.file_list.get_selection_count();
+        let total_count = st.batch_items.len();
+        let global_state = ProcessingState::from_u8(st.global_state.load(Ordering::Relaxed));
+        
+        // 1. Process Button Logic
+        if selected_count > 0 {
+            let text = format!("Process Selected ({})", selected_count);
+            btn_process.set_text(&text);
+            btn_process.set_enabled(true); // Always enable selection process unless fully locked? 
+            // Ideally if running, this might queue? But for now it starts new worker which might race. 
+            // Disable process if already running globally for safety in this version.
+            btn_process.set_enabled(global_state == ProcessingState::Idle || global_state == ProcessingState::Stopped);
+        } else {
+            // Count pending items
+            let pending_count = st.batch_items.iter()
+                .filter(|i| i.status == BatchStatus::Pending || matches!(i.status, BatchStatus::Error(_)))
+                .count();
+                
+            if pending_count > 0 {
+                let text = format!("Process Pending ({})", pending_count);
+                btn_process.set_text(&text);
+                btn_process.set_enabled(global_state == ProcessingState::Idle || global_state == ProcessingState::Stopped);
+            } else {
+                btn_process.set_text("Process All");
+                btn_process.set_enabled(false);
+            }
+        }
+
+        // 2. Remove/Clear Logic
+        btn_remove.set_enabled(selected_count > 0 && global_state != ProcessingState::Running);
+        btn_clear.set_enabled(total_count > 0 && global_state != ProcessingState::Running);
+
+        // 3. Pause Button Logic (Smart Logic)
+        if global_state == ProcessingState::Running {
+             btn_pause.set_enabled(true);
+             btn_pause.set_text("Pause");
+        } else if global_state == ProcessingState::Paused {
+             btn_pause.set_enabled(true);
+             btn_pause.set_text("Resume");
+        } else {
+             // Idle or Stopped
+             btn_pause.set_enabled(false);
+             btn_pause.set_text("Pause");
         }
     }
 }
@@ -638,6 +702,7 @@ pub unsafe fn process_hdrop(_hwnd: HWND, hdrop: HDROP, st: &mut AppState) {
     }
     DragFinish(hdrop);
     st.ingest_paths(paths);
+    update_process_button_state(st);
 }
 
 pub unsafe fn process_clipboard(hwnd: HWND, st: &mut AppState) {
