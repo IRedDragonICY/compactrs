@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -150,7 +150,7 @@ jobs:
           [void]$sb.AppendLine("- **Author:** $author")
           [void]$sb.AppendLine("- **Platform:** Windows x64")
           [void]$sb.AppendLine("- **Binary Size:** $size KB (UPX compressed)")
-          [void]$sb.AppendLine("- **Rust Toolchain:** Stable")
+          [void]$sb.AppendLine("- **Rust Toolchain:** Nightly")
           [void]$sb.AppendLine("")
           [void]$sb.AppendLine("## Installation")
           [void]$sb.AppendLine("")
