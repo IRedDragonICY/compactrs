@@ -15,6 +15,10 @@ use windows_sys::Win32::Graphics::Gdi::HFONT;
 use super::base::Component;
 use crate::ui::builder::ButtonBuilder;
 use crate::ui::controls::apply_button_theme;
+use crate::w;
+
+const ICON_SETTINGS: &[u16] = &[0x2699, 0]; // Gear
+const ICON_KEYBOARD: &[u16] = &[0x2328, 0]; // Keyboard
 
 /// Configuration for HeaderPanel control IDs.
 pub struct HeaderPanelIds {
@@ -104,19 +108,19 @@ impl Component for HeaderPanel {
             // Initial positions (will be updated in on_resize)
             // These are just placeholders - real positions set in on_resize
             self.hwnd_settings = ButtonBuilder::new(parent, self.ids.btn_settings)
-                .text("\u{2699}")  // Gear icon
+                .text_w(ICON_SETTINGS)  // Gear icon
                 .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
 
             self.hwnd_about = ButtonBuilder::new(parent, self.ids.btn_about)
-                .text("?")
+                .text_w(w!("?"))
                 .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
 
             self.hwnd_shortcuts = ButtonBuilder::new(parent, self.ids.btn_shortcuts)
-                .text("\u{2328}")
+                .text_w(ICON_KEYBOARD)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
 
             self.hwnd_console = ButtonBuilder::new(parent, self.ids.btn_console)
-                .text(">_")
+                .text_w(w!(">_"))
                 .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
 
             Ok(())

@@ -1,7 +1,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
-use crate::utils::to_wstring;
+
+use crate::w;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE, WS_CAPTION, WS_SYSMENU, WS_POPUP,
@@ -42,7 +43,7 @@ impl WindowHandler for ShortcutsState {
              crate::ui::theme::set_window_frame_theme(hwnd, is_dark_mode);
 
              // Fonts
-             let segoe_ui_var = to_wstring("Segoe UI Variable Display");
+             let segoe_ui_var = w!("Segoe UI Variable Display");
              let key_font = CreateFontW(
                  -16, 0, 0, 0, FW_BOLD as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
                  OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
@@ -54,14 +55,14 @@ impl WindowHandler for ShortcutsState {
                  (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr()) as HFONT;
 
              let shortcuts = [
-                 ("Ctrl + O", "Add Files"),
-                 ("Ctrl + Shift + O", "Add Folder"),
-                 ("Ctrl + V", "Paste Files/Paths from Clipboard"),
-                 ("Del", "Remove Selected Items"),
-                 ("Ctrl + A", "Select All"),
-                 ("Double Click (Path)", "Open File Location"),
-                 ("Double Click (Algo)", "Cycle Algorithm"),
-                 ("Double Click (Action)", "Toggle Compress/Decompress"),
+                 (w!("Ctrl + O"), w!("Add Files")),
+                 (w!("Ctrl + Shift + O"), w!("Add Folder")),
+                 (w!("Ctrl + V"), w!("Paste Files/Paths from Clipboard")),
+                 (w!("Del"), w!("Remove Selected Items")),
+                 (w!("Ctrl + A"), w!("Select All")),
+                 (w!("Double Click (Path)"), w!("Open File Location")),
+                 (w!("Double Click (Algo)"), w!("Cycle Algorithm")),
+                 (w!("Double Click (Action)"), w!("Toggle Compress/Decompress")),
              ];
 
              let start_y = 25;
@@ -77,7 +78,7 @@ impl WindowHandler for ShortcutsState {
                  // Key Column (Right Aligned)
                  ControlBuilder::new(hwnd, 0)
                      .label(false)
-                     .text(key)
+                     .text_w(key)
                      .pos(margin, y)
                      .size(col1_w, 25)
                      .font(key_font)
@@ -88,7 +89,7 @@ impl WindowHandler for ShortcutsState {
                  // Description Column (Left Aligned)
                  ControlBuilder::new(hwnd, 0)
                      .label(false)
-                     .text(desc)
+                     .text_w(desc)
                      .pos(margin + col1_w + 20, y)
                      .size(250, 25)
                      .font(desc_font)

@@ -2,6 +2,7 @@ use crate::ui::builder::ButtonBuilder;
 use crate::ui::theme;
 use crate::ui::framework::get_window_state;
 use crate::utils::to_wstring;
+use crate::w;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
@@ -16,7 +17,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
 
-const DIALOG_CLASS_NAME: &str = "CompactRS_ForceStopDialog";
+
 const TIMER_ID: usize = 1;
 const IDC_BTN_YES: u16 = 3001;
 const IDC_BTN_NO: u16 = 3002;
@@ -31,8 +32,8 @@ struct DialogState {
 
 pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: bool) -> bool { unsafe {
     let instance = GetModuleHandleW(std::ptr::null());
-    let cls = to_wstring(DIALOG_CLASS_NAME);
-    let title = to_wstring("File Locked");
+    let cls = w!("CompactRS_ForceStopDialog");
+    let title = w!("File Locked");
     
     let wc = WNDCLASSW {
         style: CS_HREDRAW | CS_VREDRAW,
@@ -116,7 +117,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 // Message Label
                 let msg_text = "Process '".to_string() + &st.process_name + "' is locking this file.\nForce Stop and try again?";
                 let msg_wide = to_wstring(&msg_text);
-                let static_cls = to_wstring("STATIC");
+                let static_cls = w!("STATIC");
                 
                 let _h_msg = CreateWindowExW(
                     0,
@@ -132,7 +133,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 
                 // Yes Button
                 ButtonBuilder::new(hwnd, IDC_BTN_YES)
-                    .text("Force Stop (Yes)").pos(40, 90).size(130, 32).dark_mode(is_dark).build();
+                    .text_w(w!("Force Stop (Yes)")).pos(40, 90).size(130, 32).dark_mode(is_dark).build();
                 
                 // No Button with Timer
                 let no_text = "Cancel (".to_string() + &st.seconds_left.to_string() + ")";

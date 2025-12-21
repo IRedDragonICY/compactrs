@@ -120,7 +120,7 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
                 WofAlgorithm::Lzx => "LZX",
             };
             for &row in &indices_to_process {
-                ctrls.file_list.update_item_text(row as i32, 2, to_wstring(algo_name));
+                ctrls.file_list.update_item_text(row as i32, 2, &to_wstring(algo_name));
             }
         }
         
@@ -178,8 +178,8 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
         
         // Reset all items' visuals
         for (i, _item) in st.batch_items.iter().enumerate() {
-             ctrls.file_list.update_item_text(i as i32, 10, to_wstring("▶ Start"));
-             ctrls.file_list.update_item_text(i as i32, 9, to_wstring("Cancelled"));
+             ctrls.file_list.update_item_text(i as i32, 10, &to_wstring("▶ Start"));
+             ctrls.file_list.update_item_text(i as i32, 9, &to_wstring("Cancelled"));
         }
     }
 }
@@ -247,16 +247,16 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                   item.estimated_size = cached;
                   let est_str = crate::utils::format_size(cached);
                   if let Some(ctrls) = &st.controls { 
-                      ctrls.file_list.update_item_text(row, 2, to_wstring(name)); 
-                      ctrls.file_list.update_item_text(row, 5, est_str);
+                      ctrls.file_list.update_item_text(row, 2, &to_wstring(name)); 
+                      ctrls.file_list.update_item_text(row, 5, &est_str);
                   }
               } else {
                   // Need to calculate - trigger async estimation
                   let path = item.path.clone();
                   let id = item.id;
                   if let Some(ctrls) = &st.controls { 
-                      ctrls.file_list.update_item_text(row, 2, to_wstring(name)); 
-                      ctrls.file_list.update_item_text(row, 5, to_wstring("Estimating..."));
+                      ctrls.file_list.update_item_text(row, 2, &to_wstring(name)); 
+                      ctrls.file_list.update_item_text(row, 5, &to_wstring("Estimating..."));
                   }
                   let tx = st.tx.clone();
                   thread::spawn(move || {
@@ -275,7 +275,7 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
               let name = match item.action {
                   BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
               };
-              if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, to_wstring(name)); }
+              if let Some(ctrls) = &st.controls { ctrls.file_list.update_item_text(row, 3, &to_wstring(name)); }
           }
     } else if col == 10 && code == NM_CLICK { // Start/Pause/Stop (Column 10)
            if let Some(_item) = st.batch_items.get_mut(row as usize) {
@@ -327,7 +327,7 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                         start_processing(st, hwnd, indices);
                         // Update text immediately to "⏸   ⏹"
                         if let Some(ctrls) = &st.controls { 
-                             ctrls.file_list.update_item_text(row, 10, to_wstring("⏸   ⏹"));
+                             ctrls.file_list.update_item_text(row, 10, &to_wstring("⏸   ⏹"));
                         }
                     },
                     ProcessingState::Running => {
@@ -335,15 +335,15 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                             // STOP
                             on_stop_processing(st);
                             if let Some(ctrls) = &st.controls {
-                                 ctrls.file_list.update_item_text(row, 10, to_wstring("▶ Start"));
+                                 ctrls.file_list.update_item_text(row, 10, &to_wstring("▶ Start"));
                             }
                         } else {
                             // PAUSE
                             st.global_state.store(ProcessingState::Paused as u8, Ordering::Relaxed);
                              if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
                              if let Some(ctrls) = &st.controls { 
-                                 ctrls.file_list.update_item_text(row, 10, to_wstring("▶   ⏹"));
-                                 ctrls.file_list.update_item_text(row, 9, to_wstring("Paused"));
+                                 ctrls.file_list.update_item_text(row, 10, &to_wstring("▶   ⏹"));
+                                 ctrls.file_list.update_item_text(row, 9, &to_wstring("Paused"));
                                  let msg = to_wstring("Paused.");
                                  SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
                             }
@@ -358,8 +358,8 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                             st.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
                             if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
                             if let Some(ctrls) = &st.controls { 
-                                 ctrls.file_list.update_item_text(row, 10, to_wstring("⏸   ⏹"));
-                                 ctrls.file_list.update_item_text(row, 9, to_wstring("Processing"));
+                                 ctrls.file_list.update_item_text(row, 10, &to_wstring("⏸   ⏹"));
+                                 ctrls.file_list.update_item_text(row, 9, &to_wstring("Processing"));
                                  let msg = to_wstring("Resumed.");
                                  SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
                             }
@@ -426,20 +426,20 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                         };
                         
                         if let Some(ctrls) = &st.controls { 
-                            ctrls.file_list.update_item_text(row, 2, to_wstring(name)); 
+                            ctrls.file_list.update_item_text(row, 2, &to_wstring(name)); 
                         }
 
                         if let Some(cached) = item.get_cached_estimate(new_algo) {
                             item.estimated_size = cached;
                             let est_str = crate::utils::format_size(cached);
                             if let Some(ctrls) = &st.controls { 
-                                ctrls.file_list.update_item_text(row, 5, est_str);
+                                ctrls.file_list.update_item_text(row, 5, &est_str);
                             }
                         } else {
                             let path = item.path.clone();
                             let id = item.id;
                             if let Some(ctrls) = &st.controls { 
-                                ctrls.file_list.update_item_text(row, 5, to_wstring("Estimating..."));
+                                ctrls.file_list.update_item_text(row, 5, &to_wstring("Estimating..."));
                             }
                             let tx = st.tx.clone();
                             thread::spawn(move || {
@@ -491,7 +491,7 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                             crate::ui::state::BatchAction::Decompress => "Decompress",
                         };
                          if let Some(ctrls) = &st.controls { 
-                            ctrls.file_list.update_item_text(row, 3, to_wstring(name)); 
+                            ctrls.file_list.update_item_text(row, 3, &to_wstring(name)); 
                         }
                     }
                 }

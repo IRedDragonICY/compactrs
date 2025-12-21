@@ -1,6 +1,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
+use crate::w;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -32,7 +33,7 @@ struct AboutState {
 }
 
 pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
-    let class_name = to_wstring("CompactRS_About");
+    let class_name = w!("CompactRS_About");
 
     // Check if window already exists
     let existing_hwnd = windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW(class_name.as_ptr(), std::ptr::null());
@@ -77,8 +78,8 @@ impl WindowHandler for AboutState {
             let margin = 20;
 
             // Create modern fonts for visual hierarchy
-            let segoe_ui_var = to_wstring("Segoe UI Variable Display");
-            let segoe_ui = to_wstring("Segoe UI");
+            let segoe_ui_var = w!("Segoe UI Variable Display");
+            let segoe_ui = w!("Segoe UI");
 
             let title_font = CreateFontW(
                 -28, 0, 0, 0, FW_BOLD as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
@@ -128,7 +129,7 @@ impl WindowHandler for AboutState {
             // App Name - Large bold title using ControlBuilder
             let _app_name = ControlBuilder::new(hwnd, 0)
                 .label(true) // center-aligned
-                .text("CompactRS")
+                .text_w(w!("CompactRS"))
                 .pos(margin, 160)
                 .size(content_width, 40)
                 .font(title_font)
@@ -149,7 +150,7 @@ impl WindowHandler for AboutState {
             // Description - Regular body text using ControlBuilder
             let _desc = ControlBuilder::new(hwnd, 0)
                 .label(true)
-                .text("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary.")
+                .text_w(w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."))
                 .pos(margin, 240)
                 .size(content_width, 130)
                 .font(body_font)
@@ -159,7 +160,7 @@ impl WindowHandler for AboutState {
             // Created by - Italic style using ControlBuilder
             let _creator = ControlBuilder::new(hwnd, 0)
                 .label(true)
-                .text("Created by IRedDragonICY\n(Mohammad Farid Hendianto)")
+                .text_w(w!("Created by IRedDragonICY\n(Mohammad Farid Hendianto)"))
                 .pos(margin, 385)
                 .size(content_width, 40)
                 .font(creator_font)
@@ -211,7 +212,7 @@ impl WindowHandler for AboutState {
                          let nmlink = &*(lparam as *const NMLINK);
                          let item = nmlink.item;
                          
-                         let open = to_wstring("open");
+                         let open = w!("open");
                          let github = to_wstring(GITHUB_URL);
                          let license = to_wstring(LICENSE_URL);
                          

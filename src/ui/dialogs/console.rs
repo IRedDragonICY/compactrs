@@ -4,6 +4,7 @@ use crate::ui::builder::ButtonBuilder;
 use crate::ui::framework::{get_window_state, WindowHandler, WindowBuilder, WindowAlignment};
 use crate::utils::to_wstring;
 use crate::logger::LogEntry;
+use crate::w;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
 
@@ -98,10 +99,10 @@ impl ConsoleState {
         crate::ui::theme::set_window_frame_theme(hwnd, self.is_dark);
         if let Some(edit) = self.edit_hwnd {
              if self.is_dark {
-                 let dark_mode = to_wstring("DarkMode_Explorer");
+                 let dark_mode = w!("DarkMode_Explorer");
                  SetWindowTheme(edit, dark_mode.as_ptr(), std::ptr::null());
              } else {
-                 let explorer = to_wstring("Explorer");
+                 let explorer = w!("Explorer");
                  SetWindowTheme(edit, explorer.as_ptr(), std::ptr::null());
              }
              InvalidateRect(edit, std::ptr::null(), 1);
@@ -129,7 +130,7 @@ impl ConsoleState {
             // Scroll to bottom
             let len = GetWindowTextLengthW(edit);
             SendMessageW(edit, EM_SETSEL, len as WPARAM, len as LPARAM);
-            SendMessageW(edit, EM_REPLACESEL, 0, to_wstring("").as_ptr() as LPARAM);
+            SendMessageW(edit, EM_REPLACESEL, 0, w!("").as_ptr() as LPARAM);
         }
     }
     
@@ -213,11 +214,11 @@ impl WindowHandler for ConsoleState {
              
              // Create Buttons
              let btn_copy = ButtonBuilder::new(hwnd, IDC_BTN_COPY as u16)
-                 .text("Copy").pos(0, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
+                 .text_w(w!("Copy")).pos(0, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
              self.btn_copy_hwnd = Some(btn_copy);
              
              let btn_clear = ButtonBuilder::new(hwnd, IDC_BTN_CLEAR as u16)
-                 .text("Clear").pos(90, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
+                 .text_w(w!("Clear")).pos(90, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
              self.btn_clear_hwnd = Some(btn_clear);
              
              self.update_theme(hwnd);
@@ -289,7 +290,7 @@ impl WindowHandler for ConsoleState {
                             self.history.clear();
                             self.pending.clear();
                             if let Some(edit) = self.edit_hwnd {
-                                let empty = to_wstring("");
+                                let empty = w!("");
                                 SetWindowTextW(edit, empty.as_ptr());
                             }
                         },

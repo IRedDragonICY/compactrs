@@ -14,6 +14,7 @@ use windows_sys::Win32::Graphics::Gdi::HFONT;
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
 use crate::ui::controls::{apply_button_theme, apply_combobox_theme, apply_accent_button_theme};
+use crate::w;
 
 /// Configuration for ActionPanel control IDs.
 pub struct ActionPanelIds {
@@ -167,7 +168,7 @@ impl Component for ActionPanel {
         // Create Input Label (title above Files/Folder/Remove buttons)
         self.hwnd_lbl_input = ControlBuilder::new(parent, self.ids.lbl_input)
             .label(false)
-            .text("Input")
+            .text_w(w!("Input"))
             .pos(10, btn_y - 18)
             .size(175, 16)
             .dark_mode(is_dark)
@@ -176,7 +177,7 @@ impl Component for ActionPanel {
         // Create Files button
         self.hwnd_files = ControlBuilder::new(parent, self.ids.btn_files)
             .button()
-            .text("Files")
+            .text_w(w!("Files"))
             .pos(10, btn_y)
             .size(65, btn_h)
             .dark_mode(is_dark)
@@ -185,7 +186,7 @@ impl Component for ActionPanel {
         // Create Folder button
         self.hwnd_folder = ControlBuilder::new(parent, self.ids.btn_folder)
             .button()
-            .text("Folder")
+            .text_w(w!("Folder"))
             .pos(85, btn_y)
             .size(65, btn_h)
             .dark_mode(is_dark)
@@ -194,7 +195,7 @@ impl Component for ActionPanel {
         // Create Remove button
         self.hwnd_remove = ControlBuilder::new(parent, self.ids.btn_remove)
             .button()
-            .text("Remove")
+            .text_w(w!("Remove"))
             .pos(160, btn_y)
             .size(70, btn_h)
             .dark_mode(is_dark)
@@ -203,7 +204,7 @@ impl Component for ActionPanel {
         // Create Clear button
         self.hwnd_clear = ControlBuilder::new(parent, self.ids.btn_clear)
             .button()
-            .text("Clear")
+            .text_w(w!("Clear"))
             .pos(235, btn_y)
             .size(70, btn_h)
             .dark_mode(is_dark)
@@ -212,7 +213,7 @@ impl Component for ActionPanel {
         // Create Action Mode Label (title above dropdown)
         self.hwnd_lbl_action_mode = ControlBuilder::new(parent, self.ids.lbl_action_mode)
             .label(false)
-            .text("Action")
+            .text_w(w!("Action"))
             .pos(310, btn_y - 18)
             .size(100, 16)
             .dark_mode(is_dark)
@@ -229,7 +230,7 @@ impl Component for ActionPanel {
         // Create Algorithm Label (title above dropdown)
         self.hwnd_lbl_algo = ControlBuilder::new(parent, self.ids.lbl_algo)
             .label(false)
-            .text("Algorithm")
+            .text_w(w!("Algorithm"))
             .pos(420, btn_y - 18)
             .size(100, 16)
             .dark_mode(is_dark)
@@ -246,7 +247,7 @@ impl Component for ActionPanel {
         // Create Force checkbox
         self.hwnd_force = ControlBuilder::new(parent, self.ids.chk_force)
             .checkbox()
-            .text("Force")
+            .text_w(w!("Force"))
             .pos(430, btn_y)
             .size(60, btn_h)
             .dark_mode(is_dark)
@@ -255,7 +256,7 @@ impl Component for ActionPanel {
         // Create Process All button with Windows 11 Fluent blue accent
         self.hwnd_process = ControlBuilder::new(parent, self.ids.btn_process)
             .button()
-            .text("Process All")
+            .text_w(w!("Process All"))
             .pos(500, btn_y)
             .size(100, btn_h)
             .dark_mode(is_dark)
@@ -266,7 +267,7 @@ impl Component for ActionPanel {
         // Create Cancel button
         self.hwnd_cancel = ControlBuilder::new(parent, self.ids.btn_cancel)
             .button()
-            .text("Cancel")
+            .text_w(w!("Cancel"))
             .pos(610, btn_y)
             .size(80, btn_h)
             .dark_mode(is_dark)

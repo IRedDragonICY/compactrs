@@ -333,9 +333,9 @@ impl AppState {
                          ctrls.file_list.add_item(
                              id, 
                              batch_item, 
-                             to_wstring("Calculating..."), 
-                             to_wstring("Calculating..."),
-                             to_wstring("Estimating..."),
+                             &to_wstring("Calculating..."), 
+                             &to_wstring("Calculating..."),
+                             &to_wstring("Estimating..."),
                              crate::engine::wof::CompressionState::None
                          );
                      }

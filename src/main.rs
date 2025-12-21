@@ -106,7 +106,7 @@ fn main() {
 
     // 0. Single Instance Check (Before Admin Check)
     unsafe {
-        let class_name = to_wstring("CompactRS_Class");
+        let class_name = w!("CompactRS_Class");
         let hwnd_existing = FindWindowW(class_name.as_ptr(), std::ptr::null());
         
         if hwnd_existing != std::ptr::null_mut() {
@@ -147,7 +147,7 @@ fn main() {
             let len = GetModuleFileNameW(std::ptr::null_mut(), filename.as_mut_ptr(), filename.len() as u32);
             
             if len > 0 {
-                let operation = to_wstring("runas");
+                let operation = w!("runas");
                 // Collect existing arguments and quote them if necessary to preserve spaces during elevation
                 let args: Vec<String> = std::env::args().skip(1).collect();
                 let args_str = args.iter()
@@ -178,8 +178,8 @@ fn main() {
             }
 
             // If elevation failed (user declined UAC, etc.), show error
-            let title = to_wstring("Privilege Error");
-            let msg = to_wstring("CompactRS requires Administrator privileges to perform compression operations.\n\nFailed to elevate privileges. Please restart as Administrator.");
+            let title = w!("Privilege Error");
+            let msg = w!("CompactRS requires Administrator privileges to perform compression operations.\n\nFailed to elevate privileges. Please restart as Administrator.");
             
             MessageBoxW(
                 std::ptr::null_mut(), 
@@ -219,7 +219,7 @@ fn main() {
             Ok(h) => h,
             Err(e) => {
                 let msg = to_wstring(&("Failed to create main window: ".to_string() + &e.to_string()));
-                MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), to_wstring("Error").as_ptr(), MB_ICONERROR | MB_OK);
+                MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), w!("Error").as_ptr(), MB_ICONERROR | MB_OK);
                 std::process::exit(1);
             }
         };

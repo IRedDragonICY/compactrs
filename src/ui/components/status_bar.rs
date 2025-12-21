@@ -15,7 +15,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
-use crate::utils::to_wstring;
+
+use crate::w;
 
 /// Configuration for StatusBar control IDs.
 pub struct StatusBarIds {
@@ -92,8 +93,8 @@ impl Component for StatusBar {
             let instance = GetModuleHandleW(std::ptr::null());
 
             // Create header/status label
-            let label_text = to_wstring("Drag and drop files or folders, or use 'Files'/'Folder' buttons. Then click 'Process All'.");
-            let static_cls = to_wstring("STATIC");
+            let label_text = w!("Drag and drop files or folders, or use 'Files'/'Folder' buttons. Then click 'Process All'.");
+            let static_cls = w!("STATIC");
             
             self.hwnd_label = CreateWindowExW(
                 0,
@@ -115,7 +116,7 @@ impl Component for StatusBar {
             }
 
             // Create progress bar
-            let empty_text = to_wstring("");
+            let empty_text = w!("");
             
             self.hwnd_progress = CreateWindowExW(
                 0,

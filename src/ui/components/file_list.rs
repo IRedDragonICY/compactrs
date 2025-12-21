@@ -52,6 +52,9 @@ use super::base::Component;
 use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::ui::state::BatchItem;
 use crate::utils::to_wstring;
+use crate::w;
+
+const ICON_START: &[u16] = &[0x25B6, 0]; // Play Triangle
 
 const DEFAULT_PATH_WIDTH: i32 = 250;
 
@@ -107,8 +110,8 @@ impl FileListView {
         // SAFETY: GetModuleHandleW with null returns the current module handle.
         let instance = GetModuleHandleW(std::ptr::null());
 
-        let class_name = to_wstring("SysListView32");
-        let empty_str = to_wstring("");
+        let class_name = w!("SysListView32");
+        let empty_str = w!("");
 
         // SAFETY: CreateWindowExW is called with valid parameters.
         let hwnd = CreateWindowExW(
@@ -157,7 +160,9 @@ impl FileListView {
     /// Sets up the ListView columns.
     fn setup_columns(&self) {
         for (i, (name, width)) in COLUMN_DEFS.iter().enumerate() {
-            let name_wide = to_wstring(name);
+            let name_wide = to_wstring(name); // Names are static, but from tuple. Can we optimize? 
+            // COLUMN_DEFS is string literal slices. 
+            // We can leave to_wstring here as it runs once on startup.
             let mut fmt = LVCFMT_LEFT;
             if i == columns::START as usize {
                 fmt = windows_sys::Win32::UI::Controls::LVCFMT_CENTER;
@@ -197,36 +202,47 @@ impl FileListView {
         &self,
         id: u32,
         item: &BatchItem,
-        size_logical: Vec<u16>,
-        size_disk: Vec<u16>,
-        size_estimated: Vec<u16>,
+        size_logical: &[u16],
+        size_disk: &[u16],
+        size_estimated: &[u16],
         state: CompressionState,
     ) -> i32 {
         let path_wide = to_wstring(&item.path);
-        let algo_str = Self::algo_to_str(item.algorithm);
-        let algo_wide = to_wstring(algo_str);
-        let action_str = if item.action == crate::ui::state::BatchAction::Compress {
-            "Compress"
-        } else {
-            "Decompress"
+
+        
+        let algo_wide = match item.algorithm {
+            WofAlgorithm::Xpress4K => w!("XPRESS4K"),
+            WofAlgorithm::Xpress8K => w!("XPRESS8K"),
+            WofAlgorithm::Xpress16K => w!("XPRESS16K"),
+            WofAlgorithm::Lzx => w!("LZX"),
         };
-        let action_wide = to_wstring(action_str);
-        // size_logical, size_disk, size_estimated are already Vec<u16>
+        
+        let action_wide = if item.action == crate::ui::state::BatchAction::Compress {
+            w!("Compress")
+        } else {
+            w!("Decompress")
+        };
+        // size_logical, size_disk, size_estimated are already &[u16]
         let size_wide = size_logical;
         let disk_wide = size_disk;
         let est_wide = size_estimated;
 
         // Format current state string
-        let current_text = match state {
-            CompressionState::None => "-".to_string(),
-            CompressionState::Specific(algo) => Self::algo_to_str(algo).to_string(),
-            CompressionState::Mixed => "Mixed".to_string(),
+
+        let current_wide: &[u16] = match state {
+            CompressionState::None => w!("-"),
+            CompressionState::Specific(algo) => match algo {
+                WofAlgorithm::Xpress4K => w!("XPRESS4K"),
+                WofAlgorithm::Xpress8K => w!("XPRESS8K"),
+                WofAlgorithm::Xpress16K => w!("XPRESS16K"),
+                WofAlgorithm::Lzx => w!("LZX"),
+            },
+            CompressionState::Mixed => w!("Mixed"),
         };
-        let current_wide = to_wstring(&current_text);
 
         // Show pending status initially
-        let status_wide = to_wstring("Pending");
-        let start_wide = to_wstring("▶");
+        let status_wide = w!("Pending");
+        let start_wide = ICON_START;
 
         // SAFETY: All wide strings are valid null-terminated UTF-16.
         unsafe {
@@ -301,7 +317,7 @@ impl FileListView {
             // Actually, I can use the helper if I change the signature.
             // Let's stick to "-" for now to minimize signature churn, 
             // as `ingest_paths` calls this with "Calculating..." strings anyway.
-            let ratio_wide = to_wstring("-");
+            let ratio_wide = w!("-");
             lvi.iSubItem = columns::RATIO;
             lvi.pszText = ratio_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
@@ -350,14 +366,14 @@ impl FileListView {
     /// * `row` - Row index (0-based)
     /// * `col` - Column index (use `columns::*` constants)
     /// * `text` - New text value
-    pub fn update_item_text(&self, row: i32, col: i32, text: Vec<u16>) {
+    pub fn update_item_text(&self, row: i32, col: i32, text: &[u16]) {
         // Ensure null-termination
         let text_wide = if text.last() == Some(&0) {
-            text
+            std::borrow::Cow::Borrowed(text)
         } else {
-            let mut t = text;
+            let mut t = text.to_vec();
             t.push(0);
-            t
+            std::borrow::Cow::Owned(t)
         };
 
         let item = LVITEMW {
@@ -586,14 +602,7 @@ impl FileListView {
     }
 
     /// Helper to convert WofAlgorithm to string.
-    fn algo_to_str(algo: WofAlgorithm) -> &'static str {
-        match algo {
-            WofAlgorithm::Xpress4K => "XPRESS4K",
-            WofAlgorithm::Xpress8K => "XPRESS8K",
-            WofAlgorithm::Xpress16K => "XPRESS16K",
-            WofAlgorithm::Lzx => "LZX",
-        }
-    }
+
 
     // Local allow_dark_mode_for_window removed in favor of theme::allow_dark_mode_for_window
 

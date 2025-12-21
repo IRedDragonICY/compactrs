@@ -39,6 +39,7 @@ use crate::ui::theme;
 use crate::ui::handlers; 
 use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings, format_size};
+use crate::w;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, load_app_icon};
 use crate::config::AppConfig;
 
@@ -273,8 +274,8 @@ impl WindowHandler for AppState {
                     // Check if processing is active
                     let state = self.global_state.load(std::sync::atomic::Ordering::Relaxed);
                     if state == crate::ui::state::ProcessingState::Running as u8 {
-                        let msg = to_wstring("A compression job is currently running.\n\nAre you sure you want to quit?");
-                        let title = to_wstring("Confirm Exit");
+                        let msg = w!("A compression job is currently running.\n\nAre you sure you want to quit?");
+                        let title = w!("Confirm Exit");
                         let res = MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), 
                             MB_YESNO | MB_ICONWARNING);
                         
@@ -326,11 +327,10 @@ impl AppState {
     unsafe fn populate_ui_combos(&self, action_panel: &ActionPanel) {
         // Algorithm Combo
         let h_combo = action_panel.combo_hwnd();
-        let algos = ["As Listed", "XPRESS4K", "XPRESS8K", "XPRESS16K", "LZX"];
+        let algos = [w!("As Listed"), w!("XPRESS4K"), w!("XPRESS8K"), w!("XPRESS16K"), w!("LZX")];
         unsafe {
             for alg in algos {
-                let w = to_wstring(alg);
-                SendMessageW(h_combo, CB_ADDSTRING, 0, w.as_ptr() as isize);
+                SendMessageW(h_combo, CB_ADDSTRING, 0, alg.as_ptr() as isize);
             }
             let algo_index = match self.config.default_algo {
                 WofAlgorithm::Xpress4K => 1,
@@ -342,10 +342,9 @@ impl AppState {
             
             // Action Mode Combo
             let h_action_mode = action_panel.action_mode_hwnd();
-            let action_modes = ["As Listed", "Compress All", "Decompress All"];
+            let action_modes = [w!("As Listed"), w!("Compress All"), w!("Decompress All")];
             for mode in action_modes {
-                let w = to_wstring(mode);
-                SendMessageW(h_action_mode, CB_ADDSTRING, 0, w.as_ptr() as isize);
+                SendMessageW(h_action_mode, CB_ADDSTRING, 0, mode.as_ptr() as isize);
             }
             SendMessageW(h_action_mode, CB_SETCURSEL, 0, 0);
             
@@ -379,7 +378,7 @@ impl AppState {
                             
                             if let Some(ctrls) = &self.controls {
                                 if let Some(batch_item) = self.batch_items.iter().find(|i| i.id == item_id) {
-                                    ctrls.file_list.add_item(item_id, batch_item, logical_str, disk_str, to_wstring("Estimating..."), detected_algo);
+                                    ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, w!("Estimating..."), detected_algo);
                                     if let Some(pos) = self.batch_items.iter().position(|i| i.id == item_id) {
                                         ctrls.file_list.set_selected(pos as i32, true);
                                         self.pending_ipc_ids.push(item_id);
@@ -537,27 +536,27 @@ impl AppState {
                              let ratio_str = crate::utils::calculate_ratio_string(logical, disk);
                              let count_str = u64_to_wstring(count);
                              
-                             ctrls.file_list.update_item_text(pos as i32, 4, log_str);
-                             ctrls.file_list.update_item_text(pos as i32, 6, disk_str);
-                             ctrls.file_list.update_item_text(pos as i32, 7, ratio_str); // Ratio
+                             ctrls.file_list.update_item_text(pos as i32, 4, &log_str);
+                             ctrls.file_list.update_item_text(pos as i32, 6, &disk_str);
+                             ctrls.file_list.update_item_text(pos as i32, 7, &ratio_str); // Ratio
                              
                              let current_state = self.global_state.load(Ordering::Relaxed);
                              if current_state == ProcessingState::Stopped as u8 {
-                                 ctrls.file_list.update_item_text(pos as i32, 9, to_wstring("Cancelled"));
+                                 ctrls.file_list.update_item_text(pos as i32, 9, w!("Cancelled"));
                              } else if current_state == ProcessingState::Paused as u8 {
-                                 ctrls.file_list.update_item_text(pos as i32, 9, to_wstring("Paused"));
+                                 ctrls.file_list.update_item_text(pos as i32, 9, w!("Paused"));
                              } else {
-                                 let status_text = concat_wstrings(&[&to_wstring("Scanning... "), &count_str]);
-                                 ctrls.file_list.update_item_text(pos as i32, 9, status_text); // Status is now 9
+                                 let status_text = concat_wstrings(&[w!("Scanning... "), &count_str]);
+                                 ctrls.file_list.update_item_text(pos as i32, 9, &status_text); // Status is now 9
                              }
 
                              if let Some(item) = self.batch_items.get(pos) {
                                  let sb_msg = concat_wstrings(&[
-                                     &to_wstring("Scanning: "), 
+                                     w!("Scanning: "), 
                                      &to_wstring(&item.path), 
-                                     &to_wstring("... ("), 
+                                     w!("... ("), 
                                      &count_str, 
-                                     &to_wstring(" files)")
+                                     w!(" files)")
                                  ]);
                                  SetWindowTextW(ctrls.status_bar.label_hwnd(), sb_msg.as_ptr());
                              }
@@ -566,22 +565,22 @@ impl AppState {
                  },
                  UiMessage::RowUpdate(row, progress, status, _) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 8, progress); // Progress is now 8
+                         ctrls.file_list.update_item_text(row, 8, &progress); // Progress is now 8
                          
                          let current_state = self.global_state.load(Ordering::Relaxed);
                          if current_state == ProcessingState::Stopped as u8 {
-                              ctrls.file_list.update_item_text(row, 9, to_wstring("Cancelled"));
+                              ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
                          } else if current_state == ProcessingState::Paused as u8 {
                              // If effectively paused, don't let "Running" overwrite "Paused"
-                              ctrls.file_list.update_item_text(row, 9, to_wstring("Paused"));
+                              ctrls.file_list.update_item_text(row, 9, w!("Paused"));
                          } else {
-                              ctrls.file_list.update_item_text(row, 9, status);   // Status is now 9
+                              ctrls.file_list.update_item_text(row, 9, &status);   // Status is now 9
                          }
                      }
                  },
                  UiMessage::ItemFinished(row, status, disk_size_vec, final_state) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 9, status); // Status is now 9
+                         ctrls.file_list.update_item_text(row, 9, &status); // Status is now 9
                          
                          // Update disk size and ratio if we have a valid disk size string?
                          // The message passes `disk_size` as Vec<u16> (string).
@@ -590,29 +589,29 @@ impl AppState {
                          // Update Ratio using stored values (Best Effort)
                          if let Some(item) = self.batch_items.get(row as usize) {
                              let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, item.disk_size);
-                             ctrls.file_list.update_item_text(row, 7, ratio_str);
+                             ctrls.file_list.update_item_text(row, 7, &ratio_str);
                          }
                          
                          if !disk_size_vec.is_empty() && disk_size_vec.len() > 1 { 
-                             ctrls.file_list.update_item_text(row, 6, disk_size_vec); 
+                             ctrls.file_list.update_item_text(row, 6, &disk_size_vec); 
                          }
                          let state_str = match final_state {
-                             CompressionState::None => "-",
+                             CompressionState::None => w!("-"),
                              CompressionState::Specific(algo) => match algo {
-                                 WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
-                                 WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
+                                 WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
+                                 WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
                              },
-                             CompressionState::Mixed => "Mixed",
+                             CompressionState::Mixed => w!("Mixed"),
                          };
-                         ctrls.file_list.update_item_text(row, 1, to_wstring(state_str));
+                         ctrls.file_list.update_item_text(row, 1, state_str);
                          
                          // Update Ratio using stored values (Best Effort)
                          if let Some(item) = self.batch_items.get(row as usize) {
                              let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, item.disk_size);
-                             ctrls.file_list.update_item_text(row, 7, ratio_str);
+                             ctrls.file_list.update_item_text(row, 7, &ratio_str);
                          }
 
-                         ctrls.file_list.update_item_text(row, 10, to_wstring("")); 
+                         ctrls.file_list.update_item_text(row, 10, w!("")); 
                          if let Some(item) = self.batch_items.get_mut(row as usize) {
                              item.status = BatchStatus::Complete;
                              item.state_flag = None;
@@ -631,23 +630,23 @@ impl AppState {
                          }
                          
                          if let Some(ctrls) = &self.controls {
-                             ctrls.file_list.update_item_text(pos as i32, 4, log_str);
-                             ctrls.file_list.update_item_text(pos as i32, 6, disk_str);
-                             ctrls.file_list.update_item_text(pos as i32, 7, ratio_str); // Ratio
+                             ctrls.file_list.update_item_text(pos as i32, 4, &log_str);
+                             ctrls.file_list.update_item_text(pos as i32, 6, &disk_str);
+                             ctrls.file_list.update_item_text(pos as i32, 7, &ratio_str); // Ratio
                              
                              let state_str = match state {
-                                CompressionState::None => "-",
+                                CompressionState::None => w!("-"),
                                 CompressionState::Specific(algo) => match algo {
-                                    WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
-                                    WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
+                                    WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
+                                    WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
                                 },
-                                CompressionState::Mixed => "Mixed",
+                                CompressionState::Mixed => w!("Mixed"),
                              };
-                             ctrls.file_list.update_item_text(pos as i32, 1, to_wstring(state_str));
-                             ctrls.file_list.update_item_text(pos as i32, 9, to_wstring("Pending")); // Status is now 9
+                             ctrls.file_list.update_item_text(pos as i32, 1, state_str);
+                             ctrls.file_list.update_item_text(pos as i32, 9, w!("Pending")); // Status is now 9
                              let count = self.batch_items.len();
                              let count_w = u64_to_wstring(count as u64);
-                             let msg = concat_wstrings(&[&count_w, &to_wstring(" item(s) analyzed.")]);
+                             let msg = concat_wstrings(&[&count_w, w!(" item(s) analyzed.")]);
                              SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
                          }
                      }
@@ -659,7 +658,7 @@ impl AppState {
                              item.cache_estimate(algo, est_size);
                          }
                          if let Some(ctrls) = &self.controls {
-                             ctrls.file_list.update_item_text(pos as i32, 5, est_str);
+                             ctrls.file_list.update_item_text(pos as i32, 5, &est_str);
                          }
                      }
                  },
@@ -713,13 +712,13 @@ impl AppState {
                     item.estimated_size = cached;
                     let est_str = format_size(cached);
                     if let Some(ctrls) = &self.controls {
-                        ctrls.file_list.update_item_text(i as i32, 5, est_str);
+                        ctrls.file_list.update_item_text(i as i32, 5, &est_str);
                     }
                 } else {
                     // Need to calculate
                     items_to_estimate.push((item.id, item.path.clone(), effective_algo));
                     if let Some(ctrls) = &self.controls {
-                        ctrls.file_list.update_item_text(i as i32, 5, to_wstring("Estimating..."));
+                        ctrls.file_list.update_item_text(i as i32, 5, w!("Estimating..."));
                     }
                 }
             }
@@ -815,8 +814,8 @@ impl AppState {
                                    let action_name = match action {
                                        BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
                                    };
-                                   ctrls.file_list.update_item_text(pos as i32, 2, to_wstring(algo_name));
-                                   ctrls.file_list.update_item_text(pos as i32, 3, to_wstring(action_name));
+                                   ctrls.file_list.update_item_text(pos as i32, 2, &to_wstring(algo_name));
+                                   ctrls.file_list.update_item_text(pos as i32, 3, &to_wstring(action_name));
 
                                    if !self.ipc_active {
                                        let count = ctrls.file_list.get_item_count();

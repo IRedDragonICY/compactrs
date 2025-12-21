@@ -3,6 +3,34 @@ use windows_sys::Win32::UI::Shell::{StrFormatByteSizeW, ShellExecuteW};
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 
+/// Macro to convert a string literal to a null-terminated UTF-16 array at compile time.
+/// 
+/// # Example
+/// ```rust
+/// let wide_str = w!("Hello");
+/// assert_eq!(wide_str, &[72, 101, 108, 108, 111, 0]);
+/// ```
+#[macro_export]
+macro_rules! w {
+    ($s:literal) => {
+        {
+            const S: &[u8] = $s.as_bytes();
+            const LEN: usize = S.len() + 1;
+            const UTF16: [u16; LEN] = {
+                let mut out = [0u16; LEN];
+                let mut i = 0;
+                while i < S.len() {
+                    out[i] = S[i] as u16;
+                    i += 1;
+                }
+                out[LEN - 1] = 0;
+                out
+            };
+            &UTF16[..]
+        }
+    };
+}
+
 /// Convert a Rust string to a null-terminated UTF-16 vector.
 pub fn to_wstring(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
@@ -89,7 +117,7 @@ pub fn format_size(bytes: u64) -> Vec<u16> {
 
 /// Reveal a file or folder in Windows Explorer
 pub fn reveal_path_in_explorer(path: &str) {
-    let select_prefix = to_wstring("/select,\"");
+    let select_prefix = w!("/select,\"");
     let path_w = to_wstring_long_path(path);
     // Remove null terminator from path_w for concatenation if using concat_wstrings logic manually, 
     // but here we can just construct carefully.
@@ -98,15 +126,15 @@ pub fn reveal_path_in_explorer(path: &str) {
     
     // We need strict quoting: /select,"C:\Path\To\File"
     // `path_w` has \0 at end.
-    let suffix = to_wstring("\"");
+    let suffix = w!("\"");
     
-    let args = concat_wstrings(&[&select_prefix, &path_w, &suffix]);
+    let args = concat_wstrings(&[select_prefix, &path_w[..], suffix]);
     
     unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
-            to_wstring("open").as_ptr(),
-            to_wstring("explorer.exe").as_ptr(),
+            w!("open").as_ptr(),
+            w!("explorer.exe").as_ptr(),
             args.as_ptr(),
             std::ptr::null(),
             SW_SHOWNORMAL
@@ -128,7 +156,7 @@ pub fn calculate_saved_percentage(logical: u64, disk: u64) -> f64 {
 
 /// Calculates the compression ratio string (e.g. "40.5%")
 pub fn calculate_ratio_string(logical: u64, disk: u64) -> Vec<u16> {
-    if logical == 0 { return to_wstring("-"); }
+    if logical == 0 { return w!("-").to_vec(); }
     
     let ratio = calculate_saved_percentage(logical, disk);
     let s = format!("{:.1}%", ratio);

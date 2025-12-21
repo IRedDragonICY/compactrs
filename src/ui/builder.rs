@@ -9,6 +9,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use crate::utils::to_wstring;
 use crate::ui::theme::{self, ControlType};
+use crate::w;
+use std::borrow::Cow;
 
 // STATIC styles
 const SS_LEFT: u32 = 0x0000;
@@ -20,9 +22,9 @@ const SS_CENTERIMAGE: u32 = 0x0200;
 pub struct ControlBuilder {
     parent: HWND,
     id: u16,
-    text: String,
+    text: Cow<'static, [u16]>,
     x: i32, y: i32, w: i32, h: i32,
-    class_name: String,
+    class_name: Cow<'static, [u16]>,
     style: u32,
     ex_style: u32,
     is_dark: bool,
@@ -34,9 +36,9 @@ impl ControlBuilder {
     pub fn new(parent: HWND, id: u16) -> Self {
         Self {
             parent, id,
-            text: String::new(),
+            text: Cow::Borrowed(w!("")),
             x: 0, y: 0, w: 100, h: 25,
-            class_name: "BUTTON".to_string(),
+            class_name: Cow::Borrowed(w!("BUTTON")),
             style: WS_VISIBLE | WS_CHILD,
             ex_style: 0,
             is_dark: false,
@@ -45,7 +47,8 @@ impl ControlBuilder {
         }
     }
 
-    pub fn text(mut self, text: &str) -> Self { self.text = text.to_string(); self }
+    pub fn text(mut self, text: &str) -> Self { self.text = Cow::Owned(to_wstring(text)); self }
+    pub fn text_w(mut self, text: &'static [u16]) -> Self { self.text = Cow::Borrowed(text); self }
     pub fn pos(mut self, x: i32, y: i32) -> Self { self.x = x; self.y = y; self }
     pub fn size(mut self, w: i32, h: i32) -> Self { self.w = w; self.h = h; self }
     pub fn style(mut self, style: u32) -> Self { self.style |= style; self }
@@ -55,49 +58,49 @@ impl ControlBuilder {
 
     // --- Presets ---
     pub fn button(mut self) -> Self {
-        self.class_name = "BUTTON".to_string();
+        self.class_name = Cow::Borrowed(w!("BUTTON"));
         self.style |= BS_PUSHBUTTON as u32;
         self
     }
 
     pub fn checkbox(mut self) -> Self {
-        self.class_name = "BUTTON".to_string();
+        self.class_name = Cow::Borrowed(w!("BUTTON"));
         self.style |= (BS_AUTOCHECKBOX as u32) | WS_TABSTOP;
         self
     }
 
     pub fn combobox(mut self) -> Self {
-        self.class_name = "COMBOBOX".to_string();
+        self.class_name = Cow::Borrowed(w!("COMBOBOX"));
         self.style |= (CBS_DROPDOWNLIST as u32) | (CBS_HASSTRINGS as u32) | WS_TABSTOP | WS_VSCROLL;
         self
     }
 
     pub fn label(mut self, align_center: bool) -> Self {
-        self.class_name = "STATIC".to_string();
+        self.class_name = Cow::Borrowed(w!("STATIC"));
         self.style |= if align_center { SS_CENTER } else { SS_LEFT };
         self
     }
 
     pub fn groupbox(mut self) -> Self {
-        self.class_name = "BUTTON".to_string();
+        self.class_name = Cow::Borrowed(w!("BUTTON"));
         self.style |= BS_GROUPBOX as u32;
         self
     }
 
     pub fn icon_display(mut self) -> Self {
-        self.class_name = "STATIC".to_string();
+        self.class_name = Cow::Borrowed(w!("STATIC"));
         self.style |= SS_ICON | SS_REALSIZEIMAGE | SS_CENTERIMAGE;
         self
     }
 
     pub fn radio(mut self) -> Self {
-        self.class_name = "BUTTON".to_string();
+        self.class_name = Cow::Borrowed(w!("BUTTON"));
         self.style |= (BS_AUTORADIOBUTTON as u32) | WS_TABSTOP;
         self
     }
 
     pub fn trackbar(mut self) -> Self {
-        self.class_name = "msctls_trackbar32".to_string();
+        self.class_name = Cow::Borrowed(w!("msctls_trackbar32"));
         // TBS_AUTOTICKS | WS_TABSTOP
         self.style |= 0x0001 | WS_TABSTOP;
         self
@@ -106,14 +109,15 @@ impl ControlBuilder {
     pub fn build(self) -> HWND {
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());
-            let text_wide = to_wstring(&self.text);
-            let class_wide = to_wstring(&self.class_name);
+            // No conversion needed, self.text and self.class_name are already [u16]
+            let text_ptr = self.text.as_ptr();
+            let class_ptr = self.class_name.as_ptr();
 
             let wants_visible = (self.style & WS_VISIBLE) != 0;
             let style_initial = self.style & !WS_VISIBLE;
 
             let hwnd = CreateWindowExW(
-                self.ex_style, class_wide.as_ptr(), text_wide.as_ptr(), style_initial,
+                self.ex_style, class_ptr, text_ptr, style_initial,
                 self.x, self.y, self.w, self.h,
                 self.parent, self.id as isize as HMENU, instance, std::ptr::null(),
             );
@@ -139,14 +143,14 @@ impl ControlBuilder {
     }
 
     fn detect_control_type(&self) -> ControlType {
-        if self.class_name == "STATIC" { ControlType::GroupBox } 
-        else if self.class_name == "BUTTON" {
+        if self.class_name == w!("STATIC") { ControlType::GroupBox } 
+        else if self.class_name == w!("BUTTON") {
             if (self.style & (BS_GROUPBOX as u32)) != 0 { ControlType::GroupBox }
             else if (self.style & (BS_AUTOCHECKBOX as u32)) != 0 { ControlType::CheckBox }
             else if (self.style & (BS_AUTORADIOBUTTON as u32)) != 0 { ControlType::RadioButton }
             else { ControlType::Button }
-        } else if self.class_name == "COMBOBOX" { ControlType::ComboBox }
-        else if self.class_name == "msctls_trackbar32" { ControlType::Trackbar }
+        } else if self.class_name == w!("COMBOBOX") { ControlType::ComboBox }
+        else if self.class_name == w!("msctls_trackbar32") { ControlType::Trackbar }
         else { ControlType::Button }
     }
 }

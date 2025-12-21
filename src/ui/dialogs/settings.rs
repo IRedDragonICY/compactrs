@@ -2,6 +2,7 @@
 use crate::ui::state::AppTheme;
 use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
+use crate::w;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -77,7 +78,7 @@ const IDC_BTN_RESTART_TI: u16 = 2012;
 // Main settings modal function with proper data passing
 pub unsafe fn show_settings_modal(parent: HWND, current_theme: AppTheme, is_dark: bool, enable_force_stop: bool, enable_context_menu: bool, enable_system_guard: bool, low_power_mode: bool, max_threads: u32, log_enabled: bool, log_level_mask: u8) -> (Option<AppTheme>, bool, bool, bool, bool, u32, bool, u8) {
     // Check if window already exists
-    let class_name = to_wstring("CompactRS_Settings");
+    let class_name = w!("CompactRS_Settings");
     let existing_hwnd = FindWindowW(class_name.as_ptr(), std::ptr::null());
     if existing_hwnd != std::ptr::null_mut() {
         ShowWindow(existing_hwnd, SW_RESTORE);
@@ -127,7 +128,7 @@ impl WindowHandler for SettingsState {
             // Group Box using ControlBuilder
             let _grp = ControlBuilder::new(hwnd, IDC_GRP_THEME)
                 .groupbox()
-                .text("App Theme")
+                .text_w(w!("App Theme"))
                 .pos(10, 10)
                 .size(260, 140)
                 .dark_mode(self.is_dark)
@@ -137,12 +138,12 @@ impl WindowHandler for SettingsState {
             let is_dark_mode = self.is_dark;
             let theme = self.theme;
             
-            // Helper to create and configure radio button with separate label (to fix dark mode text)
-            let create_radio = |text: &str, id: u16, y: i32, checked: bool| {
+            // Helper to create and configure radio button with separate label
+            let create_radio = |text: &'static [u16], id: u16, y: i32, checked: bool| {
                 // Radio Button (Icon only effectively)
                 let h_radio = ControlBuilder::new(hwnd, id)
                     .radio()
-                    .text("") // Empty text to avoid black text issue
+                    .text_w(w!("")) // Empty text to avoid black text issue
                     .pos(30, y)
                     .size(20, 25) // Small width just for the circle
                     .dark_mode(is_dark_mode)
@@ -153,25 +154,23 @@ impl WindowHandler for SettingsState {
                 }
 
                 // Companion Label
-                // Use a derived ID for the label (e.g. id + 100) or just ignore it if no interaction needed yet.
-                // For now, static label is fine.
                 let _lbl = ControlBuilder::new(hwnd, id + 100)
                     .label(false)
-                    .text(text)
+                    .text_w(text)
                     .pos(55, y + 2) // Offset text
                     .size(200, 20)
                     .dark_mode(is_dark_mode)
                     .build();
             };
             
-            create_radio("System Default", IDC_RADIO_SYSTEM, 40, theme == AppTheme::System);
-            create_radio("Dark Mode", IDC_RADIO_DARK, 70, theme == AppTheme::Dark);
-            create_radio("Light Mode", IDC_RADIO_LIGHT, 100, theme == AppTheme::Light);
+            create_radio(w!("System Default"), IDC_RADIO_SYSTEM, 40, theme == AppTheme::System);
+            create_radio(w!("Dark Mode"), IDC_RADIO_DARK, 70, theme == AppTheme::Dark);
+            create_radio(w!("Light Mode"), IDC_RADIO_LIGHT, 100, theme == AppTheme::Light);
             
             // Checkbox: Enable Force Stop (Auto-kill)
             let _chk = ControlBuilder::new(hwnd, IDC_CHK_FORCE_STOP)
                 .checkbox()
-                .text("Enable Force Stop (Auto-kill)")
+                .text_w(w!("Enable Force Stop (Auto-kill)"))
                 .pos(30, 160)
                 .size(240, 25)
                 .dark_mode(is_dark_mode)
@@ -181,7 +180,7 @@ impl WindowHandler for SettingsState {
             // Checkbox: Enable Explorer Context Menu
             let _chk_ctx = ControlBuilder::new(hwnd, IDC_CHK_CONTEXT_MENU)
                 .checkbox()
-                .text("Enable Explorer Context Menu")
+                .text_w(w!("Enable Explorer Context Menu"))
                 .pos(30, 190)
                 .size(240, 25)
                 .dark_mode(is_dark_mode)
@@ -191,7 +190,7 @@ impl WindowHandler for SettingsState {
             // Checkbox: Enable System Critical Guard
             let _chk_guard = ControlBuilder::new(hwnd, IDC_CHK_SYSTEM_GUARD)
                 .checkbox()
-                .text("Enable System Critical Path Guard")
+                .text_w(w!("Enable System Critical Path Guard"))
                 .pos(30, 220)
                 .size(240, 25)
                 .dark_mode(is_dark_mode)
@@ -201,7 +200,7 @@ impl WindowHandler for SettingsState {
             // Checkbox: Low Power Mode
             let _chk_low_power = ControlBuilder::new(hwnd, IDC_CHK_LOW_POWER)
                 .checkbox()
-                .text("Enable Low Power Mode (Eco)")
+                .text_w(w!("Enable Low Power Mode (Eco)"))
                 .pos(30, 250)
                 .size(240, 25)
                 .dark_mode(is_dark_mode)
@@ -242,7 +241,7 @@ impl WindowHandler for SettingsState {
             // Group Box: Debug Logging
             let _grp_log = ControlBuilder::new(hwnd, IDC_GRP_LOGGING)
                 .groupbox()
-                .text("Debug Logging")
+                .text_w(w!("Debug Logging"))
                 .pos(280, 10) // Right side column
                 .size(200, 200) // Taller to fit options
                 .dark_mode(self.is_dark)
@@ -256,7 +255,7 @@ impl WindowHandler for SettingsState {
             // Checkbox: Enable Logging Console
             let _chk_log = ControlBuilder::new(hwnd, IDC_CHK_LOG_ENABLED)
                 .checkbox()
-                .text("Enable Logging Console")
+                .text_w(w!("Enable Logging Console"))
                 .pos(290, 40)
                 .size(180, 20)
                 .dark_mode(is_dark_mode)
@@ -266,7 +265,7 @@ impl WindowHandler for SettingsState {
             // Bitmask options
             let _chk_err = ControlBuilder::new(hwnd, IDC_CHK_LOG_ERRORS)
                 .checkbox()
-                .text("Show Errors")
+                .text_w(w!("Show Errors"))
                 .pos(300, 70) // Indented
                 .size(160, 20)
                 .dark_mode(is_dark_mode)
@@ -275,7 +274,7 @@ impl WindowHandler for SettingsState {
 
             let _chk_warn = ControlBuilder::new(hwnd, IDC_CHK_LOG_WARNS)
                 .checkbox()
-                .text("Show Warnings")
+                .text_w(w!("Show Warnings"))
                 .pos(300, 100)
                 .size(160, 20)
                 .dark_mode(is_dark_mode)
@@ -284,7 +283,7 @@ impl WindowHandler for SettingsState {
 
             let _chk_info = ControlBuilder::new(hwnd, IDC_CHK_LOG_INFO)
                 .checkbox()
-                .text("Show Info")
+                .text_w(w!("Show Info"))
                 .pos(300, 130)
                 .size(160, 20)
                 .dark_mode(is_dark_mode)
@@ -293,7 +292,7 @@ impl WindowHandler for SettingsState {
             
             let _chk_trace = ControlBuilder::new(hwnd, IDC_CHK_LOG_TRACE)
                 .checkbox()
-                .text("Show Trace (Verbose)")
+                .text_w(w!("Show Trace (Verbose)"))
                 .pos(300, 160)
                 .size(160, 20)
                 .dark_mode(is_dark_mode)
@@ -315,7 +314,7 @@ impl WindowHandler for SettingsState {
             // Updates Section
             let _btn_update = ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
                 .button()
-                .text("Check for Updates")
+                .text_w(w!("Check for Updates"))
                 .pos(30, 360)
                 .size(150, 25)
                 .dark_mode(is_dark_mode)
@@ -323,7 +322,7 @@ impl WindowHandler for SettingsState {
             
             let _btn_ti = ControlBuilder::new(hwnd, IDC_BTN_RESTART_TI)
                 .button()
-                .text("Restart as TrustedInstaller")
+                .text_w(w!("Restart as TrustedInstaller"))
                 .pos(30, 440) // Moved down
                 .size(240, 25)
                 .dark_mode(is_dark_mode)
@@ -333,7 +332,7 @@ impl WindowHandler for SettingsState {
             if crate::engine::elevation::is_system_or_ti() {
                 use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
                 let btn_ti = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_RESTART_TI as i32);
-                let txt = to_wstring("Running as TrustedInstaller");
+                let txt = w!("Running as TrustedInstaller");
                 SendMessageW(btn_ti, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
                 EnableWindow(btn_ti, 0);
             }
@@ -350,7 +349,7 @@ impl WindowHandler for SettingsState {
             // Close Button
             let _close_btn = ControlBuilder::new(hwnd, IDC_BTN_CANCEL)
                 .button()
-                .text("Close")
+                .text_w(w!("Close"))
                 .pos(190, 360) 
                 .size(80, 25)
                 .dark_mode(self.is_dark)
@@ -427,7 +426,7 @@ impl WindowHandler for SettingsState {
                     
                     match &self.update_status {
                         UpdateStatus::Available(ver, _) => {
-                             let txt = to_wstring("Download and Restart");
+                             let txt = w!("Download and Restart");
                              SendMessageW(h_btn, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
                              
                              let status_txt = to_wstring(&format!("New version {} available!", ver));
@@ -437,17 +436,17 @@ impl WindowHandler for SettingsState {
                              windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
                         },
                         UpdateStatus::UpToDate => {
-                             let txt = to_wstring("Check for Updates");
+                             let txt = w!("Check for Updates");
                              SendMessageW(h_btn, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
                              
-                             let status_txt = to_wstring("You are up to date.");
+                             let status_txt = w!("You are up to date.");
                              SendMessageW(h_lbl, WM_SETTEXT, 0, status_txt.as_ptr() as LPARAM);
                              
                              // Re-enable button
                              windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 1);
                         },
                         UpdateStatus::Error(e) => {
-                             let txt = to_wstring("Check for Updates");
+                             let txt = w!("Check for Updates");
                              SendMessageW(h_btn, WM_SETTEXT, 0, txt.as_ptr() as LPARAM);
                              
                              let status_txt = to_wstring(&format!("Error: {}", e));
@@ -538,7 +537,7 @@ impl WindowHandler for SettingsState {
                                  }
                                  
                                  // Broadcast to Console window if open (WM_APP + 2)
-                                 let compactrs_console = to_wstring("CompactRS_Console");
+                                 let compactrs_console = w!("CompactRS_Console");
                                  let console_hwnd = FindWindowW(compactrs_console.as_ptr(), std::ptr::null());
                                  if console_hwnd != std::ptr::null_mut() {
                                      let is_dark_val = if new_is_dark { 1 } else { 0 };
@@ -580,8 +579,8 @@ impl WindowHandler for SettingsState {
                                     if checked {
                                         if let Err(_e) = crate::registry::register_context_menu() {
                                             // Show error, revert checkbox
-                                            let msg = to_wstring("Failed to register context menu. Run as Administrator.");
-                                            let title = to_wstring("Error");
+                                            let msg = w!("Failed to register context menu. Run as Administrator.");
+                                            let title = w!("Error");
                                             
                                             MessageBoxW(
                                                 hwnd,
@@ -667,7 +666,7 @@ impl WindowHandler for SettingsState {
                                                     
                                                     ShellExecuteW(
                                                         std::ptr::null_mut(),
-                                                        crate::utils::to_wstring("open").as_ptr(),
+                                                        w!("open").as_ptr(),
                                                         exe_path.as_ptr(),
                                                         std::ptr::null(),
                                                         std::ptr::null(),
@@ -685,7 +684,7 @@ impl WindowHandler for SettingsState {
                                           let h_btn = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
                                           windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(h_btn, 0); // Disable button
                                           let h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
-                                          let loading = to_wstring("Checking for updates...");
+                                          let loading = w!("Checking for updates...");
                                           SendMessageW(h_lbl, WM_SETTEXT, 0, loading.as_ptr() as LPARAM);
 
                                           let clone_hwnd_ptr = hwnd as usize;
@@ -741,14 +740,14 @@ impl WindowHandler for SettingsState {
                           },
                           IDC_BTN_RESTART_TI => {
                               if (code as u32) == BN_CLICKED {
-                                  let msg = to_wstring("This will restart CompactRS as System/TrustedInstaller.\n\nUse this ONLY if you need to compress protected system folders (e.g. WinSxS).\n\nAre you sure?");
-                                  let title = to_wstring("Privilege Elevation");
+                                  let msg = w!("This will restart CompactRS as System/TrustedInstaller.\n\nUse this ONLY if you need to compress protected system folders (e.g. WinSxS).\n\nAre you sure?");
+                                  let title = w!("Privilege Elevation");
                                   let res = MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONWARNING);
                                   
                                   if res == IDYES {
                                       if let Err(e) = crate::engine::elevation::restart_as_trusted_installer() {
                                           let err_msg = to_wstring(&format!("Failed to elevate: {}", e));
-                                          let err_title = to_wstring("Error");
+                                          let err_title = w!("Error");
                                           MessageBoxW(hwnd, err_msg.as_ptr(), err_title.as_ptr(), MB_ICONERROR | MB_OK);
                                       }
                                   }

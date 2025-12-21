@@ -4,6 +4,7 @@
 //! requiring a COM shell extension DLL.
 
 use crate::utils::to_wstring;
+use crate::w;
 use windows_sys::Win32::System::Registry::{
     RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, RegCloseKey, RegOpenKeyExW,
     HKEY, HKEY_CLASSES_ROOT, KEY_WRITE, KEY_READ, REG_SZ, REG_OPTION_NON_VOLATILE,
@@ -195,7 +196,7 @@ pub fn unregister_context_menu() -> Result<(), String> {
 /// - `true` if the registry key exists
 /// - `false` otherwise
 pub fn is_context_menu_registered() -> bool {
-    let key_path = to_wstring("*\\shell\\CompactRS");
+    let key_path = w!("*\\shell\\CompactRS");
     let mut hkey: HKEY = std::ptr::null_mut();
     
     unsafe {

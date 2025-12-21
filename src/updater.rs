@@ -11,6 +11,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use std::ptr;
 use std::ffi::c_void;
 use crate::utils::to_wstring;
+use crate::w;
 
 // Pointer Constants (Not always available in windows-sys as pointers)
 const WINHTTP_NO_PROXY_NAME: *const u16 = ptr::null();
@@ -20,7 +21,7 @@ const WINHTTP_DEFAULT_ACCEPT_TYPES: *const *const u16 = ptr::null();
 const WINHTTP_NO_ADDITIONAL_HEADERS: *const u16 = ptr::null();
 
 // Constants
-const USER_AGENT: &str = "compactrs/updater";
+
 const GITHUB_API_HOST: &str = "api.github.com";
 const REPO_OWNER: &str = "IRedDragonICY";
 const REPO_NAME: &str = "compactrs";
@@ -80,7 +81,7 @@ fn perform_http_get(url: &str) -> Result<WinHttpRequest, String> {
     // 1. Initialize Session (Once per operation)
     let session_raw = unsafe {
         WinHttpOpen(
-            to_wstring(USER_AGENT).as_ptr(),
+            w!("compactrs/updater").as_ptr(),
             WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
             WINHTTP_NO_PROXY_NAME,
             WINHTTP_NO_PROXY_BYPASS,
@@ -102,7 +103,7 @@ fn perform_http_get(url: &str) -> Result<WinHttpRequest, String> {
         let request_raw = unsafe {
             WinHttpOpenRequest(
                 connect.0,
-                to_wstring("GET").as_ptr(),
+                w!("GET").as_ptr(),
                 to_wstring(&path).as_ptr(),
                 ptr::null(),
                 WINHTTP_NO_REFERER,

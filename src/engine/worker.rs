@@ -5,6 +5,7 @@ use crate::utils::format_size;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
 use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, get_wof_algorithm, smart_compress};
 use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
+use crate::w;
 use windows_sys::Win32::Foundation::{HWND, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
 use windows_sys::Win32::Storage::FileSystem::{
@@ -728,7 +729,7 @@ pub fn batch_process_worker(
     // Automatically resets on drop (panic-safe).
     let _sleep_guard = ExecutionStateGuard::new();
     
-    let _ = tx.send(UiMessage::Status(to_wstring("Discovering files...")));
+    let _ = tx.send(UiMessage::Status(w!("Discovering files...").to_vec()));
     
     // Track total files per row (row_index -> count)
     let mut row_totals: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
@@ -750,8 +751,8 @@ pub fn batch_process_worker(
         
         // Initialize row progress
         let row_cnt_w = u64_to_wstring(row_count);
-        let prog_str = concat_wstrings(&[&to_wstring("0/"), &row_cnt_w]);
-        let _ = tx.send(UiMessage::RowUpdate(*row as i32, prog_str, to_wstring("Running"), vec![0;1])); // Empty vec for size
+        let prog_str = concat_wstrings(&[w!("0/"), &row_cnt_w[..]]);
+        let _ = tx.send(UiMessage::RowUpdate(*row as i32, prog_str, w!("Running").to_vec(), vec![0;1])); // Empty vec for size
     }
     
     // Update global total
@@ -776,7 +777,7 @@ pub fn batch_process_worker(
     let _ = tx.send(UiMessage::Status(to_wstring(&msg)));
     
     if total_files == 0 {
-        let _ = tx.send(UiMessage::Status(to_wstring("No files found to process.")));
+        let _ = tx.send(UiMessage::Status(w!("No files found to process.").to_vec()));
         let _ = tx.send(UiMessage::Finished);
         return;
     }
