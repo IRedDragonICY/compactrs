@@ -139,21 +139,28 @@ impl WindowHandler for AppState {
             let file_list = FileListView::new(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
             
             // 3. ActionPanel
+            // Initial layout Y will be set during resize, but we need a value.
             let mut action_panel = ActionPanel::new(ActionPanelIds {
                 btn_files: IDC_BTN_ADD_FILES,
                 btn_folder: IDC_BTN_ADD_FOLDER,
                 btn_remove: IDC_BTN_REMOVE,
                 btn_clear: IDC_BTN_CLEAR,
+                
                 lbl_input: IDC_LBL_INPUT,
+                
                 combo_action_mode: IDC_COMBO_ACTION_MODE,
                 lbl_action_mode: IDC_LBL_ACTION_MODE,
+                
                 combo_algo: IDC_COMBO_ALGO,
                 lbl_algo: IDC_LBL_ALGO,
+                
                 chk_force: IDC_CHK_FORCE,
+                
                 btn_process: IDC_BTN_PROCESS_ALL,
                 btn_cancel: IDC_BTN_CANCEL,
                 btn_pause: IDC_BTN_PAUSE,
-            });
+                btn_console: IDC_BTN_CONSOLE,
+            }, 0); // Pass 0 as initial layout_y
             let _ = action_panel.create(hwnd);
             
             // 4. HeaderPanel
@@ -439,7 +446,7 @@ impl AppState {
                  },
                  IDC_BTN_CONSOLE => {
                        let is_dark = theme::resolve_mode(self.theme);
-                       crate::ui::dialogs::show_console_window(hwnd, &self.logs, is_dark);
+                       crate::ui::dialogs::show_console_window(self, hwnd, is_dark);
                  },
                  IDC_BTN_PAUSE => {
                        handlers::on_pause_clicked(self);
@@ -539,7 +546,7 @@ impl AppState {
                      if self.logs.len() > 1000 {
                          self.logs.pop_front();
                      }
-                     crate::ui::dialogs::append_log_entry(entry);
+                     crate::ui::dialogs::append_log_entry(self.console_hwnd, entry);
                  },
                  UiMessage::Finished => {
                      // Check queue for more items

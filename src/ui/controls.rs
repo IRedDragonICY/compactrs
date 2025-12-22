@@ -24,6 +24,8 @@ pub const IDC_LBL_ALGO: u16 = 122;
 pub const IDC_LBL_INPUT: u16 = 123;
 pub const IDC_BTN_CLEAR: u16 = 124;
 pub const IDC_BTN_PAUSE: u16 = 125;
+pub const IDC_LBL_OUTPUT: u16 = 126;
+pub const IDC_LBL_RATIO: u16 = 127;
 
 // Helper untuk update tema dinamis (digunakan saat switch theme)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {

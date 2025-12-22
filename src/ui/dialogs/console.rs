@@ -4,6 +4,7 @@ use crate::ui::builder::ButtonBuilder;
 use crate::ui::framework::{get_window_state, WindowHandler, WindowBuilder, WindowAlignment};
 use crate::utils::to_wstring;
 use crate::logger::LogEntry;
+use crate::ui::state::AppState;
 use crate::w;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
@@ -36,10 +37,8 @@ const MAX_HISTORY: usize = 1000;
 // Win32 Edit Control Limit (64KB is default, let's bump to 1MB to be safe, but we truncate manually too)
 const EDIT_LIMIT: usize = 1024 * 1024; 
 
-// Registry to track singleton instance
-static mut CONSOLE_HWND: Option<HWND> = None;
-
 struct ConsoleState {
+    parent_state: *mut AppState, // Pointer back to AppState if needed, but risky. For now avoiding it.
     edit_hwnd: Option<HWND>,
     btn_copy_hwnd: Option<HWND>,
     btn_clear_hwnd: Option<HWND>,
@@ -48,8 +47,8 @@ struct ConsoleState {
     pending: Vec<LogEntry>,
 }
 
-pub unsafe fn show_console_window(parent: HWND, initial_logs: &VecDeque<LogEntry>, is_dark: bool) {
-    if let Some(hwnd) = CONSOLE_HWND {
+pub unsafe fn show_console_window(app_state: &mut AppState, parent: HWND, is_dark: bool) {
+    if let Some(hwnd) = app_state.console_hwnd {
         // Update theme if window exists
         if let Some(state) = get_window_state::<ConsoleState>(hwnd) {
             state.is_dark = is_dark;
@@ -66,9 +65,10 @@ pub unsafe fn show_console_window(parent: HWND, initial_logs: &VecDeque<LogEntry
     let bg_brush = (COLOR_WINDOW + 1) as HBRUSH;
     
     let mut history = VecDeque::with_capacity(MAX_HISTORY);
-    history.extend(initial_logs.iter().cloned());
+    history.extend(app_state.logs.iter().cloned());
 
     let state = Box::new(ConsoleState {
+        parent_state: app_state as *mut _,
         edit_hwnd: None,
         btn_copy_hwnd: None,
         btn_clear_hwnd: None,
@@ -89,7 +89,7 @@ pub unsafe fn show_console_window(parent: HWND, initial_logs: &VecDeque<LogEntry
         
     if let Ok(hwnd) = hwnd_res {
         if hwnd != std::ptr::null_mut() {
-            CONSOLE_HWND = Some(hwnd);
+            app_state.console_hwnd = Some(hwnd);
         }
     }
 }
@@ -300,7 +300,9 @@ impl WindowHandler for ConsoleState {
                 },
                 WM_DESTROY => {
                     KillTimer(hwnd, TIMER_ID);
-                    CONSOLE_HWND = None;
+                    // Safe cleanup: Clear the HWND in parent state
+                    let app_state = &mut *self.parent_state;
+                    app_state.console_hwnd = None;
                     Some(0)
                 },
                 WM_CTLCOLOREDIT => None,
@@ -316,17 +318,14 @@ impl WindowHandler for ConsoleState {
     }
 }
 
-pub unsafe fn append_log_entry(entry: LogEntry) {
-    if let Some(hwnd) = CONSOLE_HWND {
+pub unsafe fn append_log_entry(console_hwnd: Option<HWND>, entry: LogEntry) {
+    if let Some(hwnd) = console_hwnd {
         if let Some(state) = get_window_state::<ConsoleState>(hwnd) {
             state.pending.push(entry);
         }
     }
 }
 
-pub unsafe fn close_console() {
-    if let Some(hwnd) = CONSOLE_HWND {
-        DestroyWindow(hwnd);
-        CONSOLE_HWND = None;
-    }
+pub unsafe fn close_console(hwnd: HWND) {
+    DestroyWindow(hwnd);
 }

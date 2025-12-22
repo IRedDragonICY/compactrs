@@ -49,7 +49,7 @@ winres = "0.1"
 
 [profile.release]
 opt-level = "z"          # Optimize for size
-lto = true               # Link Time Optimization
+lto = "fat"               # Link Time Optimization
 codegen-units = 1        # Maximize optimization
 panic = "abort"          # No unwinding
 strip = true             # Strip symbols

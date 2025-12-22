@@ -116,7 +116,7 @@ impl WindowHandler for AboutState {
 
             // Use LayoutBuilder for text content
             // Start below icon (20 + 128 = 148). Let's start at 160.
-            let mut layout = crate::ui::layout::LayoutContext::new(margin, 160, content_width, 5);
+            let mut layout = crate::ui::layout::LayoutColumn::new(margin, 160, content_width, 5);
 
             // App Name - Large bold title using ControlBuilder
             let (x, y, w, h) = layout.row(40);
