@@ -159,8 +159,7 @@ impl WindowHandler for AppState {
                 btn_process: IDC_BTN_PROCESS_ALL,
                 btn_cancel: IDC_BTN_CANCEL,
                 btn_pause: IDC_BTN_PAUSE,
-                btn_console: IDC_BTN_CONSOLE,
-            }, 0); // Pass 0 as initial layout_y
+            });
             let _ = action_panel.create(hwnd);
             
             // 4. HeaderPanel

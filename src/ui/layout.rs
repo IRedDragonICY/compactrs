@@ -6,7 +6,6 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER};
 /// Designed to eliminate manual pixel calculations in `on_resize`.
 /// Optimized for horizontal bars (like ActionPanel).
 pub struct LayoutRow {
-    start_x: i32,
     y: i32,
     height: i32,
     padding: i32,
@@ -17,7 +16,6 @@ impl LayoutRow {
     /// Starts a new horizontal layout row.
     pub fn new(x: i32, y: i32, height: i32, padding: i32) -> Self {
         Self {
-            start_x: x,
             y,
             height,
             padding,
@@ -28,7 +26,6 @@ impl LayoutRow {
     /// Extends the layout from the right side (Right-to-Left), useful for "Cancel/Ok" buttons.
     pub fn new_rtl(right: i32, y: i32, height: i32, padding: i32) -> Self {
         Self {
-            start_x: right, 
             y,
             height,
             padding,
@@ -39,15 +36,17 @@ impl LayoutRow {
     /// Adds a fixed-width control to the layout (Left-to-Right).
     pub unsafe fn add_fixed(&mut self, hwnd: HWND, width: i32) {
         if hwnd.is_null() { return; }
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            self.current_x,
-            self.y,
-            width,
-            self.height,
-            SWP_NOZORDER,
-        );
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                self.current_x,
+                self.y,
+                width,
+                self.height,
+                SWP_NOZORDER,
+            );
+        }
         self.current_x += width + self.padding;
     }
 
@@ -56,15 +55,17 @@ impl LayoutRow {
     pub unsafe fn add_fixed_rtl(&mut self, hwnd: HWND, width: i32) {
         if hwnd.is_null() { return; }
         let left = self.current_x - width;
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            left,
-            self.y,
-            width,
-            self.height,
-            SWP_NOZORDER,
-        );
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                left,
+                self.y,
+                width,
+                self.height,
+                SWP_NOZORDER,
+            );
+        }
         self.current_x = left - self.padding;
     }
 
@@ -73,15 +74,17 @@ impl LayoutRow {
         if hwnd.is_null() { return; }
         // Center-ish or left aligned to the current slot?
         // ActionPanel uses: label is at the same X as the control below it.
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            self.current_x,
-            self.y + offset_y,
-            width,
-            label_height,
-            SWP_NOZORDER,
-        );
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                self.current_x,
+                self.y + offset_y,
+                width,
+                label_height,
+                SWP_NOZORDER,
+            );
+        }
     }
     
     /// Returns the current X position.

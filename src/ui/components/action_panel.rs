@@ -13,6 +13,15 @@ use crate::ui::builder::ControlBuilder;
 use crate::ui::controls::{apply_button_theme, apply_combobox_theme, apply_accent_button_theme};
 use crate::ui::layout::LayoutRow;
 
+const ICON_FILES: &[u16] = &[0xD83D, 0xDCC4, 0]; // 📄
+const ICON_FOLDER: &[u16] = &[0xD83D, 0xDCC1, 0]; // 📂
+const ICON_REMOVE: &[u16] = &[0x2796, 0]; // ➖
+const ICON_CLEAR: &[u16] = &[0xD83D, 0xDDD1, 0]; // 🗑
+const ICON_PROCESS: &[u16] = &[0x25B6, 0]; // ▶
+const ICON_PAUSE: &[u16] = &[0x23F8, 0]; // ⏸
+const ICON_CANCEL: &[u16] = &[0x23F9, 0]; // ⏹
+
+
 /// Configuration for ActionPanel control IDs.
 pub struct ActionPanelIds {
     pub btn_files: u16,
@@ -28,7 +37,6 @@ pub struct ActionPanelIds {
     pub btn_process: u16,
     pub btn_cancel: u16,
     pub btn_pause: u16,
-    pub btn_console: u16,
 }
 
 pub struct ActionPanel {
@@ -50,16 +58,14 @@ pub struct ActionPanel {
     hwnd_process: HWND,
     hwnd_cancel: HWND,
     hwnd_pause: HWND,
-    hwnd_console: HWND,
     
     // Layout
-    layout_y: i32,
     
     ids: ActionPanelIds,
 }
 
 impl ActionPanel {
-    pub fn new(ids: ActionPanelIds, layout_y: i32) -> Self {
+    pub fn new(ids: ActionPanelIds) -> Self {
         Self {
             hwnd_files: std::ptr::null_mut(),
             hwnd_folder: std::ptr::null_mut(),
@@ -78,9 +84,7 @@ impl ActionPanel {
             hwnd_process: std::ptr::null_mut(),
             hwnd_cancel: std::ptr::null_mut(),
             hwnd_pause: std::ptr::null_mut(),
-            hwnd_console: std::ptr::null_mut(),
             
-            layout_y,
             ids,
         }
     }
@@ -109,10 +113,10 @@ impl Component for ActionPanel {
         let font = crate::ui::theme::get_app_font();
 
         // Helper for consistent control creation
-        let create_btn = |id: u16, text: &'static str, w: i32| -> HWND {
+        let create_btn = |id: u16, text: &'static [u16], w: i32| -> HWND {
             ControlBuilder::new(parent, id)
                 .button()
-                .text(text)
+                .text_w(text)
                 .size(w, 32)
                 .dark_mode(is_dark)
                 .font(font) // Apply font immediately
@@ -133,10 +137,10 @@ impl Component for ActionPanel {
         
         // Input Group
         self.hwnd_lbl_input = create_lbl(self.ids.lbl_input, "Input");
-        self.hwnd_files = create_btn(self.ids.btn_files, "Files", 65);
-        self.hwnd_folder = create_btn(self.ids.btn_folder, "Folder", 65);
-        self.hwnd_remove = create_btn(self.ids.btn_remove, "Remove", 70);
-        self.hwnd_clear = create_btn(self.ids.btn_clear, "Clear", 70);
+        self.hwnd_files = create_btn(self.ids.btn_files, ICON_FILES, 32);
+        self.hwnd_folder = create_btn(self.ids.btn_folder, ICON_FOLDER, 32);
+        self.hwnd_remove = create_btn(self.ids.btn_remove, ICON_REMOVE, 32);
+        self.hwnd_clear = create_btn(self.ids.btn_clear, ICON_CLEAR, 32);
 
         // Action Mode Group
         self.hwnd_lbl_action_mode = create_lbl(self.ids.lbl_action_mode, "Action");
@@ -166,15 +170,13 @@ impl Component for ActionPanel {
             .build();
 
         // Control Buttons
-        self.hwnd_process = create_btn(self.ids.btn_process, "Process All", 160);
+        self.hwnd_process = create_btn(self.ids.btn_process, ICON_PROCESS, 32);
         // Apply Accent Theme
         apply_accent_button_theme(self.hwnd_process, is_dark);
 
-        self.hwnd_pause = create_btn(self.ids.btn_pause, "Pause", 80);
-        self.hwnd_cancel = create_btn(self.ids.btn_cancel, "Cancel", 80);
+        self.hwnd_pause = create_btn(self.ids.btn_pause, ICON_PAUSE, 32);
+        self.hwnd_cancel = create_btn(self.ids.btn_cancel, ICON_CANCEL, 32);
         
-        self.hwnd_console = create_btn(self.ids.btn_console, "Console", 80);
-
         Ok(())
     }}
 
@@ -200,11 +202,12 @@ impl Component for ActionPanel {
             let lbl_h = 16;
 
             // Input Buttons
-            left.add_label_above(self.hwnd_lbl_input, 175, lbl_h, lbl_offset);
-            left.add_fixed(self.hwnd_files, 55);
-            left.add_fixed(self.hwnd_folder, 55);
-            left.add_fixed(self.hwnd_remove, 65);
-            left.add_fixed(self.hwnd_clear, 65);
+            // 4 buttons * 32 width + 3 spaces * 5 padding = 128 + 15 = 143
+            left.add_label_above(self.hwnd_lbl_input, 143, lbl_h, lbl_offset);
+            left.add_fixed(self.hwnd_files, 32);
+            left.add_fixed(self.hwnd_folder, 32);
+            left.add_fixed(self.hwnd_remove, 32);
+            left.add_fixed(self.hwnd_clear, 32);
 
             // Spacing
             left.add_fixed(std::ptr::null_mut(), 20); // Spacer
@@ -224,10 +227,9 @@ impl Component for ActionPanel {
             // Layout from Right to Left: Console <- Cancel <- Process <- Pause
             let mut right = LayoutRow::new_rtl(width - bar_padding, btn_y, btn_height, 10);
             
-            right.add_fixed_rtl(self.hwnd_console, 80);
-            right.add_fixed_rtl(self.hwnd_cancel, 80);
-            right.add_fixed_rtl(self.hwnd_process, 160);
-            right.add_fixed_rtl(self.hwnd_pause, 80);
+            right.add_fixed_rtl(self.hwnd_cancel, 32);
+            right.add_fixed_rtl(self.hwnd_process, 32);
+            right.add_fixed_rtl(self.hwnd_pause, 32);
         }
     }
 
@@ -243,7 +245,6 @@ impl Component for ActionPanel {
             apply_button_theme(self.hwnd_cancel, is_dark);
             apply_button_theme(self.hwnd_pause, is_dark);
             apply_button_theme(self.hwnd_force, is_dark); 
-            apply_button_theme(self.hwnd_console, is_dark);
 
             apply_combobox_theme(self.hwnd_action_mode, is_dark);
             apply_combobox_theme(self.hwnd_combo_algo, is_dark);

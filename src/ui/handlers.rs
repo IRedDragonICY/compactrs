@@ -237,7 +237,9 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
         Button::new(ctrls.action_panel.cancel_hwnd()).set_enabled(false);
         let btn_pause = Button::new(ctrls.action_panel.pause_hwnd());
         btn_pause.set_enabled(false);
-        btn_pause.set_text("Pause");
+        // Reset to Pause icon
+        let icon_pause = [0x23F8, 0];
+        btn_pause.set_text_w(&icon_pause);
         
         Label::new(ctrls.status_bar.label_hwnd()).set_text("Stopping...");
         
@@ -286,24 +288,15 @@ pub unsafe fn update_process_button_state(st: &AppState) {
         
         // 1. Process Button Logic
         if selected_count > 0 {
-            let text = format!("Process Selected ({})", selected_count);
-            btn_process.set_text(&text);
-            btn_process.set_enabled(true); // Always enable selection process unless fully locked? 
-            // Ideally if running, this might queue? But for now it starts new worker which might race. 
-            // Disable process if already running globally for safety in this version.
-            btn_process.set_enabled(global_state == ProcessingState::Idle || global_state == ProcessingState::Stopped);
+             btn_process.set_enabled(global_state == ProcessingState::Idle || global_state == ProcessingState::Stopped);
         } else {
-            // Count pending items
             let pending_count = st.batch_items.iter()
                 .filter(|i| i.status == BatchStatus::Pending || matches!(i.status, BatchStatus::Error(_)))
                 .count();
                 
             if pending_count > 0 {
-                let text = format!("Process Pending ({})", pending_count);
-                btn_process.set_text(&text);
                 btn_process.set_enabled(global_state == ProcessingState::Idle || global_state == ProcessingState::Stopped);
             } else {
-                btn_process.set_text("Process All");
                 btn_process.set_enabled(false);
             }
         }
@@ -312,17 +305,20 @@ pub unsafe fn update_process_button_state(st: &AppState) {
         btn_remove.set_enabled(selected_count > 0 && global_state != ProcessingState::Running);
         btn_clear.set_enabled(total_count > 0 && global_state != ProcessingState::Running);
 
-        // 3. Pause Button Logic (Smart Logic)
+        // 3. Pause Button Logic
+        let icon_pause = [0x23F8, 0];
+        let icon_resume = [0x25B6, 0];
+
         if global_state == ProcessingState::Running {
              btn_pause.set_enabled(true);
-             btn_pause.set_text("Pause");
+             btn_pause.set_text_w(&icon_pause);
         } else if global_state == ProcessingState::Paused {
              btn_pause.set_enabled(true);
-             btn_pause.set_text("Resume");
+             btn_pause.set_text_w(&icon_resume);
         } else {
              // Idle or Stopped
              btn_pause.set_enabled(false);
-             btn_pause.set_text("Pause");
+             btn_pause.set_text_w(&icon_pause);
         }
     }
 }

@@ -34,6 +34,10 @@ impl Button {
         let w = to_wstring(text);
         unsafe { SetWindowTextW(self.hwnd, w.as_ptr()); }
     }
+
+    pub fn set_text_w(&self, text: &[u16]) {
+        unsafe { SetWindowTextW(self.hwnd, text.as_ptr()); }
+    }
 }
 
 /// Safe wrapper for ComboBox controls

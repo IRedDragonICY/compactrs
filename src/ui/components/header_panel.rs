@@ -8,17 +8,18 @@
 use windows_sys::Win32::Foundation::{HWND, RECT};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SetWindowPos, SWP_NOZORDER, SendMessageW, WM_SETFONT,
+    SetWindowPos, SWP_NOZORDER,
 };
 use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
 use crate::ui::builder::ButtonBuilder;
 use crate::ui::controls::apply_button_theme;
-use crate::w;
 
-const ICON_SETTINGS: &[u16] = &[0x2699, 0]; // Gear
-const ICON_KEYBOARD: &[u16] = &[0x2328, 0]; // Keyboard
+const ICON_SETTINGS: &[u16] = &[0xE713, 0]; // Settings
+const ICON_KEYBOARD: &[u16] = &[0xE765, 0]; // Keyboard
+const ICON_ABOUT: &[u16] = &[0xE946, 0];    // Info
+const ICON_CONSOLE: &[u16] = &[0xE756, 0];  // CommandPrompt
 
 /// Configuration for HeaderPanel control IDs.
 pub struct HeaderPanelIds {
@@ -88,13 +89,8 @@ impl HeaderPanel {
     /// # Safety
     /// Calls Win32 SendMessageW API.
     pub unsafe fn set_font(&self, hfont: HFONT) {
-        let wparam = hfont as usize;
-        let lparam = 1; // Redraw
-        
-        SendMessageW(self.hwnd_settings, WM_SETFONT, wparam, lparam);
-        SendMessageW(self.hwnd_about, WM_SETFONT, wparam, lparam);
-        SendMessageW(self.hwnd_shortcuts, WM_SETFONT, wparam, lparam);
-        SendMessageW(self.hwnd_console, WM_SETFONT, wparam, lparam);
+        let _ = hfont;
+        // Do NOT apply app font to these buttons as they use specific Icon Font.
     }
 }
 
@@ -104,24 +100,33 @@ impl Component for HeaderPanel {
             let _module = GetModuleHandleW(std::ptr::null());
 
             let is_dark = crate::ui::theme::is_system_dark_mode();
+            let icon_font = crate::ui::theme::get_icon_font();
 
             // Initial positions (will be updated in on_resize)
             // These are just placeholders - real positions set in on_resize
             self.hwnd_settings = ButtonBuilder::new(parent, self.ids.btn_settings)
-                .text_w(ICON_SETTINGS)  // Gear icon
-                .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
+                .text_w(ICON_SETTINGS)
+                .pos(0, 0).size(30, 25).dark_mode(is_dark)
+                .font(icon_font)
+                .build();
 
             self.hwnd_about = ButtonBuilder::new(parent, self.ids.btn_about)
-                .text_w(w!("?"))
-                .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
+                .text_w(ICON_ABOUT)
+                .pos(0, 0).size(30, 25).dark_mode(is_dark)
+                .font(icon_font)
+                .build();
 
             self.hwnd_shortcuts = ButtonBuilder::new(parent, self.ids.btn_shortcuts)
                 .text_w(ICON_KEYBOARD)
-                .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
+                .pos(0, 0).size(30, 25).dark_mode(is_dark)
+                .font(icon_font)
+                .build();
 
             self.hwnd_console = ButtonBuilder::new(parent, self.ids.btn_console)
-                .text_w(w!(">_"))
-                .pos(0, 0).size(30, 25).dark_mode(is_dark).build();
+                .text_w(ICON_CONSOLE)
+                .pos(0, 0).size(30, 25).dark_mode(is_dark)
+                .font(icon_font)
+                .build();
 
             Ok(())
         }

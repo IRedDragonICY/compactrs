@@ -5,17 +5,12 @@ use crate::w;
 use crate::ui::framework::WindowHandler;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, 
-    WS_VISIBLE, WS_CHILD,
-    WM_NOTIFY,
     STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
-    WS_TABSTOP, WM_SETFONT, SendMessageW,
+    SendMessageW, GetClientRect,
 };
 
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::Controls::{
-    NMHDR, NM_CLICK, NM_RETURN, NMLINK, WC_LINK, ICC_LINK_CLASS, INITCOMMONCONTROLSEX, InitCommonControlsEx,
-};
+// unused imports removed
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 use windows_sys::Win32::Graphics::Gdi::{
@@ -40,7 +35,7 @@ pub unsafe fn show_about_modal(parent: HWND, is_dark: bool) {
         "CompactRS_About", 
         ABOUT_TITLE, 
         450, 
-        500, 
+        600, 
         is_dark
     );
 }
@@ -55,15 +50,11 @@ impl WindowHandler for AboutState {
             // Apply DWM title bar color using centralized helper
             crate::ui::theme::set_window_frame_theme(hwnd, self.is_dark);
             
-            // Initialize Link Control
-            let iccex = INITCOMMONCONTROLSEX {
-                dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
-                dwICC: ICC_LINK_CLASS,
-            };
-            InitCommonControlsEx(&iccex);
-
-            let content_width = 410; // Wider content area
-            let margin = 20;
+            let mut rc = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rc);
+            let client_width = rc.right - rc.left;
+            
+            // Cleanup Link Control Logic (removed)
 
             // Create modern fonts for visual hierarchy
             let segoe_ui_var = w!("Segoe UI Variable Display");
@@ -92,7 +83,7 @@ impl WindowHandler for AboutState {
             // Icon - Centered at top (Large Hero Icon)
             let instance = GetModuleHandleW(std::ptr::null());
             let icon_size = 128;
-            let icon_x = (450 - icon_size) / 2;
+            let icon_x = (client_width - icon_size) / 2;
             
             // Load large icon for about dialog
             let hicon = LoadImageW(
@@ -116,6 +107,8 @@ impl WindowHandler for AboutState {
 
             // Use LayoutBuilder for text content
             // Start below icon (20 + 128 = 148). Let's start at 160.
+            let content_width = 410; // Wider content area
+            let margin = (client_width - content_width) / 2; // Auto-center content column
             let mut layout = crate::ui::layout::LayoutColumn::new(margin, 160, content_width, 5);
 
             // App Name - Large bold title using ControlBuilder
@@ -167,33 +160,80 @@ impl WindowHandler for AboutState {
                 .dark_mode(self.is_dark)
                 .build();
 
-            // GitHub Link (SysLink) - Centered (still raw CreateWindowExW as it's a special control)
-            layout.add_space(10);
-            let (x, y, w, h) = layout.row(25);
-            let link_text = to_wstring("<a href=\"https://github.com/IRedDragonICY/compactrs\">GitHub</a>  •  <a href=\"https://github.com/IRedDragonICY/compactrs/blob/main/LICENSE\">License</a>");
-            let link_cls = WC_LINK;
-            let link = CreateWindowExW(
-                0,
-                link_cls,
-                link_text.as_ptr(),
-                WS_VISIBLE | WS_CHILD | WS_TABSTOP,
-                x, y, w, h,
-                hwnd,
-                std::ptr::null_mut(),
-                instance,
-                std::ptr::null()
-            );
-            SendMessageW(link, WM_SETFONT, body_font as WPARAM, 1);
-            if self.is_dark {
-                crate::ui::theme::apply_theme(link, crate::ui::theme::ControlType::Window, true);
-            }
+            // Modern Action Buttons (Centered Row)
+            layout.add_space(20);
+            
+            // Allocate row for buttons (Height 40)
+            let (_, y_btn, _, _) = layout.row(40);
+            
+            // Calculate center position for two button groups
+            // Group width = 60 (Button) + 10 (Space) + 60 (Button) = 130
+            // Start X = (client_width - 130) / 2
+            let start_x = (client_width - 130) / 2;
+            
+            let icon_font = crate::ui::theme::get_icon_font();
+            
+            // GitHub Button
+            // Icon: Code (\u{E943})
+            let _btn_github = ControlBuilder::new(hwnd, 1001)
+                .button()
+                .text_w(&[0xE943, 0]) 
+                .pos(start_x, y_btn) 
+                .size(60, 40)
+                .font(icon_font)
+                .dark_mode(self.is_dark)
+                .build();
+                
+            // License Button
+            // Icon: Certificate (\u{E929})
+            let _btn_license = ControlBuilder::new(hwnd, 1002)
+                .button()
+                .text_w(&[0xE929, 0])
+                .pos(start_x + 70, y_btn)
+                .size(60, 40)
+                .font(icon_font)
+                .dark_mode(self.is_dark)
+                .build();
+
+            // Labels for buttons
+            let _lbl_github = ControlBuilder::new(hwnd, 0)
+                .label(true) // Center
+                .text("GitHub")
+                .pos(start_x, y_btn + 45)
+                .size(60, 20)
+                .font(creator_font) // Reusing small font
+                .dark_mode(self.is_dark)
+                .build();
+
+            let _lbl_license = ControlBuilder::new(hwnd, 0)
+                .label(true)
+                .text("License")
+                .pos(start_x + 70, y_btn + 45)
+                .size(60, 20)
+                .font(creator_font)
+                .dark_mode(self.is_dark)
+                .build();
         }
         0
     }
 
-    fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+    fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
             match msg {
+                // WM_COMMAND: Handle Button Clicks
+                0x0111 => { // WM_COMMAND
+                    let id = (wparam & 0xFFFF) as u16;
+                    let open = w!("open");
+                    let github = to_wstring(GITHUB_URL);
+                    let license = to_wstring(LICENSE_URL);
+                    
+                    if id == 1001 { // GitHub
+                        ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), github.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                    } else if id == 1002 { // License
+                         ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), license.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
+                    }
+                    Some(0)
+                },
                 // WM_APP + 2: Theme change broadcast from Settings
                 0x8002 => {
                     let new_is_dark = wparam == 1;
@@ -207,26 +247,6 @@ impl WindowHandler for AboutState {
                     Some(0)
                 },
                 
-                WM_NOTIFY => {
-                    let nmhdr = &*(lparam as *const NMHDR);
-                    // Handle SysLink clicks
-                    if nmhdr.code == NM_CLICK || nmhdr.code == NM_RETURN {
-                         let nmlink = &*(lparam as *const NMLINK);
-                         let item = nmlink.item;
-                         
-                         let open = w!("open");
-                         let github = to_wstring(GITHUB_URL);
-                         let license = to_wstring(LICENSE_URL);
-                         
-                         // Open URL
-                         if item.iLink == 0 {
-                               ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), github.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
-                         } else if item.iLink == 1 {
-                               ShellExecuteW(std::ptr::null_mut(), open.as_ptr(), license.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL);
-                         }
-                    }
-                    Some(0)
-                },
                 _ => None,
             }
         }

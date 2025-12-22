@@ -295,6 +295,29 @@ fn get_dark_brush() -> HBRUSH {
     handle as HBRUSH
 }
 
+// Global Icon Font Handle (Segoe Fluent Icons)
+static ICON_FONT_HANDLE: OnceLock<isize> = OnceLock::new();
+
+pub fn get_icon_font() -> HFONT {
+    let handle = *ICON_FONT_HANDLE.get_or_init(|| unsafe {
+        let font_height = -16; // Slightly larger for icons
+        let font_name = to_wstring("Segoe Fluent Icons");
+        CreateFontW(
+            font_height,
+            0, 0, 0,
+            FW_NORMAL as i32,
+            0, 0, 0,
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            CLEARTYPE_QUALITY as u32,
+            (DEFAULT_PITCH | FF_DONTCARE) as u32,
+            font_name.as_ptr(),
+        ) as isize
+    });
+    handle as HFONT
+}
+
 // ============================================================================
 // Message Handlers
 // ============================================================================
