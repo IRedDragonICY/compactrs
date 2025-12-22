@@ -52,6 +52,7 @@ pub const COLOR_HEADER_TEXT_DARK: u32 = 0x00FFFFFF;
 // ============================================================================
 
 /// Defines the type of control for theming purposes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlType {
     Window,
     Button,
@@ -288,7 +289,7 @@ pub fn get_app_font() -> HFONT {
     handle as HFONT
 }
 
-fn get_dark_brush() -> HBRUSH {
+pub fn get_dark_brush() -> HBRUSH {
     let handle = *DARK_BRUSH_HANDLE.get_or_init(|| unsafe {
         CreateSolidBrush(COLOR_DARK_BG) as isize
     });

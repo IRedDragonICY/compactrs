@@ -189,17 +189,32 @@ impl Component for ActionPanel {
             let height = parent_rect.bottom - parent_rect.top;
             let width = parent_rect.right - parent_rect.left;
             
-            // Constants
-            let btn_height = 30;
+            // Dynamic Layout Calculation
+            let content_height = 48; // Label (16) + Gap (4) + Control (30) - slightly larger gap
+            let center_y_offset = (height - content_height) / 2;
+            
+            // Positions (Absolute Client Coordinates)
+            // Start layout from the computed top of the content block
+            let start_y = parent_rect.top + center_y_offset;
+            
+            // Labels at the top of the block
+            let label_y = start_y; 
+            
+            // Buttons below labels
+            let btn_y = start_y + 16 + 4; // 16px label + 4px gap
+
             let bar_padding = 10;
-            let btn_y = height - btn_height - bar_padding;
+            let btn_height = 30;
+            let lbl_h = 16;
             
             // --- Left Section: Input & Config ---
             let mut left = LayoutRow::new(bar_padding, btn_y, btn_height, 5);
             
-            // Labels are positioned relative to the buttons
-            let lbl_offset = -18;
-            let lbl_h = 16;
+            // Labels are positioned relative to the buttons? 
+            // LayoutRow places items at its 'y' (which is btn_y).
+            // add_label_above uses 'y + offset'. 
+            // So if we want label at 'label_y', offset = label_y - btn_y = -20.
+            let lbl_offset = label_y - btn_y; 
 
             // Input Buttons
             // 4 buttons * 32 width + 3 spaces * 5 padding = 128 + 15 = 143

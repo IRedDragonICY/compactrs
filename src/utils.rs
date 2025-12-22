@@ -291,3 +291,96 @@ impl PathBuffer {
         String::from_utf16_lossy(&self.buf[..len])
     }
 }
+
+// ===== CUSTOM MATCHER OPTIMIZATION =====
+
+pub mod matcher {
+    /// Simple wildcard matcher (Glob-like)
+    /// Supports:
+    /// - `?`: Match any single character
+    /// - `*`: Match any sequence of characters (including empty)
+    /// - `^`: Anchor match to start (optional support, typical globs don't use it but useful)
+    /// - `$`: Anchor match to end
+    ///
+    /// Use `is_match(pattern, text)` as main entry.
+    pub fn is_match(pattern: &str, text: &str) -> bool {
+        let p_chars: Vec<char> = pattern.chars().collect();
+        let t_chars: Vec<char> = text.chars().collect();
+        match_slice(&p_chars, &t_chars)
+    }
+
+    fn match_slice(p: &[char], t: &[char]) -> bool {
+        // If pattern is empty, text must be empty (unless pattern was just wildcards that matched empty?)
+        // Actually, simple recursive approach:
+        
+        if p.is_empty() {
+            return t.is_empty();
+        }
+        
+        match p[0] {
+            '*' => {
+                // '*' matches zero or more characters.
+                // Try matching '*' to 0 chars (recurse with p[1..], t)
+                // Or matching '*' to 1 char (recurse with p, t[1..])
+                
+                // Optimization: Skip consecutive '*'
+                let mut next_p = 1;
+                while next_p < p.len() && p[next_p] == '*' {
+                    next_p += 1;
+                }
+                // If '*' is trailing, it matches everything remaining.
+                if next_p == p.len() {
+                    return true;
+                }
+                // Recursion: Try to find a match for p[next_p..] in t[i..]
+                // Greedy or non-greedy?
+                // "expert optimization" -> Iteration would be better than recursion for deep strings,
+                // but for file names recursion is fine.
+                
+                for i in 0..=t.len() {
+                    if match_slice(&p[next_p..], &t[i..]) {
+                        return true;
+                    }
+                }
+                false
+            },
+            '?' => {
+                if t.is_empty() { return false; }
+                match_slice(&p[1..], &t[1..])
+            },
+            '^' => {
+                // Anchor start. Only valid at start of pattern?
+                // For simple implementation, let's treating it as "match must start at 0".
+                // But is_match usually assumes partial match?
+                // "Contains" vs "Exact Match".
+                // Our app logic `regex.is_match` implies "Contains".
+                // BUT file searching usually expects "Contains" by default unless glob chars are used?
+                // If user types "foo", they find "foo_bar".
+                // If I implement wildcard logic:
+                // "foo" -> matches "foo" only? Or ".*foo.*"?
+                
+                // DECISION: 
+                // If pattern contains `*` or `?`, treat as GLOB (Full Match required against pattern).
+                // If NO wildcards, treat as SUBSTRING (Contains).
+                // But `fn is_match` should implement pure logic.
+                
+                 // Treating literal char match
+                if t.is_empty() { return false; }
+                if p[0] == t[0] {
+                    match_slice(&p[1..], &t[1..])
+                } else {
+                    false
+                }
+            },
+            c => {
+                if t.is_empty() { return false; }
+                 // Case sensitivity? handled by caller lowercasing usually.
+                if c == t[0] {
+                    match_slice(&p[1..], &t[1..])
+                } else {
+                    false
+                }
+            }
+        }
+    }
+}

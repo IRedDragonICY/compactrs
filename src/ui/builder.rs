@@ -145,6 +145,10 @@ impl ControlBuilder {
                 ShowWindow(hwnd, SW_SHOW);
             }
 
+            if self.detect_control_type() == ControlType::Edit {
+                crate::ui::edit_subclass::subclass_edit(hwnd);
+            }
+
             hwnd
         }
     }

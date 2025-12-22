@@ -19,7 +19,8 @@ use windows_sys::Win32::UI::Controls::{
     LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, NM_CUSTOMDRAW, NMCUSTOMDRAW,
     CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW, CDRF_NOTIFYSUBITEMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
     LVM_GETITEMCOUNT, LVM_SETITEMSTATE, LVIS_SELECTED, LVM_SORTITEMS, LVM_SETCOLUMNWIDTH,
-    HDN_BEGINTRACKW, HDN_DIVIDERDBLCLICKW, LVM_GETITEMTEXTW,
+    HDN_BEGINTRACKW, HDN_DIVIDERDBLCLICKW, LVM_GETITEMTEXTW, LVM_FINDITEMW, LVFINDINFOW,
+    LVFI_PARAM,
 };
 // COLORREF is a type alias for u32 in Win32 (0x00BBGGRR format)
 type COLORREF = u32;
@@ -360,6 +361,33 @@ impl FileListView {
         }
     }
 
+    /// Finds the visual row index of an item by its ID (lParam).
+    /// Returns None if not found (e.g., hidden by filter).
+    pub fn find_item_by_id(&self, id: u32) -> Option<i32> {
+        let mut find_info = LVFINDINFOW {
+            flags: LVFI_PARAM,
+            psz: std::ptr::null(),
+            lParam: id as isize,
+            pt: windows_sys::Win32::Foundation::POINT { x: 0, y: 0 },
+            vkDirection: 0,
+        };
+
+        unsafe {
+            let index = SendMessageW(
+                self.hwnd,
+                LVM_FINDITEMW,
+                -1isize as usize, // Start search from beginning
+                &mut find_info as *mut _ as isize,
+            );
+
+            if index >= 0 {
+                Some(index as i32)
+            } else {
+                None
+            }
+        }
+    }
+
     /// Updates the text of a specific cell.
     ///
     /// # Arguments
@@ -686,31 +714,19 @@ impl Component for FileListView {
         Some(self.hwnd)
     }
 
-    unsafe fn on_resize(&mut self, parent_rect: &RECT) {
+    unsafe fn on_resize(&mut self, rect: &RECT) {
         unsafe {
-            let width = parent_rect.right - parent_rect.left;
-            let height = parent_rect.bottom - parent_rect.top;
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
 
-            let padding = 10;
-            let header_height = 25;
-            let progress_height = 25;
-            let btn_height = 30;
-            let lbl_height = 18;  // Space for labels above action dropdowns
-
-            // Calculate list height: total height minus header, progress bar, buttons, labels, and padding
-            let list_height = height - header_height - progress_height - btn_height - lbl_height - (padding * 5);
-
-            // Position ListView below header
-            let list_y = padding + header_height + padding;
-            let list_width = width - padding * 2;
-
+            // Use passed rect directly (Layout managed by parent)
             SetWindowPos(
                 self.hwnd,
                 std::ptr::null_mut(),
-                padding,
-                list_y,
-                list_width,
-                list_height,
+                rect.left,
+                rect.top,
+                width,
+                height,
                 SWP_NOZORDER,
             );
 
@@ -723,9 +739,9 @@ impl Component for FileListView {
             }
 
             // Get exact client width (excludes scrollbar/borders if present)
-            let mut rect: RECT = std::mem::zeroed();
-            GetClientRect(self.hwnd, &mut rect);
-            let list_inner_width = rect.right - rect.left;
+            let mut client_rect: RECT = std::mem::zeroed();
+            GetClientRect(self.hwnd, &mut client_rect);
+            let list_inner_width = client_rect.right - client_rect.left;
 
             // Calculate new width for Path column (Column 0)
             let mut new_path_width = list_inner_width - fixed_width;

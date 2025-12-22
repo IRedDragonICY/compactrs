@@ -29,13 +29,13 @@ unsafe extern "system" {
 
 use crate::ui::controls::*;
 use crate::ui::wrappers::{Button, ComboBox, Label, ProgressBar};
-use crate::ui::components::{
-    Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
-    HeaderPanel, HeaderPanelIds,
-};
 // FIX: Added BatchAction
 use crate::ui::state::{AppState, Controls, UiMessage, BatchStatus, AppTheme, BatchAction, ProcessingState};
 use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
+use crate::ui::components::{
+    Component, FileListView, StatusBar, StatusBarIds, ActionPanel, ActionPanelIds,
+    HeaderPanel, HeaderPanelIds, SearchPanel, SearchPanelIds,
+};
 use crate::ui::theme;
 use crate::ui::handlers; 
 use crate::engine::wof::{WofAlgorithm, CompressionState};
@@ -136,7 +136,24 @@ impl WindowHandler for AppState {
             let _ = status_bar.create(hwnd);
             
             // 2. FileListView
-            let file_list = FileListView::new(hwnd, 10, 40, 860, 380, IDC_BATCH_LIST);
+            // Y position will be adjusted in on_resize to account for SearchPanel
+            let file_list = FileListView::new(hwnd, 10, 100, 860, 320, IDC_BATCH_LIST);
+            
+            // 5. Search Panel
+            let search_ids = SearchPanelIds {
+                edit_search: IDC_SEARCH_EDIT,
+                combo_filter_col: IDC_COMBO_FILTER_COL,
+                combo_algo: IDC_COMBO_FILTER_ALGO,
+                combo_size: IDC_COMBO_FILTER_SIZE,
+                chk_case: IDC_CHK_CASE,
+                chk_regex: IDC_CHK_REGEX,
+                lbl_results: IDC_LBL_RESULTS,
+                lbl_filter_by: IDC_LBL_FILTER_BY,
+                lbl_algo: IDC_LBL_FILTER_ALGO,
+                lbl_size: IDC_LBL_SIZE,
+            };
+            let mut search_panel = SearchPanel::new(search_ids);
+            let _ = search_panel.create(hwnd);
             
             // 3. ActionPanel
             // Initial layout Y will be set during resize, but we need a value.
@@ -183,6 +200,7 @@ impl WindowHandler for AppState {
                 status_bar,
                 action_panel,
                 header_panel,
+                search_panel,
             });
             
             // Set initial state of buttons (Disabled if empty)
@@ -343,6 +361,106 @@ impl WindowHandler for AppState {
 // Logic Helper Functions (Extensions to AppState for Window Logic)
 
 impl AppState {
+    /// Refresh the file list based on current filters
+    unsafe fn refresh_file_list(&mut self) {
+        if let Some(ctrls) = &self.controls {
+            ctrls.file_list.clear_all();
+            
+            let search = &self.search_state;
+            let filter_text = search.text.trim().to_lowercase();
+            // "use_regex" now means "use custom wildcard/regex matcher"
+            let use_custom_match = search.use_regex && !search.text.trim().is_empty();
+
+            for item in &self.batch_items {
+                // 1. Column/Text Filter
+                let text_match = if search.text.is_empty() {
+                    true
+                } else {
+                    let haystack = match search.filter_column {
+                        crate::ui::state::FilterColumn::Path => item.path.to_lowercase(),
+                        crate::ui::state::FilterColumn::Status => format!("{:?}", item.status).to_lowercase(),
+                    };
+                    
+                    if use_custom_match {
+                        let pattern = &search.text;
+                        if search.case_sensitive {
+                             let haystack_raw = match search.filter_column {
+                                crate::ui::state::FilterColumn::Path => item.path.clone(),
+                                crate::ui::state::FilterColumn::Status => format!("{:?}", item.status),
+                            };
+                            crate::utils::matcher::is_match(pattern, &haystack_raw)
+                        } else {
+                            // Pattern lowercased? filter_text is already lowercased search.text
+                           crate::utils::matcher::is_match(&filter_text, &haystack)
+                        }
+                    } else if search.case_sensitive {
+                         // Re-read without lowercase if case sensitive
+                         let haystack_raw = match search.filter_column {
+                            crate::ui::state::FilterColumn::Path => item.path.clone(),
+                            crate::ui::state::FilterColumn::Status => format!("{:?}", item.status),
+                        };
+                        haystack_raw.contains(&search.text)
+                    } else {
+                        haystack.contains(&filter_text)
+                    }
+                };
+                
+                if !text_match { continue; }
+                
+                // 2. Algorithm Filter
+                if let Some(target_algo) = search.algorithm_filter {
+                    if item.algorithm != target_algo { continue; }
+                }
+                
+                // 3. Size Filter
+                let size_match = match search.size_filter {
+                    1 => item.logical_size < 1_000_000, // Small < 1MB
+                    2 => item.logical_size > 100_000_000, // Large > 100MB
+                    _ => true,
+                };
+                if !size_match { continue; }
+
+                // Add to List
+                let logical_str = format_size(item.logical_size);
+                let disk_str = format_size(item.disk_size);
+                
+                ctrls.file_list.add_item(
+                    item.id, 
+                    item, 
+                    &logical_str, 
+                    &disk_str, 
+                    w!("Estimating..."), 
+                    crate::engine::wof::CompressionState::None 
+                );
+            }
+            
+            // Update "Showing results" label
+            let current_count = ctrls.file_list.get_item_count();
+            let total_count = self.batch_items.len();
+            
+            let is_default_state = search.text.trim().is_empty() 
+                && search.algorithm_filter.is_none() 
+                && search.size_filter == 0
+                && !search.use_regex;
+
+            let msg = if is_default_state {
+                if total_count == 0 {
+                    "Ready.".to_string()
+                } else {
+                    format!("Ready. {} items loaded.", total_count)
+                }
+            } else {
+                 if current_count == 0 {
+                     "No matching items found.".to_string()
+                 } else {
+                     format!("Found {} matching items.", current_count)
+                 }
+            };
+            
+            crate::ui::wrappers::Label::new(ctrls.search_panel.results_hwnd()).set_text(&msg);
+        }
+    }
+
     /// Populate initial values for comboboxes and checkboxes
     unsafe fn populate_ui_combos(&self, action_panel: &ActionPanel) {
         // Algorithm Combo
@@ -454,8 +572,67 @@ impl AppState {
                        let hwnd_ctl = lparam as HWND;
                        self.force_compress = Button::new(hwnd_ctl).is_checked();
                  },
+                 // --- Search Panel Handlers ---
+                 IDC_SEARCH_EDIT => {
+                     if notification_code as u32 == windows_sys::Win32::UI::WindowsAndMessaging::EN_CHANGE {
+                        if let Some(ctrls) = &self.controls {
+                            let text = crate::ui::wrappers::get_window_text(ctrls.search_panel.search_hwnd());
+                            self.search_state.text = text;
+                            self.refresh_file_list();
+                        }
+                     }
+                 },
+                 IDC_COMBO_FILTER_COL => {
+                     if notification_code == CBN_SELCHANGE {
+                        if let Some(ctrls) = &self.controls {
+                            let idx = crate::ui::wrappers::ComboBox::new(ctrls.search_panel.filter_col_hwnd()).get_selected_index();
+                            self.search_state.filter_column = if idx == 1 { 
+                                crate::ui::state::FilterColumn::Status 
+                            } else { 
+                                crate::ui::state::FilterColumn::Path 
+                            };
+                             self.refresh_file_list();
+                        }
+                     }
+                 },
+                 IDC_COMBO_FILTER_ALGO => {
+                     if notification_code == CBN_SELCHANGE {
+                        if let Some(ctrls) = &self.controls {
+                            let idx = crate::ui::wrappers::ComboBox::new(ctrls.search_panel.algo_hwnd()).get_selected_index();
+                            self.search_state.algorithm_filter = match idx {
+                                1 => Some(WofAlgorithm::Xpress4K),
+                                2 => Some(WofAlgorithm::Xpress8K),
+                                3 => Some(WofAlgorithm::Xpress16K),
+                                4 => Some(WofAlgorithm::Lzx),
+                                _ => None,
+                            };
+                            self.refresh_file_list();
+                        }
+                     }
+                 },
+                 IDC_COMBO_FILTER_SIZE => {
+                     if notification_code == CBN_SELCHANGE {
+                        if let Some(ctrls) = &self.controls {
+                            let idx = crate::ui::wrappers::ComboBox::new(ctrls.search_panel.size_hwnd()).get_selected_index();
+                            self.search_state.size_filter = idx;
+                            self.refresh_file_list();
+                        }
+                     }
+                 },
+                 IDC_CHK_CASE => {
+                     if let Some(ctrls) = &self.controls {
+                        self.search_state.case_sensitive = crate::ui::wrappers::Button::new(ctrls.search_panel.case_hwnd()).is_checked();
+                        self.refresh_file_list();
+                     }
+                 },
+                 IDC_CHK_REGEX => {
+                     if let Some(ctrls) = &self.controls {
+                        self.search_state.use_regex = crate::ui::wrappers::Button::new(ctrls.search_panel.regex_hwnd()).is_checked();
+                        self.refresh_file_list();
+                     }
+                 },
                  IDC_COMBO_ALGO => {
-                     // Re-estimate all items when global algorithm changes
+                     // Main Process Algorithm Combo
                      if notification_code == CBN_SELCHANGE {
                          self.on_global_algo_changed();
                      }
@@ -593,18 +770,21 @@ impl AppState {
                              let ratio_str = crate::utils::calculate_ratio_string(logical, disk);
                              let count_str = u64_to_wstring(count);
                              
-                             ctrls.file_list.update_item_text(pos as i32, 4, &log_str);
-                             ctrls.file_list.update_item_text(pos as i32, 6, &disk_str);
-                             ctrls.file_list.update_item_text(pos as i32, 7, &ratio_str); // Ratio
-                             
-                             let current_state = self.global_state.load(Ordering::Relaxed);
-                             if current_state == ProcessingState::Stopped as u8 {
-                                 ctrls.file_list.update_item_text(pos as i32, 9, w!("Cancelled"));
-                             } else if current_state == ProcessingState::Paused as u8 {
-                                 ctrls.file_list.update_item_text(pos as i32, 9, w!("Paused"));
-                             } else {
-                                 let status_text = concat_wstrings(&[w!("Scanning... "), &count_str]);
-                                 ctrls.file_list.update_item_text(pos as i32, 9, &status_text); // Status is now 9
+                             // Find visual row by ID
+                             if let Some(row) = ctrls.file_list.find_item_by_id(id) {
+                                 ctrls.file_list.update_item_text(row, 4, &log_str);
+                                 ctrls.file_list.update_item_text(row, 6, &disk_str);
+                                 ctrls.file_list.update_item_text(row, 7, &ratio_str); // Ratio
+                                 
+                                 let current_state = self.global_state.load(Ordering::Relaxed);
+                                 if current_state == ProcessingState::Stopped as u8 {
+                                     ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
+                                 } else if current_state == ProcessingState::Paused as u8 {
+                                     ctrls.file_list.update_item_text(row, 9, w!("Paused"));
+                                 } else {
+                                     let status_text = concat_wstrings(&[w!("Scanning... "), &count_str]);
+                                     ctrls.file_list.update_item_text(row, 9, &status_text);
+                                 }
                              }
 
                              if let Some(item) = self.batch_items.get(pos) {
@@ -614,63 +794,94 @@ impl AppState {
                          }
                      }
                  },
-                 UiMessage::RowProgress(row, cur, tot, bytes) => {
+                 UiMessage::RowProgress(row_idx, cur, tot, bytes) => {
                      if let Some(ctrls) = &self.controls {
-                         // Update Progress Text (Column 8)
-                         let cur_w = u64_to_wstring(cur);
-                         let tot_w = u64_to_wstring(tot);
-                         let prog_str = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
-                         ctrls.file_list.update_item_text(row, 8, &prog_str);
+                         // Map batch index to item ID
+                         let item_id = self.batch_items.get(row_idx as usize).map(|i| i.id);
                          
-                         // Update Size (Column 6) - Live update
-                         if bytes > 0 {
-                             let size_str = format_size(bytes);
-                             ctrls.file_list.update_item_text(row, 6, &size_str);
-                         }
+                         if let Some(id) = item_id {
+                             if let Some(row) = ctrls.file_list.find_item_by_id(id) {
+                                 // Update Progress Text (Column 8)
+                                 let cur_w = u64_to_wstring(cur);
+                                 let tot_w = u64_to_wstring(tot);
+                                 let prog_str = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
+                                 ctrls.file_list.update_item_text(row, 8, &prog_str);
+                                 
+                                 // Update Size (Column 6) - Live update
+                                 if bytes > 0 {
+                                     let size_str = format_size(bytes);
+                                     ctrls.file_list.update_item_text(row, 6, &size_str);
+                                 }
 
-                         let current_state = self.global_state.load(Ordering::Relaxed);
-                         if current_state == ProcessingState::Stopped as u8 {
-                              ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
-                         } else if current_state == ProcessingState::Paused as u8 {
-                             // If effectively paused, don't let "Running" overwrite "Paused"
-                              ctrls.file_list.update_item_text(row, 9, w!("Paused"));
-                         } else {
-                              ctrls.file_list.update_item_text(row, 9, w!("Running"));
+                                 let current_state = self.global_state.load(Ordering::Relaxed);
+                                 if current_state == ProcessingState::Stopped as u8 {
+                                      ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
+                                 } else if current_state == ProcessingState::Paused as u8 {
+                                     // If effectively paused, don't let "Running" overwrite "Paused"
+                                      ctrls.file_list.update_item_text(row, 9, w!("Paused"));
+                                 } else {
+                                      ctrls.file_list.update_item_text(row, 9, w!("Running"));
+                                 }
+                             }
                          }
                      }
                  },
-                 UiMessage::RowFinished(row, final_bytes, total_count, final_state) => {
+                 UiMessage::RowFinished(row_idx, final_bytes, total_count, final_state) => {
                      if let Some(ctrls) = &self.controls {
-                         ctrls.file_list.update_item_text(row, 9, w!("Done"));
-                         
-                         // Update Progress Text (Column 8)
-                         let tot_w = u64_to_wstring(total_count);
-                         let prog_str = concat_wstrings(&[&tot_w, &to_wstring("/"), &tot_w]);
-                         ctrls.file_list.update_item_text(row, 8, &prog_str);
-                         
-                         // Update disk size (Col 6) and Ratio (Col 7)
-                         let size_str = format_size(final_bytes);
-                         ctrls.file_list.update_item_text(row, 6, &size_str);
-                         
-                         if let Some(item) = self.batch_items.get_mut(row as usize) {
+                         let item_id = self.batch_items.get(row_idx as usize).map(|i| i.id);
+                         if let Some(id) = item_id {
+                             if let Some(row) = ctrls.file_list.find_item_by_id(id) {
+                                 ctrls.file_list.update_item_text(row, 9, w!("Done"));
+                                 
+                                 // Update Progress Text (Column 8)
+                                 let tot_w = u64_to_wstring(total_count);
+                                 let prog_str = concat_wstrings(&[&tot_w, &to_wstring("/"), &tot_w]);
+                                 ctrls.file_list.update_item_text(row, 8, &prog_str);
+                                 
+                                 // Update final size
+                                 if final_bytes > 0 {
+                                     let size_str = format_size(final_bytes);
+                                     ctrls.file_list.update_item_text(row, 6, &size_str);
+                                 }
+                                 
+                                 // Clear Start Button Text
+                                 ctrls.file_list.update_item_text(row, 10, w!("")); // Clear start column text
+                             }
+                         }
+
+                         // Update in-memory state
+                         if let Some(item) = self.batch_items.get_mut(row_idx as usize) {
                              item.disk_size = final_bytes;
                              item.status = BatchStatus::Complete;
                              item.state_flag = None;
-                             
-                             let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, final_bytes);
-                             ctrls.file_list.update_item_text(row, 7, &ratio_str);
+                             item.progress = (total_count, total_count);
                          }
 
-                         let state_str = match final_state {
-                             CompressionState::None => w!("-"),
-                             CompressionState::Specific(algo) => match algo {
-                                 WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
-                                 WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
-                             },
-                             CompressionState::Mixed => w!("Mixed"),
-                         };
-                         ctrls.file_list.update_item_text(row, 1, state_str);
-                         ctrls.file_list.update_item_text(row, 10, w!("")); 
+                         // Update UI for final state
+                         if let Some(ctrls) = &self.controls {
+                             if let Some(id) = item_id {
+                                 if let Some(row) = ctrls.file_list.find_item_by_id(id) {
+                                     // Calculate Ratio with final sizes
+                                     if let Some(item) = self.batch_items.get(row_idx as usize) {
+                                          let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, final_bytes);
+                                          ctrls.file_list.update_item_text(row, 7, &ratio_str);
+                                     }
+    
+                                     // Update State/Algorithm Column
+                                     let state_str = match final_state {
+                                         CompressionState::None => w!("-"),
+                                         CompressionState::Specific(algo) => match algo {
+                                             WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
+                                             WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
+                                         },
+                                         CompressionState::Mixed => w!("Mixed"),
+                                     };
+                                     ctrls.file_list.update_item_text(row, 1, state_str);
+                                     
+                                     ctrls.file_list.update_item_text(row, 10, w!("")); 
+                                 }
+                             }
+                         }
                      }
                      handlers::update_process_button_state(self);
                  },
@@ -730,10 +941,64 @@ impl AppState {
             let mut client_rect: RECT = std::mem::zeroed();
             if GetClientRect(hwnd, &mut client_rect) != 0 {
                 if let Some(ctrls) = &mut self.controls {
+                     let _width = client_rect.right - client_rect.left;
+                     let height = client_rect.bottom - client_rect.top;
+                     
+                     // Layout Constants
+                     let header_h = 50;
+                     let search_h = 135; // Increased slightly for spacing
+                     let action_h = 80;  // Accommodate controls
+                     let status_h = 40;  // Increased to prevent overlap
+                     let padding = 10;
+                     
+                     // 1. Header Rect (Top Strip)
+                     let header_rect = RECT { 
+                        left: client_rect.left, 
+                        top: client_rect.top, 
+                        right: client_rect.right, 
+                        bottom: client_rect.top + header_h 
+                     };
+                     
+                     // 2. Search Rect (Below Header)
+                     let search_rect = RECT {
+                        left: client_rect.left,
+                        top: header_rect.bottom,
+                        right: client_rect.right,
+                        bottom: header_rect.bottom + search_h
+                     };
+                     
+                     // 3. Action Rect (Bottom Strip, above Status)
+                     // Calculate tops from bottom up
+                     let status_top = height - status_h;
+                     let action_top = status_top - action_h;
+                     
+                     let action_rect = RECT {
+                        left: client_rect.left,
+                        top: action_top,
+                        right: client_rect.right,
+                        bottom: status_top
+                     };
+                     
+                     // 4. List Rect (Middle Fill)
+                     // Fills space between Search and Action
+                     let list_top = search_rect.bottom;
+                     let list_bottom = action_rect.top - padding; // Space before action panel
+                     
+                     let list_rect = RECT {
+                        left: client_rect.left + padding,
+                        top: list_top,
+                        right: client_rect.right - padding,
+                        bottom: std::cmp::max(list_top + 10, list_bottom) // Ensure min height
+                     };
+
+                     // Apply Layouts
+                     ctrls.header_panel.on_resize(&header_rect);
+                     ctrls.search_panel.on_resize(&search_rect);
+                     ctrls.file_list.on_resize(&list_rect);
+                     ctrls.action_panel.on_resize(&action_rect);
+                     
+                     // Status bar handles itself (usually sticks to bottom of passed rect)
                      ctrls.status_bar.on_resize(&client_rect);
-                     ctrls.file_list.on_resize(&client_rect);
-                     ctrls.action_panel.on_resize(&client_rect);
-                     ctrls.header_panel.on_resize(&client_rect);
                 }
             }
             0
@@ -877,7 +1142,6 @@ impl AppState {
                                        for i in 0..count {
                                            ctrls.file_list.set_selected(i, false);
                                        }
-                                       self.ipc_active = true;
                                    }
                                    
                                    ctrls.file_list.set_selected(pos as i32, true);

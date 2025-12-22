@@ -115,3 +115,17 @@ impl Trackbar {
         unsafe { SendMessageW(self.hwnd, TBM_GETPOS, 0, 0) as u32 }
     }
 }
+// Helper to get text from a window
+pub fn get_window_text(hwnd: HWND) -> String {
+    unsafe {
+        let len = windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(hwnd);
+        if len > 0 {
+            let mut buf = vec![0u16; (len + 1) as usize];
+            let copied = windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW(hwnd, buf.as_mut_ptr(), len + 1);
+            if copied > 0 {
+                return String::from_utf16_lossy(&buf[..copied as usize]);
+            }
+        }
+        String::new()
+    }
+}

@@ -109,6 +109,36 @@ impl Default for BatchStatus {
     }
 }
 
+/// Filter column type
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FilterColumn {
+    Path,
+    Status,
+}
+
+/// Search State
+pub struct SearchState {
+    pub text: String,
+    pub filter_column: FilterColumn,
+    pub algorithm_filter: Option<crate::engine::wof::WofAlgorithm>,
+    pub size_filter: i32, // 0 = All, 1 = Small, 2 = Large (placeholder for now)
+    pub use_regex: bool,
+    pub case_sensitive: bool,
+}
+
+impl Default for SearchState {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            filter_column: FilterColumn::Path,
+            algorithm_filter: None,
+            size_filter: 0,
+            use_regex: false,
+            case_sensitive: false,
+        }
+    }
+}
+
 /// Represents an item in the batch processing queue
 #[derive(Clone, Debug)]
 pub struct BatchItem {
@@ -162,6 +192,7 @@ pub struct Controls {
     pub status_bar: crate::ui::components::StatusBar,
     pub action_panel: crate::ui::components::ActionPanel,
     pub header_panel: crate::ui::components::HeaderPanel,
+    pub search_panel: crate::ui::components::SearchPanel,
 }
 
 impl Controls {
@@ -188,12 +219,14 @@ impl Controls {
             self.status_bar.on_theme_change(is_dark);
             self.action_panel.on_theme_change(is_dark);
             self.header_panel.on_theme_change(is_dark);
+            self.search_panel.on_theme_change(is_dark);
             self.file_list.on_theme_change(is_dark);
             
             // Set fonts on all components
             self.status_bar.set_font(hfont);
             self.action_panel.set_font(hfont);
             self.header_panel.set_font(hfont);
+            self.search_panel.set_font(hfont);
             
             // Set font on ListView
             // Set font on ListView
@@ -210,6 +243,10 @@ pub struct AppState {
     // New batch processing state
     pub batch_items: Vec<BatchItem>,
     pub processing_queue: Vec<usize>, // Queue of item indices waiting for processing
+    
+    // Search State
+    pub search_state: SearchState,
+
     pub next_item_id: u32,
     
     // UI and communication
@@ -260,6 +297,7 @@ impl AppState {
         Self {
             batch_items: Vec::new(),
             processing_queue: Vec::new(),
+            search_state: SearchState::default(),
             next_item_id: 1,
             controls: None,
             tx,

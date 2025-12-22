@@ -153,19 +153,13 @@ impl Component for StatusBar {
 
             let padding = 10;
             let header_height = 25;
-            let progress_height = 25;
-            let btn_height = 30;
-            let lbl_height = 18;  // Space for labels above dropdowns
-
-            // Calculate ListView height to determine where progress bar goes
-            // Account for label height above action buttons
-            let list_height = height - header_height - progress_height - btn_height - lbl_height - (padding * 5);
+            let progress_height = 20; // Slightly slimmer
 
             // Cache values for potential future use
             self.x = padding;
             self.width = width - padding * 2;
 
-            // Position label at top (leave space for top-right buttons: 120px)
+            // 1. Position Label at Top (Instruction Text)
             let label_y = padding;
             SetWindowPos(
                 self.hwnd_label,
@@ -177,8 +171,12 @@ impl Component for StatusBar {
                 SWP_NOZORDER,
             );
 
-            // Position progress bar after ListView
-            let progress_y = padding + header_height + padding + list_height + padding;
+            // 2. Position Progress Bar at Bottom (Status Area)
+            // We reserved 40px in window.rs. Let's center the 20px bar in that 40px space.
+            // parent_rect is client_rect (0,0 to width,height)
+            let bottom_area_h = 40;
+            let progress_y = height - bottom_area_h + ((bottom_area_h - progress_height) / 2);
+            
             self.y = progress_y;
             SetWindowPos(
                 self.hwnd_progress,

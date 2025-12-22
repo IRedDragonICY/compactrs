@@ -27,6 +27,18 @@ pub const IDC_BTN_PAUSE: u16 = 125;
 pub const IDC_LBL_OUTPUT: u16 = 126;
 pub const IDC_LBL_RATIO: u16 = 127;
 
+// Search Panel IDs
+pub const IDC_SEARCH_EDIT: u16 = 130;
+pub const IDC_COMBO_FILTER_COL: u16 = 131;
+pub const IDC_COMBO_FILTER_ALGO: u16 = 132;
+pub const IDC_COMBO_FILTER_SIZE: u16 = 133;
+pub const IDC_CHK_CASE: u16 = 134;
+pub const IDC_CHK_REGEX: u16 = 135;
+pub const IDC_LBL_RESULTS: u16 = 136;
+pub const IDC_LBL_FILTER_BY: u16 = 137;
+pub const IDC_LBL_FILTER_ALGO: u16 = 138;
+pub const IDC_LBL_SIZE: u16 = 139;
+
 // Helper untuk update tema dinamis (digunakan saat switch theme)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
     theme::apply_theme(hwnd, ControlType::Button, is_dark);
@@ -34,6 +46,14 @@ pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {
 
 pub unsafe fn apply_combobox_theme(hwnd: HWND, is_dark: bool) {
     theme::apply_theme(hwnd, ControlType::ComboBox, is_dark);
+}
+
+pub unsafe fn apply_checkbox_theme(hwnd: HWND, is_dark: bool) {
+    theme::apply_theme(hwnd, ControlType::CheckBox, is_dark);
+}
+
+pub unsafe fn apply_edit_theme(hwnd: HWND, is_dark: bool) {
+    theme::apply_theme(hwnd, ControlType::Edit, is_dark);
 }
 
 /// Applies Windows 11 Fluent blue accent styling to a button.

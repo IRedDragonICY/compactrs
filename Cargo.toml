@@ -1,6 +1,6 @@
 [package]
 name = "compactrs"
-version = "2025.12.21"
+version = "2025.12.22"
 rust-version = "1.94.0"
 edition = "2024"
 authors = ["Mohammad Farid Hendianto (IRedDragonICY)"]
