@@ -875,8 +875,8 @@ impl AppState {
                                      ctrls.file_list.update_item_text(row, 6, &size_str);
                                  }
                                  
-                                 // Clear Start Button Text
-                                 ctrls.file_list.update_item_text(row, 10, w!("")); // Clear start column text
+                                 // Show Start Button again for reprocessing
+                                 ctrls.file_list.update_item_text(row, 10, &crate::utils::to_wstring("▶"));
                              }
                          }
 
@@ -909,7 +909,7 @@ impl AppState {
                                      };
                                      ctrls.file_list.update_item_text(row, 1, state_str);
                                      
-                                     ctrls.file_list.update_item_text(row, 10, w!("")); 
+                                     // Start button text already set above
                                  }
                              }
                          }
