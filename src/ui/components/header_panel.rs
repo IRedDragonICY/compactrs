@@ -7,14 +7,12 @@
 
 use windows_sys::Win32::Foundation::{HWND, RECT};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SetWindowPos, SWP_NOZORDER,
-};
 use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
-use crate::ui::builder::ButtonBuilder;
+use crate::ui::builder::ControlBuilder;
 use crate::ui::controls::apply_button_theme;
+use crate::ui::layout::{layout_horizontal, LayoutItem, SizePolicy};
 
 const ICON_SETTINGS: &[u16] = &[0xE713, 0]; // Settings
 const ICON_KEYBOARD: &[u16] = &[0xE765, 0]; // Keyboard
@@ -114,31 +112,31 @@ impl Component for HeaderPanel {
 
             // Initial positions (will be updated in on_resize)
             // These are just placeholders - real positions set in on_resize
-            self.hwnd_settings = ButtonBuilder::new(parent, self.ids.btn_settings)
+            self.hwnd_settings = ControlBuilder::new(parent, self.ids.btn_settings)
                 .text_w(ICON_SETTINGS)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_about = ButtonBuilder::new(parent, self.ids.btn_about)
+            self.hwnd_about = ControlBuilder::new(parent, self.ids.btn_about)
                 .text_w(ICON_ABOUT)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_shortcuts = ButtonBuilder::new(parent, self.ids.btn_shortcuts)
+            self.hwnd_shortcuts = ControlBuilder::new(parent, self.ids.btn_shortcuts)
                 .text_w(ICON_KEYBOARD)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_console = ButtonBuilder::new(parent, self.ids.btn_console)
+            self.hwnd_console = ControlBuilder::new(parent, self.ids.btn_console)
                 .text_w(ICON_CONSOLE)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_watcher = ButtonBuilder::new(parent, self.ids.btn_watcher)
+            self.hwnd_watcher = ControlBuilder::new(parent, self.ids.btn_watcher)
                 .text_w(ICON_WATCHER)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
@@ -155,66 +153,61 @@ impl Component for HeaderPanel {
 
     unsafe fn on_resize(&mut self, parent_rect: &RECT) {
         unsafe {
-            let width = parent_rect.right - parent_rect.left;
-
+             // Parent rect provides everything needed.
+            
             let padding = 10;
-            let btn_width = 30;
-            let header_height = 25;
-
-            // Position Settings button (Rightmost)
-            SetWindowPos(
-                self.hwnd_settings,
-                std::ptr::null_mut(),
-                width - padding - btn_width,
-                padding,
-                btn_width,
-                header_height,
-                SWP_NOZORDER,
-            );
-
-            // Position About button (Left of Settings)
-            SetWindowPos(
-                self.hwnd_about,
-                std::ptr::null_mut(),
-                width - padding - btn_width - 35,
-                padding,
-                btn_width,
-                header_height,
-                SWP_NOZORDER,
-            );
-
-            // Position Shortcuts button (Left of About)
-            SetWindowPos(
-                self.hwnd_shortcuts,
-                std::ptr::null_mut(),
-                width - padding - btn_width - 70,
-                padding,
-                btn_width,
-                header_height,
-                SWP_NOZORDER,
-            );
-
-            // Position Console button (Left of Shortcuts)
-            SetWindowPos(
-                self.hwnd_console,
-                std::ptr::null_mut(),
-                width - padding - btn_width - 105,
-                padding,
-                btn_width,
-                header_height,
-                SWP_NOZORDER,
-            );
-
-            // Position Watcher button (Left of Console)
-            SetWindowPos(
-                self.hwnd_watcher,
-                std::ptr::null_mut(),
-                width - padding - btn_width - 140,
-                padding,
-                btn_width,
-                header_height,
-                SWP_NOZORDER,
-            );
+            // Header height is 25? Based on button size (30x25).
+            // Let's rely on layout implementation.
+            
+            // Visual Order (Right -> Left): Settings, About, Shortcuts, Console, Watcher.
+            // layout_horizontal is Left -> Right.
+            // So: [Spacer] [Watcher] [Console] [Shortcuts] [About] [Settings]
+            
+            // Current manual code:
+            // Settings: right - pad - btn
+            // About: right - pad - btn - 35 (so 5px gap)
+            
+            // Layout Items:
+            // Spacer: Flex(1.0)
+            // Watcher: Fixed(30)
+            // Console: Fixed(30)
+            // Shortcuts: Fixed(30)
+            // About: Fixed(30)
+            // Settings: Fixed(30)
+            
+            // Gap should be 5.
+            
+            let items = [
+                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Flex(1.0) },
+                LayoutItem { hwnd: self.hwnd_watcher, policy: SizePolicy::Fixed(30) },
+                LayoutItem { hwnd: self.hwnd_console, policy: SizePolicy::Fixed(30) },
+                LayoutItem { hwnd: self.hwnd_shortcuts, policy: SizePolicy::Fixed(30) },
+                LayoutItem { hwnd: self.hwnd_about, policy: SizePolicy::Fixed(30) },
+                LayoutItem { hwnd: self.hwnd_settings, policy: SizePolicy::Fixed(30) },
+            ];
+            
+            // The existing code uses a `header_height` of 25.
+            // layout_horizontal stretches items to fill height (height - padding*2).
+            // If parent_rect height is large (e.g. whole window?), we shouldn't pass entire parent_rect.
+            // HeaderPanel creates buttons with size(30, 25).
+            // Let's assume we want a fixed height strip at the top.
+            // Previous code used `header_height = 25` and `padding = 10`.
+            // So top y = padding = 10. height = 25.
+            
+            let rect_h = 25 + (padding * 2); 
+            let layout_rect = RECT {
+                left: parent_rect.left,
+                top: parent_rect.top, // Relative or Absolute? 
+                // parent_rect comes from window.rs
+                // In window.rs, HeaderPanel is created.
+                // window.rs calls `header_panel.on_resize(&client_rect)`.
+                // client_rect usually starts at (0,0).
+                
+                right: parent_rect.right,
+                bottom: parent_rect.top + rect_h,
+            };
+            
+            layout_horizontal(&layout_rect, &items, padding, 5);
         }
     }
 

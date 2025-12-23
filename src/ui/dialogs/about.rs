@@ -105,66 +105,65 @@ impl WindowHandler for AboutState {
             // Set the icon image
             SendMessageW(icon_static, STM_SETICON, hicon as WPARAM, 0);
 
-            // Use LayoutBuilder for text content
+            // Use simple local variables for text content layout
             // Start below icon (20 + 128 = 148). Let's start at 160.
             let content_width = 410; // Wider content area
-            let margin = (client_width - content_width) / 2; // Auto-center content column
-            let mut layout = crate::ui::layout::LayoutColumn::new(margin, 160, content_width, 5);
+            let x_start = (client_width - content_width) / 2; // Auto-center content column
+            let mut current_y = 160;
 
             // App Name - Large bold title using ControlBuilder
-            let (x, y, w, h) = layout.row(40);
+            let h_title = 40;
             let _app_name = ControlBuilder::new(hwnd, 0)
                 .label(true) // center-aligned
                 .text_w(w!("CompactRS"))
-                .pos(x, y)
-                .size(w, h)
+                .pos(x_start, current_y)
+                .size(content_width, h_title)
                 .font(title_font)
                 .dark_mode(self.is_dark)
                 .build();
+            current_y += h_title + 20; // Extra spacing after title
 
             // Version - Lighter font using ControlBuilder
+            let h_ver = 20;
             let ver_string = format!("Version {}", env!("APP_VERSION"));
-            let (x, y, w, h) = layout.row(20);
             let _version = ControlBuilder::new(hwnd, 0)
                 .label(true)
                 .text(&ver_string)
-                .pos(x, y)
-                .size(w, h)
+                .pos(x_start, current_y)
+                .size(content_width, h_ver)
                 .font(version_font)
                 .dark_mode(self.is_dark)
                 .build();
-            
-            layout.add_space(10);
+            current_y += h_ver + 10; // Space
 
             // Description - Regular body text using ControlBuilder
-            let (x, y, w, h) = layout.row(130);
+            let h_desc = 130;
             let _desc = ControlBuilder::new(hwnd, 0)
                 .label(true)
                 .text_w(w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."))
-                .pos(x, y)
-                .size(w, h)
+                .pos(x_start, current_y)
+                .size(content_width, h_desc)
                 .font(body_font)
                 .dark_mode(self.is_dark)
                 .build();
-            
-            layout.add_space(10);
+            current_y += h_desc + 10;
 
             // Created by - Italic style using ControlBuilder
-            let (x, y, w, h) = layout.row(40);
+            let h_creator = 40;
             let _creator = ControlBuilder::new(hwnd, 0)
                 .label(true)
                 .text_w(w!("Created by IRedDragonICY\n(Mohammad Farid Hendianto)"))
-                .pos(x, y)
-                .size(w, h)
+                .pos(x_start, current_y)
+                .size(content_width, h_creator)
                 .font(creator_font)
                 .dark_mode(self.is_dark)
                 .build();
+            current_y += h_creator + 20;
 
             // Modern Action Buttons (Centered Row)
-            layout.add_space(20);
             
             // Allocate row for buttons (Height 40)
-            let (_, y_btn, _, _) = layout.row(40);
+            let y_btn = current_y;
             
             // Calculate center position for two button groups
             // Group width = 60 (Button) + 10 (Space) + 60 (Button) = 130

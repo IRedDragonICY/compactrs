@@ -14,7 +14,7 @@ use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
 use crate::ui::controls::{apply_combobox_theme, apply_checkbox_theme, apply_edit_theme};
-use crate::ui::layout::{LayoutRow};
+use crate::ui::layout::{layout_horizontal, LayoutItem, SizePolicy};
 use crate::w;
 
 /// Configuration for SearchPanel control IDs.
@@ -245,36 +245,46 @@ impl Component for SearchPanel {
             // "Found X Items" takes ~150px on the right.
             let label_w = 200; // ample space for text
             let gap = 10;
-            let search_w = width - (padding * 2) - label_w - gap;
             
-            SetWindowPos(self.hwnd_search, std::ptr::null_mut(), padding, padding, search_w, 28, SWP_NOZORDER);
+            let row1_rect = RECT {
+                left: 0, 
+                top: 0, // layout starts at top+padding, so 0+10 = 10 (Correct)
+                right: width,
+                bottom: 28 + (padding * 2), // 28 content + 20 padding = 48
+            };
             
-            // Center label vertically relative to search box (28px height)
-            // Label is usually ~20px high text.
-            let label_y = padding + 4; 
-            SetWindowPos(self.hwnd_lbl_results, std::ptr::null_mut(), padding + search_w + gap, label_y, label_w, 20, SWP_NOZORDER);
+            let row1_items = [
+                LayoutItem { hwnd: self.hwnd_search, policy: SizePolicy::Flex(1.0) },
+                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Fixed(gap) },
+                LayoutItem { hwnd: self.hwnd_lbl_results, policy: SizePolicy::Fixed(label_w) },
+            ];
             
+            layout_horizontal(&row1_rect, &row1_items, padding, 0);
+
+
             // Row 2: Filter Controls
-            let row2_y = padding + row_h + 5;
+            let row2_y = padding + row_h + 5; 
             
-            // Using LayoutRow for easy positioning
-            let mut row = LayoutRow::new(padding, row2_y, 24, 10);
+            // Row 2 Rect
+            // We want content at row2_y.
+            // layout starts at top + padding.
+            // so top = row2_y - padding.
+            let r2_top = row2_y - padding;
+            let r2_height = 24 + (padding * 2); // 24 height + padding
+            let r2_rect = RECT { left: 0, top: r2_top, right: width, bottom: r2_top + r2_height };
             
-            // "Filter By:" Label + Combo
-            row.add_fixed(self.hwnd_lbl_filter_by, 60);
-            row.add_fixed(self.hwnd_combo_filter_col, 100);
+            let row2_items = [
+                 LayoutItem { hwnd: self.hwnd_lbl_filter_by, policy: SizePolicy::Fixed(60) },
+                 LayoutItem { hwnd: self.hwnd_combo_filter_col, policy: SizePolicy::Fixed(100) },
+                 LayoutItem { hwnd: self.hwnd_lbl_algo, policy: SizePolicy::Fixed(65) },
+                 LayoutItem { hwnd: self.hwnd_combo_algo, policy: SizePolicy::Fixed(90) },
+                 LayoutItem { hwnd: self.hwnd_lbl_size, policy: SizePolicy::Fixed(35) },
+                 LayoutItem { hwnd: self.hwnd_combo_size, policy: SizePolicy::Fixed(90) },
+                 LayoutItem { hwnd: self.hwnd_chk_case, policy: SizePolicy::Fixed(110) },
+                 LayoutItem { hwnd: self.hwnd_chk_regex, policy: SizePolicy::Fixed(70) },
+            ];
             
-            // "Algorithm:" Label + Combo
-            row.add_fixed(self.hwnd_lbl_algo, 65);
-            row.add_fixed(self.hwnd_combo_algo, 90);
-            
-            // "Size:" Label + Combo
-            row.add_fixed(self.hwnd_lbl_size, 35);
-            row.add_fixed(self.hwnd_combo_size, 90);
-            
-            // Toggles
-            row.add_fixed(self.hwnd_chk_case, 110);
-            row.add_fixed(self.hwnd_chk_regex, 70);
+            layout_horizontal(&r2_rect, &row2_items, padding, 10);
         }
     }
 

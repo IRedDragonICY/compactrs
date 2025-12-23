@@ -1,6 +1,6 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::controls::apply_button_theme;
-use crate::ui::builder::ButtonBuilder;
+use crate::ui::builder::ControlBuilder;
 use crate::ui::framework::{get_window_state, WindowHandler, WindowBuilder, WindowAlignment};
 use crate::utils::to_wstring;
 use crate::logger::LogEntry;
@@ -213,11 +213,11 @@ impl WindowHandler for ConsoleState {
              self.edit_hwnd = Some(edit);
              
              // Create Buttons
-             let btn_copy = ButtonBuilder::new(hwnd, IDC_BTN_COPY as u16)
+             let btn_copy = ControlBuilder::new(hwnd, IDC_BTN_COPY as u16)
                  .text_w(w!("Copy")).pos(0, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
              self.btn_copy_hwnd = Some(btn_copy);
              
-             let btn_clear = ButtonBuilder::new(hwnd, IDC_BTN_CLEAR as u16)
+             let btn_clear = ControlBuilder::new(hwnd, IDC_BTN_CLEAR as u16)
                  .text_w(w!("Clear")).pos(90, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
              self.btn_clear_hwnd = Some(btn_clear);
              

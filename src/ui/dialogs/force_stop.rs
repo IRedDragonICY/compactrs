@@ -1,4 +1,4 @@
-use crate::ui::builder::ButtonBuilder;
+use crate::ui::builder::ControlBuilder;
 use crate::ui::theme;
 use crate::ui::framework::get_window_state;
 use crate::utils::to_wstring;
@@ -133,12 +133,12 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                 );
                 
                 // Yes Button
-                ButtonBuilder::new(hwnd, IDC_BTN_YES)
+                ControlBuilder::new(hwnd, IDC_BTN_YES)
                     .text_w(w!("Force Stop (Yes)")).pos(40, 90).size(130, 32).dark_mode(is_dark).build();
                 
                 // No Button with Timer
                 let no_text = "Cancel (".to_string() + &st.seconds_left.to_string() + ")";
-                ButtonBuilder::new(hwnd, IDC_BTN_NO)
+                ControlBuilder::new(hwnd, IDC_BTN_NO)
                     .text(&no_text).pos(190, 90).size(130, 32).dark_mode(is_dark).build();
                 
                 // Start Timer

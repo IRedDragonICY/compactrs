@@ -178,4 +178,3 @@ impl ControlBuilder {
     }
 }
 
-pub type ButtonBuilder = ControlBuilder;

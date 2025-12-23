@@ -1,123 +1,139 @@
-use windows_sys::Win32::Foundation::HWND;
-use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER};
+use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER, HWND_TOP};
 
-/// A zero-cost immediate mode layout helper.
-///
-/// Designed to eliminate manual pixel calculations in `on_resize`.
-/// Optimized for horizontal bars (like ActionPanel).
-pub struct LayoutRow {
-    y: i32,
-    height: i32,
-    padding: i32,
-    current_x: i32,
+#[derive(Clone, Copy)]
+pub enum SizePolicy {
+    Fixed(i32),      // Exact pixel width/height
+    Flex(f32),       // Proportional weight (e.g., 1.0, 2.0) to fill remaining space
 }
 
-impl LayoutRow {
-    /// Starts a new horizontal layout row.
-    pub fn new(x: i32, y: i32, height: i32, padding: i32) -> Self {
-        Self {
-            y,
-            height,
-            padding,
-            current_x: x,
-        }
-    }
+pub struct LayoutItem {
+    pub hwnd: HWND,
+    pub policy: SizePolicy,
+}
 
-    /// Extends the layout from the right side (Right-to-Left), useful for "Cancel/Ok" buttons.
-    pub fn new_rtl(right: i32, y: i32, height: i32, padding: i32) -> Self {
-        Self {
-            y,
-            height,
-            padding,
-            current_x: right,
-        }
-    }
+/// Lays out items horizontally within the given parent rectangle.
+/// 
+/// * `parent_rect`: The bounds to layout within.
+/// * `items`: List of items to position.
+/// * `padding`: Inner padding from the edges of rect.
+/// * `gap`: Horizontal spacing between items.
+pub unsafe fn layout_horizontal(parent_rect: &RECT, items: &[LayoutItem], padding: i32, gap: i32) {
+    if items.is_empty() { return; }
 
-    /// Adds a fixed-width control to the layout (Left-to-Right).
-    pub unsafe fn add_fixed(&mut self, hwnd: HWND, width: i32) {
-        if hwnd.is_null() { return; }
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                std::ptr::null_mut(),
-                self.current_x,
-                self.y,
-                width,
-                self.height,
-                SWP_NOZORDER,
-            );
-        }
-        self.current_x += width + self.padding;
-    }
-
-    /// Adds a fixed-width control to the layout (Right-to-Left).
-    /// `self.current_x` acts as the right edge.
-    pub unsafe fn add_fixed_rtl(&mut self, hwnd: HWND, width: i32) {
-        if hwnd.is_null() { return; }
-        let left = self.current_x - width;
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                std::ptr::null_mut(),
-                left,
-                self.y,
-                width,
-                self.height,
-                SWP_NOZORDER,
-            );
-        }
-        self.current_x = left - self.padding;
-    }
-
-    /// Positions a label above the current slot (helper for ActionPanel labels).
-    pub unsafe fn add_label_above(&self, hwnd: HWND, width: i32, label_height: i32, offset_y: i32) {
-        if hwnd.is_null() { return; }
-        // Center-ish or left aligned to the current slot?
-        // ActionPanel uses: label is at the same X as the control below it.
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                std::ptr::null_mut(),
-                self.current_x,
-                self.y + offset_y,
-                width,
-                label_height,
-                SWP_NOZORDER,
-            );
-        }
-    }
+    let width = parent_rect.right - parent_rect.left;
+    let height = parent_rect.bottom - parent_rect.top;
     
-    /// Returns the current X position.
-    pub fn cursor(&self) -> i32 {
-        self.current_x
+    // Content area
+    let avail_width = width - (padding * 2);
+    let start_x = parent_rect.left + padding;
+    let start_y = parent_rect.top + padding;
+    let item_height = height - (padding * 2);
+
+    // Pass 1: Calculate usage
+    let mut total_fixed = 0;
+    let mut total_flex = 0.0;
+    
+    // Gaps sum: (n-1) * gap
+    // Use safe math to avoid underflow if items.len() is 0
+    let total_gaps = if items.len() > 1 { (items.len() as i32 - 1) * gap } else { 0 };
+
+    for item in items {
+        match item.policy {
+            SizePolicy::Fixed(w) => total_fixed += w,
+            SizePolicy::Flex(w) => total_flex += w,
+        }
+    }
+
+    let remaining_space = avail_width - total_fixed - total_gaps;
+    let flex_unit = if total_flex > 0.0 {
+        remaining_space as f32 / total_flex
+    } else {
+        0.0
+    };
+
+    // Pass 2: Layout
+    let mut current_x = start_x;
+
+    for item in items {
+        let w = match item.policy {
+            SizePolicy::Fixed(val) => val,
+            SizePolicy::Flex(weight) => (weight * flex_unit) as i32,
+        };
+
+        // If hwnd is valid (non-zero), position it. 
+        // 0/null HWNDs are treated as spacers.
+        if item.hwnd != std::ptr::null_mut() {
+             unsafe {
+                SetWindowPos(
+                    item.hwnd,
+                    HWND_TOP, 
+                    current_x,
+                    start_y,
+                    w,
+                    item_height,
+                    SWP_NOZORDER,
+                );
+             }
+        }
+
+        current_x += w + gap;
     }
 }
 
-/// A zero-cost immediate mode vertical layout helper.
-///
-/// Designed to satisfy `about.rs` vertical stacking needs.
-pub struct LayoutColumn {
-    x: i32,
-    y: i32,
-    width: i32,
-    padding: i32,
+/// Lays out items vertically within the given parent rectangle.
+pub unsafe fn layout_vertical(parent_rect: &RECT, items: &[LayoutItem], padding: i32, gap: i32) {
+    if items.is_empty() { return; }
+
+    let width = parent_rect.right - parent_rect.left;
+    let height = parent_rect.bottom - parent_rect.top;
+    
+    let avail_height = height - (padding * 2);
+    let start_x = parent_rect.left + padding;
+    let start_y = parent_rect.top + padding;
+    let item_width = width - (padding * 2);
+
+    let mut total_fixed = 0;
+    let mut total_flex = 0.0;
+    let total_gaps = if items.len() > 1 { (items.len() as i32 - 1) * gap } else { 0 };
+
+    for item in items {
+        match item.policy {
+            SizePolicy::Fixed(h) => total_fixed += h,
+            SizePolicy::Flex(h) => total_flex += h,
+        }
+    }
+
+    let remaining_space = avail_height - total_fixed - total_gaps;
+    let flex_unit = if total_flex > 0.0 {
+        remaining_space as f32 / total_flex
+    } else {
+        0.0
+    };
+
+    let mut current_y = start_y;
+
+    for item in items {
+        let h = match item.policy {
+            SizePolicy::Fixed(val) => val,
+            SizePolicy::Flex(weight) => (weight * flex_unit) as i32,
+        };
+
+        if item.hwnd != std::ptr::null_mut() {
+             unsafe {
+                SetWindowPos(
+                    item.hwnd,
+                    HWND_TOP,
+                    start_x,
+                    current_y,
+                    item_width,
+                    h,
+                    SWP_NOZORDER,
+                );
+             }
+        }
+        current_y += h + gap;
+    }
 }
 
-impl LayoutColumn {
-    pub fn new(x: i32, y: i32, width: i32, padding: i32) -> Self {
-        Self { x, y, width, padding }
-    }
 
-    /// Allocates a new row of the given height.
-    /// Returns (x, y, width, height).
-    pub fn row(&mut self, height: i32) -> (i32, i32, i32, i32) {
-        let y = self.y;
-        self.y += height + self.padding;
-        (self.x, y, self.width, height)
-    }
-
-    /// Adds vertical spacing.
-    pub fn add_space(&mut self, space: i32) {
-        self.y += space;
-    }
-}

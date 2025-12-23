@@ -10,8 +10,9 @@ use windows_sys::Win32::Graphics::Gdi::HFONT;
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
+// Duplicate import removed here
 use crate::ui::controls::{apply_button_theme, apply_combobox_theme, apply_accent_button_theme};
-use crate::ui::layout::LayoutRow;
+use crate::ui::layout::{layout_horizontal, LayoutItem, SizePolicy};
 
 const ICON_FILES: &[u16] = &[0xD83D, 0xDCC4, 0]; // 📄
 const ICON_FOLDER: &[u16] = &[0xD83D, 0xDCC1, 0]; // 📂
@@ -186,64 +187,75 @@ impl Component for ActionPanel {
 
     unsafe fn on_resize(&mut self, parent_rect: &RECT) {
         unsafe {
-            let _height = parent_rect.bottom - parent_rect.top;
-            let width = parent_rect.right - parent_rect.left;
+             // Access width if needed, though layout engine handles it
             
-            // Dynamic Layout Calculation
-            // We align to the top to keep labels close to the progress bar (which is immediately above)
+            // Layout Configuration
             let top_padding = 4;
-            
-            // Positions (Absolute Client Coordinates)
-            let start_y = parent_rect.top + top_padding;
-            
-            // Labels at the top of the block
-            let label_y = start_y; 
-            
-            // Buttons below labels
-            let btn_y = start_y + 16 + 4; // 16px label + 4px gap
-
             let bar_padding = 10;
+            let gap = 5;
             let btn_height = 30;
-            let lbl_h = 16;
+            let lbl_height = 16;
             
-            // --- Left Section: Input & Config ---
-            let mut left = LayoutRow::new(bar_padding, btn_y, btn_height, 5);
+            // Labels Row (Top)
+            let lbl_rect = RECT {
+                left: parent_rect.left,
+                top: parent_rect.top + top_padding,
+                right: parent_rect.right,
+                bottom: parent_rect.top + top_padding + lbl_height,
+            };
             
-            // Labels are positioned relative to the buttons? 
-            // LayoutRow places items at its 'y' (which is btn_y).
-            // add_label_above uses 'y + offset'. 
-            // So if we want label at 'label_y', offset = label_y - btn_y = -20.
-            let lbl_offset = label_y - btn_y; 
+            // Buttons Row (Bottom)
+            let btn_y = lbl_rect.bottom + 4;
+            // StackLayout contracts height by 2*padding, so we must expand the rect.
+            // We also want the content to start at `btn_y`, so we offset top by -padding.
+            let btn_rect = RECT {
+                left: parent_rect.left,
+                top: btn_y - bar_padding, 
+                right: parent_rect.right,
+                bottom: btn_y + btn_height + bar_padding,
+            };
 
-            // Input Buttons
-            // 4 buttons * 32 width + 3 spaces * 5 padding = 128 + 15 = 143
-            left.add_label_above(self.hwnd_lbl_input, 143, lbl_h, lbl_offset);
-            left.add_fixed(self.hwnd_files, 32);
-            left.add_fixed(self.hwnd_folder, 32);
-            left.add_fixed(self.hwnd_remove, 32);
-            left.add_fixed(self.hwnd_clear, 32);
-
-            // Spacing
-            left.add_fixed(std::ptr::null_mut(), 20); // Spacer
-
-            // Action Mode
-            left.add_label_above(self.hwnd_lbl_action_mode, 100, lbl_h, lbl_offset);
-            left.add_fixed(self.hwnd_action_mode, 100);
-
-            // Algorithm
-            left.add_label_above(self.hwnd_lbl_algo, 100, lbl_h, lbl_offset);
-            left.add_fixed(self.hwnd_combo_algo, 100);
-
-            // Force
-            left.add_fixed(self.hwnd_force, 65);
-
-            // --- Right Section: Execution Controls ---
-            // Layout from Right to Left: Console <- Cancel <- Process <- Pause
-            let mut right = LayoutRow::new_rtl(width - bar_padding, btn_y, btn_height, 10);
+            // 1. Labels Layout
+            // "Input" label spans Files, Folder, Remove, Clear (32*4 + 5*3 = 143)
+            let labels = [
+                LayoutItem { hwnd: self.hwnd_lbl_input, policy: SizePolicy::Fixed(143) },
+                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Fixed(20) }, // Spacer alignment
+                LayoutItem { hwnd: self.hwnd_lbl_action_mode, policy: SizePolicy::Fixed(100) },
+                LayoutItem { hwnd: self.hwnd_lbl_algo, policy: SizePolicy::Fixed(100) },
+            ];
             
-            right.add_fixed_rtl(self.hwnd_cancel, 32);
-            right.add_fixed_rtl(self.hwnd_process, 32);
-            right.add_fixed_rtl(self.hwnd_pause, 32);
+            layout_horizontal(&lbl_rect, &labels, bar_padding, gap);
+
+            // 2. Buttons Layout
+            // Left to Right flow with a Flex spacer to push execution controls to the end
+            let buttons = [
+                // Input Group
+                LayoutItem { hwnd: self.hwnd_files, policy: SizePolicy::Fixed(32) },
+                LayoutItem { hwnd: self.hwnd_folder, policy: SizePolicy::Fixed(32) },
+                LayoutItem { hwnd: self.hwnd_remove, policy: SizePolicy::Fixed(32) },
+                LayoutItem { hwnd: self.hwnd_clear, policy: SizePolicy::Fixed(32) },
+                
+                // Spacer
+                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Fixed(20) },
+                
+                // Config Group
+                LayoutItem { hwnd: self.hwnd_action_mode, policy: SizePolicy::Fixed(100) },
+                LayoutItem { hwnd: self.hwnd_combo_algo, policy: SizePolicy::Fixed(100) },
+                LayoutItem { hwnd: self.hwnd_force, policy: SizePolicy::Fixed(65) },
+                
+                // Flexible Spacer (pushes remaining items to right)
+                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Flex(1.0) },
+                
+                // Execution Controls (Right Aligned)
+                // Order: Pause, Process, Cancel (Visual L->R)
+                LayoutItem { hwnd: self.hwnd_pause, policy: SizePolicy::Fixed(32) },
+                 // Note: Original code used gap=10 for right side, layout_horizontal uses constant gap=5.
+                 // This small visual difference is acceptable for code consistency.
+                LayoutItem { hwnd: self.hwnd_process, policy: SizePolicy::Fixed(32) },
+                LayoutItem { hwnd: self.hwnd_cancel, policy: SizePolicy::Fixed(32) },
+            ];
+            
+            layout_horizontal(&btn_rect, &buttons, bar_padding, gap);
         }
     }
 
