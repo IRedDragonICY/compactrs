@@ -72,7 +72,9 @@ pub unsafe fn on_remove_selected(st: &mut AppState) {
 }
 
 pub unsafe fn on_clear_all(st: &mut AppState) {
-    if st.batch_items.is_empty() { return; }
+    // Note: Do not early return if batch_items is empty, 
+    // because user might just want to clear logs/lock state.
+
     
     st.clear_batch();
     st.next_item_id = 1;
@@ -87,6 +89,16 @@ pub unsafe fn on_clear_all(st: &mut AppState) {
     // Reset Lock Dialog State
     st.active_lock_dialog = None;
     st.ignored_lock_processes.clear();
+    
+    // Clear Global Logs
+    st.logs.clear();
+    
+    // Clear Console Window if open (Send IDC_BTN_CLEAR = 1003)
+    if let Some(hwnd) = st.console_hwnd {
+        use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::WM_COMMAND;
+        SendMessageW(hwnd, WM_COMMAND, 1003, 0); 
+    }
     
     update_process_button_state(st);
 }

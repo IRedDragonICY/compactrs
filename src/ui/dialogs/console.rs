@@ -289,6 +289,11 @@ impl WindowHandler for ConsoleState {
                             // Clear history and edit
                             self.history.clear();
                             self.pending.clear();
+                            
+                            // CRITICAL: Clear global app logs too, otherwise reopening console will restore them!
+                            let app_state = &mut *self.parent_state;
+                            app_state.logs.clear();
+                            
                             if let Some(edit) = self.edit_hwnd {
                                 let empty = w!("");
                                 SetWindowTextW(edit, empty.as_ptr());

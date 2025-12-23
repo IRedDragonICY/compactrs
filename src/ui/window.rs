@@ -946,9 +946,14 @@ impl AppState {
                      
                      // Layout Constants
                      let header_h = 50;
-                     let search_h = 135; // Increased slightly for spacing
-                     let action_h = 80;  // Accommodate controls
-                     let status_h = 40;  // Increased to prevent overlap
+                     // Reduced height for 2-row layout (Search/Results + Filters)
+                     let search_h = 85; 
+                     
+                     // Dynamic Action Panel Height calculation
+                     // Top Padding (4) + Label (16) + Gap (4) + Button (30) + Bottom Padding (6) = 60
+                     let action_h = 60;  
+                     
+                     let status_h = 22;  // Reduced to 22 (tight fit for 20px bar)
                      let padding = 10;
                      
                      // 1. Header Rect (Top Strip)
@@ -967,22 +972,33 @@ impl AppState {
                         bottom: header_rect.bottom + search_h
                      };
                      
-                     // 3. Action Rect (Bottom Strip, above Status)
+                     // 3. Action Rect (Bottom Strip)
                      // Calculate tops from bottom up
-                     let status_top = height - status_h;
-                     let action_top = status_top - action_h;
+                     // Status is now ABOVE Action, below List.
                      
+                     let action_top = height - action_h;
                      let action_rect = RECT {
                         left: client_rect.left,
-                        top: action_top,
+                        top: client_rect.top + action_top, // Absolute Y
                         right: client_rect.right,
-                        bottom: status_top
+                        bottom: client_rect.top + height
+                     };
+
+                     // 4. Status Rect (Above Action)
+                     // StatusBar draws label at top, progress at bottom.
+                     // We want progress bar here.
+                     let status_top = action_top - status_h;
+                     let status_rect = RECT {
+                         left: client_rect.left,
+                         top: client_rect.top + status_top,
+                         right: client_rect.right,
+                         bottom: client_rect.top + action_top
                      };
                      
-                     // 4. List Rect (Middle Fill)
-                     // Fills space between Search and Action
+                     // 5. List Rect (Middle Fill)
+                     // Fills space between Search and Status
                      let list_top = search_rect.bottom;
-                     let list_bottom = action_rect.top - padding; // Space before action panel
+                     let list_bottom = status_rect.top; // Space before status
                      
                      let list_rect = RECT {
                         left: client_rect.left + padding,
@@ -994,11 +1010,11 @@ impl AppState {
                      // Apply Layouts
                      ctrls.header_panel.on_resize(&header_rect);
                      ctrls.search_panel.on_resize(&search_rect);
-                     ctrls.file_list.on_resize(&list_rect);
-                     ctrls.action_panel.on_resize(&action_rect);
                      
-                     // Status bar handles itself (usually sticks to bottom of passed rect)
-                     ctrls.status_bar.on_resize(&client_rect);
+                     // Note: Layout order depends on intended Z-order if overlapping, usually doesn't matter for distinct rects.
+                     ctrls.file_list.on_resize(&list_rect);
+                     ctrls.status_bar.on_resize(&status_rect); // Progress bar now in middle-ish
+                     ctrls.action_panel.on_resize(&action_rect); // Controls at bottom
                 }
             }
             0

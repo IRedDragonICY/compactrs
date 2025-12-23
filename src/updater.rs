@@ -1,324 +1,172 @@
-use windows_sys::Win32::Networking::WinHttp::{
-    WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
-    WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest,
-    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_FLAG_SECURE,
-    WINHTTP_QUERY_STATUS_CODE, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_LOCATION,
-};
+//! Self-update module - Downloads and applies updates from GitHub releases.
+use windows_sys::Win32::Networking::WinHttp::*;
 use windows_sys::Win32::Foundation::GetLastError;
-use windows_sys::Win32::Storage::FileSystem::{
-    DeleteFileW, MoveFileExW, MOVEFILE_REPLACE_EXISTING,
-};
-use std::ptr;
-use std::ffi::c_void;
+use windows_sys::Win32::Storage::FileSystem::{DeleteFileW, MoveFileExW, MOVEFILE_REPLACE_EXISTING};
+use std::{ffi::c_void, io::Write, ptr};
 use crate::utils::to_wstring;
 use crate::w;
 
-fn extract_json_string<'a>(json: &'a str, key_with_quotes: &str) -> Option<&'a str> {
-    let key_idx = json.find(key_with_quotes)?;
-    let after_key = &json[key_idx + key_with_quotes.len()..];
-    let colon_idx = after_key.find(':')?; 
-    let start_quote = after_key[colon_idx..].find('"')? + colon_idx;
-    let after_start_quote = &after_key[start_quote + 1..];
-    let end_quote = after_start_quote.find('"')?;
-    Some(&after_start_quote[..end_quote])
+const GITHUB_API: &str = "https://api.github.com/repos/IRedDragonICY/compactrs/releases/latest";
+const ASSET_NAME: &str = "\"compactrs.exe\"";
+
+// --- RAII Handle ---
+
+struct Handle(*mut c_void);
+
+impl Handle {
+    #[inline]
+    fn new(h: *mut c_void) -> Option<Self> { (!h.is_null()).then_some(Self(h)) }
 }
 
-// Helper to find range of the JSON object containing a specific index
-fn find_object_range(json: &str, index: usize) -> Option<(usize, usize)> {
-    // Scan backwards for start '{'
-    let mut balance = 0;
-    let start = json[..index].char_indices().rev().find_map(|(i, c)| {
-        match c {
-            '}' => { balance += 1; None },
-            '{' => if balance == 0 { Some(i) } else { balance -= 1; None },
-            _ => None,
-        }
-    })?;
-
-    // Scan forwards for end '}'
-    let mut balance = 0;
-    let end_offset = json[index..].char_indices().find_map(|(i, c)| {
-        match c {
-            '{' => { balance += 1; None },
-            '}' => if balance == 0 { Some(i) } else { balance -= 1; None },
-            _ => None,
-        }
-    })?;
-
-    Some((start, index + end_offset + 1))
+impl Drop for Handle {
+    fn drop(&mut self) { if !self.0.is_null() { unsafe { WinHttpCloseHandle(self.0) }; } }
 }
-const WINHTTP_NO_PROXY_NAME: *const u16 = ptr::null();
-const WINHTTP_NO_PROXY_BYPASS: *const u16 = ptr::null();
-const WINHTTP_NO_REFERER: *const u16 = ptr::null();
-const WINHTTP_DEFAULT_ACCEPT_TYPES: *const *const u16 = ptr::null();
-const WINHTTP_NO_ADDITIONAL_HEADERS: *const u16 = ptr::null();
 
-// Constants
+// --- JSON Helpers ---
 
-const GITHUB_API_HOST: &str = "api.github.com";
-const REPO_OWNER: &str = "IRedDragonICY";
-const REPO_NAME: &str = "compactrs";
+fn json_str<'a>(json: &'a str, key: &str) -> Option<&'a str> {
+    let i = json.find(key)? + key.len();
+    let s = json[i..].find('"')? + i + 1;
+    let e = json[s..].find('"')? + s;
+    Some(&json[s..e])
+}
 
-// RAII Wrapper for HINTERNET
-struct WinHttpHandle(pub *mut c_void);
-
-impl WinHttpHandle {
-    fn new(handle: *mut c_void) -> Option<Self> {
-        if handle.is_null() { None } else { Some(Self(handle)) }
+fn find_asset_url(json: &str) -> Option<&str> {
+    let idx = json.find(ASSET_NAME)?;
+    // Find enclosing object braces
+    let (mut bal, mut start) = (0, 0);
+    for (i, c) in json[..idx].char_indices().rev() {
+        match c { '}' => bal += 1, '{' if bal == 0 => { start = i; break }, '{' => bal -= 1, _ => {} }
     }
-}
-
-impl Drop for WinHttpHandle {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { WinHttpCloseHandle(self.0) };
-        }
+    let (mut bal, mut end) = (0, json.len());
+    for (i, c) in json[idx..].char_indices() {
+        match c { '{' => bal += 1, '}' if bal == 0 => { end = idx + i + 1; break }, '}' => bal -= 1, _ => {} }
     }
+    json_str(&json[start..end], "\"browser_download_url\"")
 }
 
-#[derive(Debug, Clone)]
-pub struct UpdateInfo {
-    pub version: String,
-    pub download_url: String,
+// --- HTTP ---
+
+struct Request { _ses: Handle, _con: Handle, req: Handle }
+
+fn parse_url(url: &str) -> Result<(&str, &str), &'static str> {
+    let s = url.strip_prefix("https://").ok_or("Invalid URL")?;
+    Ok(s.find('/').map_or((s, "/"), |i| (&s[..i], &s[i..])))
 }
 
-// Custom struct to keep handle chain alive
-struct WinHttpRequest {
-    _session: WinHttpHandle,
-    _connect: WinHttpHandle,
-    request: WinHttpHandle,
-}
+fn http_get(url: &str) -> Result<Request, String> {
+    let ses = Handle::new(unsafe {
+        WinHttpOpen(w!("compactrs").as_ptr(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, ptr::null(), ptr::null(), 0)
+    }).ok_or_else(|| format!("WinHttpOpen: {}", unsafe { GetLastError() }))?;
 
-// --- Helpers ---
+    let mut url = url.to_string();
+    for _ in 0..5 {
+        let (host, path) = parse_url(&url).map_err(|e| e.to_string())?;
+        let host_w = to_wstring(host);
+        let path_w = to_wstring(path);
 
-// Helper to parse "https://host/path" -> ("host", "/path")
-fn parse_url(url: &str) -> Result<(String, String), String> {
-    // skip "https://"
-    let content = url.strip_prefix("https://").ok_or_else(|| format!("Invalid URL scheme: {}", url))?;
-    let slash_idx = content.find('/');
-    
-    let (host, path) = match slash_idx {
-        Some(idx) => (content[..idx].to_string(), content[idx..].to_string()),
-        None => (content.to_string(), "/".to_string()),
-    };
-    Ok((host, path))
-}
+        let con = Handle::new(unsafe { WinHttpConnect(ses.0, host_w.as_ptr(), 443, 0) })
+            .ok_or_else(|| format!("Connect: {}", unsafe { GetLastError() }))?;
+        let req = Handle::new(unsafe {
+            WinHttpOpenRequest(con.0, w!("GET").as_ptr(), path_w.as_ptr(), ptr::null(), ptr::null(), ptr::null(), WINHTTP_FLAG_SECURE)
+        }).ok_or_else(|| format!("OpenRequest: {}", unsafe { GetLastError() }))?;
 
-// Core HTTP GET logic with redirect handling
-fn perform_http_get(url: &str) -> Result<WinHttpRequest, String> {
-    const MAX_REDIRECTS: u32 = 5;
-    let mut current_url = url.to_string();
-    
-    // 1. Initialize Session (Once per operation)
-    let session_raw = unsafe {
-        WinHttpOpen(
-            w!("compactrs/updater").as_ptr(),
-            WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-            WINHTTP_NO_PROXY_NAME,
-            WINHTTP_NO_PROXY_BYPASS,
-            0,
-        )
-    };
-    let session = WinHttpHandle::new(session_raw).ok_or_else(|| format!("WinHttpOpen failed: {}", unsafe { GetLastError() }))?;
-
-    for _ in 0..=MAX_REDIRECTS {
-        let (host, path) = parse_url(&current_url)?;
-
-        // 2. Connect
-        let connect_raw = unsafe {
-            WinHttpConnect(session.0, to_wstring(&host).as_ptr(), 443, 0)
-        };
-        let connect = WinHttpHandle::new(connect_raw).ok_or_else(|| format!("WinHttpConnect failed: {}", unsafe { GetLastError() }))?;
-
-        // 3. Open Request
-        let request_raw = unsafe {
-            WinHttpOpenRequest(
-                connect.0,
-                w!("GET").as_ptr(),
-                to_wstring(&path).as_ptr(),
-                ptr::null(),
-                WINHTTP_NO_REFERER,
-                WINHTTP_DEFAULT_ACCEPT_TYPES,
-                WINHTTP_FLAG_SECURE,
-            )
-        };
-        let request = WinHttpHandle::new(request_raw).ok_or_else(|| format!("WinHttpOpenRequest failed: {}", unsafe { GetLastError() }))?;
-
-        // 4. Send Request
-        if unsafe { WinHttpSendRequest(request.0, WINHTTP_NO_ADDITIONAL_HEADERS, 0, ptr::null(), 0, 0, 0) } == 0 {
-            return Err(format!("WinHttpSendRequest failed: {}", unsafe { GetLastError() }));
+        if unsafe { WinHttpSendRequest(req.0, ptr::null(), 0, ptr::null(), 0, 0, 0) } == 0 {
+            return Err(format!("SendRequest: {}", unsafe { GetLastError() }));
+        }
+        if unsafe { WinHttpReceiveResponse(req.0, ptr::null_mut()) } == 0 {
+            return Err(format!("ReceiveResponse: {}", unsafe { GetLastError() }));
         }
 
-        // 5. Receive Response
-        if unsafe { WinHttpReceiveResponse(request.0, ptr::null_mut()) } == 0 {
-            return Err(format!("WinHttpReceiveResponse failed: {}", unsafe { GetLastError() }));
-        }
+        let mut code: u32 = 0;
+        let mut sz = 4u32;
+        unsafe { WinHttpQueryHeaders(req.0, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, ptr::null(), &mut code as *mut _ as _, &mut sz, ptr::null_mut()) };
 
-        // 6. Check Status
-        let mut status_code: u32 = 0;
-        let mut size = std::mem::size_of::<u32>() as u32;
-        unsafe {
-            WinHttpQueryHeaders(
-                request.0,
-                WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                ptr::null(),
-                &mut status_code as *mut _ as *mut c_void,
-                &mut size,
-                ptr::null_mut()
-            );
-        }
-
-        match status_code {
-            200 => {
-                // Return everything to keep handles alive
-                return Ok(WinHttpRequest {
-                    _session: session,
-                    _connect: connect,
-                    request,
-                });
-            },
+        match code {
+            200 => return Ok(Request { _ses: ses, _con: con, req }),
             301 | 302 | 307 | 308 => {
-                // Handle Redirect
-                let mut size: u32 = 0;
-                unsafe {
-                    WinHttpQueryHeaders(request.0, WINHTTP_QUERY_LOCATION, ptr::null(), ptr::null_mut(), &mut size, ptr::null_mut());
+                let mut sz = 0u32;
+                unsafe { WinHttpQueryHeaders(req.0, WINHTTP_QUERY_LOCATION, ptr::null(), ptr::null_mut(), &mut sz, ptr::null_mut()) };
+                if sz == 0 { return Err("Redirect missing Location".into()); }
+                let mut buf = vec![0u8; sz as usize];
+                if unsafe { WinHttpQueryHeaders(req.0, WINHTTP_QUERY_LOCATION, ptr::null(), buf.as_mut_ptr() as _, &mut sz, ptr::null_mut()) } == 0 {
+                    return Err("Read Location failed".into());
                 }
-                if size == 0 {
-                    return Err(format!("Redirect {} missing Location header", status_code));
-                }
-
-                let mut buffer = vec![0u8; size as usize];
-                if unsafe { WinHttpQueryHeaders(request.0, WINHTTP_QUERY_LOCATION, ptr::null(), buffer.as_mut_ptr() as *mut c_void, &mut size, ptr::null_mut()) } == 0 {
-                     return Err("Failed to read Location header".into());
-                }
-                
-                // Parse Unicode Location
-                let location_w: Vec<u16> = buffer
-                    .chunks_exact(2)
-                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
-                    .take((size / 2) as usize)
-                    .collect();
-                    
-                let new_url = String::from_utf16_lossy(&location_w).trim_matches(char::from(0)).to_string();
-                current_url = new_url;
-                // session is reused, but connect/request checks drop at end of scope.
-                // We need to NOT drop session. 
-                // But `session` var is moved into loop? No, `session` is outside.
-                // Use session.0 for connect.
-                continue; 
-            },
-            _ => return Err(format!("HTTP Request failed with status: {}", status_code)),
+                let loc: Vec<u16> = buf.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+                url = String::from_utf16_lossy(&loc).trim_matches('\0').to_string();
+            }
+            _ => return Err(format!("HTTP {}", code)),
         }
     }
-    
     Err("Too many redirects".into())
 }
 
-// Generic helper to stream response body
-fn read_data_stream<F>(request_handle: &WinHttpHandle, mut writer: F) -> Result<u64, String>
-where F: FnMut(&[u8]) -> Result<(), String>
-{
-    let mut total_bytes = 0;
-    let mut buffer = [0u8; 8192]; // Stack buffer, zero allocation
-    
+fn read_body<F: FnMut(&[u8]) -> Result<(), String>>(req: &Handle, mut f: F) -> Result<u64, String> {
+    let mut buf = [0u8; 8192];
+    let mut total = 0u64;
     loop {
-        let mut read: u32 = 0;
-        if unsafe { WinHttpReadData(request_handle.0, buffer.as_mut_ptr() as *mut c_void, buffer.len() as u32, &mut read) } == 0 {
-             return Err(format!("WinHttpReadData failed: {}", unsafe { GetLastError() }));
+        let mut n = 0u32;
+        if unsafe { WinHttpReadData(req.0, buf.as_mut_ptr() as _, buf.len() as u32, &mut n) } == 0 {
+            return Err(format!("ReadData: {}", unsafe { GetLastError() }));
         }
-        if read == 0 { break; }
-        
-        writer(&buffer[..read as usize])?;
-        total_bytes += read as u64;
+        if n == 0 { break; }
+        f(&buf[..n as usize])?;
+        total += n as u64;
     }
-    Ok(total_bytes)
+    Ok(total)
 }
 
-// --- Public APIs ---
+// --- Public API ---
+
+#[derive(Debug, Clone)]
+pub struct UpdateInfo { pub version: String, pub download_url: String }
 
 pub fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
-    // Construct GitHub API URL
-    let url = format!("https://{}/repos/{}/{}/releases/latest", GITHUB_API_HOST, REPO_OWNER, REPO_NAME);
-    let req = perform_http_get(&url)?;
-    
-    // Read Body to memory
+    let req = http_get(GITHUB_API)?;
     let mut body = Vec::new();
-    read_data_stream(&req.request, |chunk| {
-        body.extend_from_slice(chunk);
-        Ok(())
-    })?;
+    read_body(&req.req, |c| { body.extend_from_slice(c); Ok(()) })?;
     
-    let json_str = String::from_utf8(body).map_err(|e| format!("Invalid UTF-8: {}", e))?;
-    
-    // Parse JSON logic (Zero-dependency string slicing)
-    let tag_name = extract_json_string(&json_str, "\"tag_name\"").ok_or("Missing tag_name")?;
-    
-    // Asset Logic: Robust search
-    let target = "\"compactrs.exe\"";
-    let download_url = json_str.match_indices(target)
-        .find_map(|(idx, _)| {
-            let (start, end) = find_object_range(&json_str, idx)?;
-            let chunk = &json_str[start..end];
-            extract_json_string(chunk, "\"browser_download_url\"")
-        })
-        .ok_or("No compactrs.exe asset found")?
-        .to_string();
+    let json = String::from_utf8(body).map_err(|e| e.to_string())?;
+    let tag = json_str(&json, "\"tag_name\"").ok_or("Missing tag_name")?;
+    let url = find_asset_url(&json).ok_or("No compactrs.exe asset")?.to_string();
 
-    let current_version = env!("APP_VERSION").trim_start_matches('v');
-    let remote_version = tag_name.trim_start_matches('v');
-    
-    if remote_version != current_version {
-         Ok(Some(UpdateInfo { version: tag_name.to_string(), download_url }))
-    } else {
-        Ok(None)
-    }
+    let cur = env!("APP_VERSION").trim_start_matches('v');
+    let rem = tag.trim_start_matches('v');
+    Ok((rem != cur).then_some(UpdateInfo { version: tag.to_string(), download_url: url }))
 }
 
 pub fn download_and_start_update(url: &str) -> Result<(), String> {
-    let req = perform_http_get(url)?;
-    
-    let temp_path = std::env::current_exe().map_err(|e| e.to_string())?.with_extension("tmp");
-    let mut file = std::fs::File::create(&temp_path).map_err(|e| e.to_string())?;
-    
-    use std::io::Write;
-    let mut first_chunk = true;
-    
-    // Download and Validate
-    let bytes_downloaded = read_data_stream(&req.request, |chunk| {
-        if first_chunk {
+    let req = http_get(url)?;
+    let tmp = std::env::current_exe().map_err(|e| e.to_string())?.with_extension("tmp");
+    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    let mut first = true;
+
+    let bytes = read_body(&req.req, |chunk| {
+        if first {
             if chunk.len() < 2 || chunk[0] != 0x4D || chunk[1] != 0x5A {
-                return Err("Invalid executable (missing MZ header)".into());
+                return Err("Invalid executable".into());
             }
-            first_chunk = false;
+            first = false;
         }
         file.write_all(chunk).map_err(|e| e.to_string())
     })?;
-    
-    if bytes_downloaded == 0 {
-        let _ = std::fs::remove_file(&temp_path);
-        return Err("Empty download".into());
-    }
-    // Explicitly drop file to flush and close handle
+
+    if bytes == 0 { let _ = std::fs::remove_file(&tmp); return Err("Empty download".into()); }
     drop(file);
 
-    // Replace Logic
-    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let old_exe = current_exe.with_extension("old");
-    
+    let cur = std::env::current_exe().map_err(|e| e.to_string())?;
+    let old = cur.with_extension("old");
+    let (cur_w, old_w, tmp_w) = (to_wstring(cur.to_str().unwrap()), to_wstring(old.to_str().unwrap()), to_wstring(tmp.to_str().unwrap()));
+
     unsafe {
-        // Clean up previous old file if any
-        let _ = DeleteFileW(to_wstring(old_exe.to_str().unwrap()).as_ptr());
-        
-        if MoveFileExW(to_wstring(current_exe.to_str().unwrap()).as_ptr(), to_wstring(old_exe.to_str().unwrap()).as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
-             return Err(format!("Failed to move current exe: {}", GetLastError()));
+        let _ = DeleteFileW(old_w.as_ptr());
+        if MoveFileExW(cur_w.as_ptr(), old_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
+            return Err(format!("Move current: {}", GetLastError()));
         }
-        
-        if MoveFileExW(to_wstring(temp_path.to_str().unwrap()).as_ptr(), to_wstring(current_exe.to_str().unwrap()).as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
-             // Rollback
-             let _ = MoveFileExW(to_wstring(old_exe.to_str().unwrap()).as_ptr(), to_wstring(current_exe.to_str().unwrap()).as_ptr(), MOVEFILE_REPLACE_EXISTING);
-             return Err(format!("Failed to replace exe: {}", GetLastError()));
+        if MoveFileExW(tmp_w.as_ptr(), cur_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
+            let _ = MoveFileExW(old_w.as_ptr(), cur_w.as_ptr(), MOVEFILE_REPLACE_EXISTING);
+            return Err(format!("Replace exe: {}", GetLastError()));
         }
     }
-    
     Ok(())
 }

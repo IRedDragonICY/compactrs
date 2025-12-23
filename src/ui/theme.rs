@@ -66,6 +66,7 @@ pub enum ControlType {
     ItemsView, // For specialized ListView themes
     Trackbar, 
     Edit,
+    ProgressBar,
 }
 
 /// Trait for components that need to react to theme changes.
@@ -114,6 +115,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::ItemsView => ("DarkMode_ItemsView", None),
             ControlType::Trackbar => ("", None), // Use default drawing but with dark background
             ControlType::Edit => ("DarkMode_Explorer", None),
+            ControlType::ProgressBar => ("", None),
         }
     } else {
         match control_type {
@@ -129,6 +131,7 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
             ControlType::ItemsView => ("Explorer", None),
             ControlType::Trackbar => ("Explorer", None),
             ControlType::Edit => ("Explorer", None),
+            ControlType::ProgressBar => ("Explorer", None),
         }
     };
 
@@ -165,6 +168,10 @@ pub unsafe fn apply_theme_recursive(parent: HWND, is_dark: bool) {
     while child != std::ptr::null_mut() {
         // Apply to child
         apply_theme_to_child(child, is_dark);
+        
+        // Recurse to children's children
+        apply_theme_recursive(child, is_dark);
+        
         child = GetWindow(child, GW_HWNDNEXT);
     }
 }
@@ -194,6 +201,10 @@ unsafe fn apply_theme_to_child(hwnd: HWND, is_dark: bool) {
          ControlType::Header
      } else if class_name == "msctls_trackbar32" {
          ControlType::Trackbar
+     } else if class_name == "edit" {
+         ControlType::Edit
+     } else if class_name == "msctls_progress32" {
+         ControlType::ProgressBar
      } else {
          return; // Unknown or ignored
      };
@@ -330,7 +341,22 @@ pub unsafe fn handle_standard_colors(
     is_dark: bool,
 ) -> Option<LRESULT> {
     match msg {
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLORDLG | WM_CTLCOLOREDIT => {
+        WM_CTLCOLOREDIT => {
+             let hdc = wparam as HDC;
+             if is_dark {
+                 use windows_sys::Win32::Graphics::Gdi::{SetBkColor};
+                 use windows_sys::Win32::Graphics::Gdi::OPAQUE;
+                 SetTextColor(hdc, COLOR_DARK_TEXT);
+                 SetBkColor(hdc, COLOR_DARK_BG); // Solid background for text
+                 SetBkMode(hdc, OPAQUE as i32);  // Ensure solid background is used
+                 Some(get_dark_brush() as LRESULT)
+             } else {
+                 SetTextColor(hdc, COLOR_LIGHT_TEXT);
+                 SetBkMode(hdc, TRANSPARENT as i32);
+                 Some(unsafe { GetStockObject(WHITE_BRUSH) } as LRESULT)
+             }
+        },
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLORDLG => {
             let hdc = wparam as HDC;
             if is_dark {
                 SetTextColor(hdc, COLOR_DARK_TEXT);

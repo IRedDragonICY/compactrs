@@ -4,12 +4,12 @@ use windows_sys::Win32::Foundation::{HWND, RECT};
 use windows_sys::Win32::Graphics::Gdi::HFONT;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_CHILD, WS_VISIBLE, WS_CLIPSIBLINGS, CreateWindowExW, SetWindowPos, SWP_NOZORDER,
-    SendMessageW, WM_SETFONT, WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, DefWindowProcW,
+    SendMessageW, WM_SETFONT, WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, DefWindowProcW,
     RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, WM_ERASEBKGND,
     SetPropW, GetPropW, RemovePropW, WM_DESTROY, WM_COMMAND,
     GetParent,
 };
-use windows_sys::Win32::Graphics::Gdi::{SetTextColor, SetBkMode, TRANSPARENT, HBRUSH, COLOR_WINDOW};
+use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
@@ -241,10 +241,18 @@ impl Component for SearchPanel {
             let padding = 10;
             let row_h = 30;
             
-            // Row 1: Search Bar (Full Width with padding)
-            // Left: Padding, Right: Padding
-            let search_w = width - (padding * 2);
+            // Row 1: Search Bar + Results Label
+            // "Found X Items" takes ~150px on the right.
+            let label_w = 200; // ample space for text
+            let gap = 10;
+            let search_w = width - (padding * 2) - label_w - gap;
+            
             SetWindowPos(self.hwnd_search, std::ptr::null_mut(), padding, padding, search_w, 28, SWP_NOZORDER);
+            
+            // Center label vertically relative to search box (28px height)
+            // Label is usually ~20px high text.
+            let label_y = padding + 4; 
+            SetWindowPos(self.hwnd_lbl_results, std::ptr::null_mut(), padding + search_w + gap, label_y, label_w, 20, SWP_NOZORDER);
             
             // Row 2: Filter Controls
             let row2_y = padding + row_h + 5;
@@ -267,15 +275,6 @@ impl Component for SearchPanel {
             // Toggles
             row.add_fixed(self.hwnd_chk_case, 110);
             row.add_fixed(self.hwnd_chk_regex, 70);
-            
-            // Results Label (Right Aligned or Float?)
-            // Let's place it at the end if space permits, or below. Design shows line 3 "Showing results for..."
-            // Actually design showed "Showing results for: [Search Term]" on a third line? 
-            // "Filter By... Algorithm... Size... Case... Regex" all on line 2.
-            // "Showing results..." on line 3.
-            
-            let row3_y = row2_y + row_h;
-            SetWindowPos(self.hwnd_lbl_results, std::ptr::null_mut(), padding, row3_y, width - (padding * 2), 20, SWP_NOZORDER);
         }
     }
 
@@ -312,7 +311,7 @@ unsafe extern "system" fn search_panel_proc(hwnd: HWND, umsg: u32, wparam: usize
              }
              return 0;
         },
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => {
             // Check property first (1=Light, 2=Dark), fallback to system
             let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
             let is_dark = if prop_val != 0 {
@@ -321,16 +320,9 @@ unsafe extern "system" fn search_panel_proc(hwnd: HWND, umsg: u32, wparam: usize
                 crate::ui::theme::is_system_dark_mode()
             };
 
-            let hdc = wparam as windows_sys::Win32::Graphics::Gdi::HDC;
-            
-            if is_dark {
-                SetTextColor(hdc, 0x00FFFFFF); // White text
-                SetBkMode(hdc, TRANSPARENT as i32);
-                return crate::ui::theme::get_dark_brush() as isize;
-            } else {
-                SetTextColor(hdc, 0x00000000); // Black text
-                SetBkMode(hdc, TRANSPARENT as i32);
-                return (COLOR_WINDOW + 1) as isize;
+            // Use centralized handler
+            if let Some(res) = crate::ui::theme::handle_standard_colors(hwnd, umsg, wparam, is_dark) {
+                return res as isize;
             }
         },
         WM_ERASEBKGND => {

@@ -478,7 +478,7 @@ impl WindowHandler for SettingsState {
                 .build();
             
             // Subtitle (Dynamic Status)
-            let version_str = format!("v{} - Check for updates", env!("APP_VERSION"));
+            let version_str = format!("{} - Check for updates", env!("APP_VERSION"));
             ControlBuilder::new(hwnd, IDC_LBL_UPDATE_STATUS)
                 .label(false)
                 .text(&version_str)

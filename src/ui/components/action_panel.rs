@@ -186,16 +186,15 @@ impl Component for ActionPanel {
 
     unsafe fn on_resize(&mut self, parent_rect: &RECT) {
         unsafe {
-            let height = parent_rect.bottom - parent_rect.top;
+            let _height = parent_rect.bottom - parent_rect.top;
             let width = parent_rect.right - parent_rect.left;
             
             // Dynamic Layout Calculation
-            let content_height = 48; // Label (16) + Gap (4) + Control (30) - slightly larger gap
-            let center_y_offset = (height - content_height) / 2;
+            // We align to the top to keep labels close to the progress bar (which is immediately above)
+            let top_padding = 4;
             
             // Positions (Absolute Client Coordinates)
-            // Start layout from the computed top of the content block
-            let start_y = parent_rect.top + center_y_offset;
+            let start_y = parent_rect.top + top_padding;
             
             // Labels at the top of the block
             let label_y = start_y; 
