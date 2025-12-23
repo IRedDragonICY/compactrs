@@ -21,10 +21,10 @@
 ## Screenshots
 
 <div align="center">
-  <img src="docs/ss1.png" alt="Main Interface" width="800" />
-  <img src="docs/ss2.png" alt="Settings Dialog" width="800" />
-  <img src="docs/ss3.png" alt="Watcher Manager" width="800" />
-  <img src="docs/ss4.png" alt="Action Panel" width="800" />
+  <img src="docs/ss1.png" alt="Main Interface" width="200" />
+  <img src="docs/ss2.png" alt="Settings Dialog" width="200" />
+  <img src="docs/ss3.png" alt="Watcher Manager" width="200" />
+  <img src="docs/ss4.png" alt="Action Panel" width="200" />
 </div>
 
 ---
