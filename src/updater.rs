@@ -1,5 +1,4 @@
 //! Self-update module - Downloads and applies updates from GitHub releases.
-use windows_sys::Win32::Networking::WinHttp::*;
 use windows_sys::Win32::Foundation::GetLastError;
 use windows_sys::Win32::Storage::FileSystem::{DeleteFileW, MoveFileExW, MOVEFILE_REPLACE_EXISTING};
 use std::{ffi::c_void, io::Write, ptr};
@@ -8,6 +7,75 @@ use crate::w;
 
 const GITHUB_API: &str = "https://api.github.com/repos/IRedDragonICY/compactrs/releases/latest";
 const ASSET_NAME: &str = "\"compactrs.exe\"";
+
+// --- Manual WinHttp Bindings ---
+
+#[link(name = "winhttp")]
+unsafe extern "system" {
+    fn WinHttpOpen(
+        pszagent: *const u16,
+        dwaccesstype: u32,
+        pszproxyname: *const u16,
+        pszproxybypass: *const u16,
+        dwflags: u32,
+    ) -> *mut c_void;
+
+    fn WinHttpConnect(
+        hsession: *mut c_void,
+        pswzservername: *const u16,
+        nserverport: u16,
+        dwreserved: u32,
+    ) -> *mut c_void;
+
+    fn WinHttpOpenRequest(
+        hconnect: *mut c_void,
+        pwszverb: *const u16,
+        pwszobjectname: *const u16,
+        pwszversion: *const u16,
+        pwszreferrer: *const u16,
+        ppwszaccepttypes: *const *const u16, // pointer to array of pointers to strings
+        dwflags: u32,
+    ) -> *mut c_void;
+
+    fn WinHttpSendRequest(
+        hrequest: *mut c_void,
+        lpszheaders: *const u16,
+        dwheaderslength: u32,
+        lpoptional: *const c_void,
+        dwoptionallength: u32,
+        dwtotalength: u32,
+        dwcontext: usize,
+    ) -> i32;
+
+    fn WinHttpReceiveResponse(
+        hrequest: *mut c_void,
+        lpreserved: *mut c_void,
+    ) -> i32;
+
+    fn WinHttpQueryHeaders(
+        hrequest: *mut c_void,
+        dwinfolevel: u32,
+        pwszname: *const u16,
+        lpbuffer: *mut c_void,
+        lpdwbufferlength: *mut u32, // IN OUT
+        lpdwindex: *mut u32,        // IN OUT
+    ) -> i32;
+
+    fn WinHttpReadData(
+        hrequest: *mut c_void,
+        lpbuffer: *mut c_void,
+        dwnumbytestoread: u32,
+        lpdwnumberofbytesread: *mut u32,
+    ) -> i32;
+
+    fn WinHttpCloseHandle(hinternet: *mut c_void) -> i32;
+}
+
+const WINHTTP_ACCESS_TYPE_DEFAULT_PROXY: u32 = 0;
+const WINHTTP_FLAG_SECURE: u32 = 0x00800000;
+const WINHTTP_QUERY_STATUS_CODE: u32 = 19;
+const WINHTTP_QUERY_FLAG_NUMBER: u32 = 0x20000000;
+const WINHTTP_QUERY_LOCATION: u32 = 33;
 
 // --- RAII Handle ---
 

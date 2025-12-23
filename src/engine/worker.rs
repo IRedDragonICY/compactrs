@@ -2,7 +2,16 @@ use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, Ordering}};
 use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
-use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED};
+// use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED}; // Removed
+
+// Manual Power bindings
+const ES_CONTINUOUS: u32 = 0x80000000;
+const ES_SYSTEM_REQUIRED: u32 = 0x00000001;
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn SetThreadExecutionState(esFlags: u32) -> u32;
+}
 
 use crate::utils::to_wstring;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};

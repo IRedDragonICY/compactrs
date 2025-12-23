@@ -1,5 +1,5 @@
 /* --- src/ui/window.rs --- */
-#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, RECT, TRUE, FALSE};
 use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
@@ -12,8 +12,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_DESTROY, KillTimer, WM_SETTINGCHANGE, WM_CLOSE, MessageBoxW, MB_YESNO, MB_ICONWARNING, IDNO, DestroyWindow,
     FlashWindowEx, FLASHWINFO, FLASHW_ALL, FLASHW_TIMERNOFG,
 };
-use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
-use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+// use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT; // Removed
+// use windows_sys::Win32::System::Threading::GetCurrentThreadId; // Removed manual binding below
 use windows_sys::Win32::UI::Shell::DragAcceptFiles;
 use windows_sys::Win32::UI::Controls::{
     NMITEMACTIVATE, NMHDR, NM_CLICK, NM_DBLCLK, NM_CUSTOMDRAW,
@@ -26,6 +26,18 @@ use std::sync::atomic::Ordering;
 #[link(name = "user32")]
 unsafe extern "system" {
     fn AttachThreadInput(idAttach: u32, idAttachTo: u32, fAttach: i32) -> i32;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetCurrentThreadId() -> u32;
+}
+
+#[repr(C)]
+pub struct COPYDATASTRUCT {
+    pub dwData: usize,
+    pub cbData: u32,
+    pub lpData: *mut std::ffi::c_void,
 }
 
 use crate::ui::controls::*;

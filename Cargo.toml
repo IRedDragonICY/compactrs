@@ -12,7 +12,6 @@ keywords = ["windows", "compression", "wof", "compactos", "utility"]
 categories = ["os::windows-apis", "filesystem", "command-line-utilities"]
 [dependencies]
 windows-sys = { version = "0.61.2", features = [
-    "Win32_Storage_Compression",
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Controls",
@@ -23,23 +22,16 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_SystemServices",
-    "Win32_System_Threading",
     "Win32_System_Com",
-    "Win32_System_Power",
-    "Win32_System_Ioctl",
     "Win32_Storage_FileSystem",
     "Win32_Security",
     "Win32_System_Registry",
     "Win32_System_RestartManager",
     "Win32_System_DataExchange",
     "Win32_System_IO",
-    "Win32_Networking_WinHttp",
     "Win32_Security_Authorization",
     "Win32_System_Services",
-    "Win32_System_ProcessStatus",
-    "Win32_System_SystemInformation",
     "Win32_System_WindowsProgramming",
-    "Win32_System_Time",
 ] }
 
 

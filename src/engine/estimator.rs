@@ -11,11 +11,32 @@ use std::io::Read;
 use std::ptr;
 use std::path::Path;
 
-use windows_sys::Win32::Storage::Compression::{
-    CloseCompressor, Compress, CreateCompressor,
-    COMPRESS_ALGORITHM_XPRESS_HUFF,
-    COMPRESSOR_HANDLE,
-};
+use std::ffi::c_void;
+
+// --- Manual Bindings for Windows Compression API ---
+#[allow(non_camel_case_types)]
+type COMPRESSOR_HANDLE = *mut c_void;
+const COMPRESS_ALGORITHM_XPRESS_HUFF: u32 = 4;
+
+#[link(name = "cabinet")]
+unsafe extern "system" {
+    fn CreateCompressor(
+        algorithm: u32,
+        allocationroutines: *const c_void,
+        compressorhandle: *mut COMPRESSOR_HANDLE,
+    ) -> i32;
+
+    fn Compress(
+        compressorhandle: COMPRESSOR_HANDLE,
+        uncompresseddata: *const c_void,
+        uncompresseddatasize: usize,
+        compressedbuffer: *mut c_void,
+        compressedbuffersize: usize,
+        compresseddatasize: *mut usize,
+    ) -> i32;
+
+    fn CloseCompressor(compressorhandle: COMPRESSOR_HANDLE) -> i32;
+}
 
 use crate::engine::wof::WofAlgorithm;
 

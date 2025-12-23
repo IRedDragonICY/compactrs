@@ -1,28 +1,56 @@
+#![allow(non_snake_case, non_camel_case_types)]
 use std::ffi::c_void;
 use std::fs::File;
 use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
-use std::os::windows::fs::OpenOptionsExt; // Import the trait for share_mode
+use std::os::windows::fs::OpenOptionsExt; 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LUID, ERROR_ACCESS_DENIED,
+    CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LUID, ERROR_ACCESS_DENIED
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetCompressedFileSizeW, GetFileAttributesW, SetFileAttributesW, 
     FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY, FILE_FLAG_BACKUP_SEMANTICS, 
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
- // Keep module if needed, or remove if empty
-use windows_sys::Win32::System::Ioctl::{
-    FSCTL_DELETE_EXTERNAL_BACKING, FSCTL_GET_EXTERNAL_BACKING, FSCTL_SET_COMPRESSION, 
-    FSCTL_SET_EXTERNAL_BACKING,
-};
-use windows_sys::Win32::System::IO::DeviceIoControl;
-use windows_sys::Win32::Security::{
-    AdjustTokenPrivileges, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED, 
-    TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY, LUID_AND_ATTRIBUTES,
-};
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+// --- Manual Bindings & Constants ---
+
+// IOCTL Codes
+const FSCTL_SET_COMPRESSION: u32 = 0x9C040;
+const FSCTL_SET_EXTERNAL_BACKING: u32 = 0x9030C;
+const FSCTL_GET_EXTERNAL_BACKING: u32 = 0x90310;
+const FSCTL_DELETE_EXTERNAL_BACKING: u32 = 0x90314;
+
+// Security Constants
+const SE_PRIVILEGE_ENABLED: u32 = 0x00000002;
+const TOKEN_ADJUST_PRIVILEGES: u32 = 0x0020;
+const TOKEN_QUERY: u32 = 0x0008;
+
+#[repr(C)]
+struct LUID_AND_ATTRIBUTES {
+    Luid: LUID,
+    Attributes: u32,
+}
+
+#[repr(C)]
+struct TOKEN_PRIVILEGES {
+    PrivilegeCount: u32,
+    Privileges: [LUID_AND_ATTRIBUTES; 1],
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn DeviceIoControl(hDevice: HANDLE, dwIoControlCode: u32, lpInBuffer: *const c_void, nInBufferSize: u32, lpOutBuffer: *mut c_void, nOutBufferSize: u32, lpBytesReturned: *mut u32, lpOverlapped: *mut c_void) -> i32;
+    fn GetCurrentProcess() -> HANDLE;
+}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn OpenProcessToken(ProcessHandle: HANDLE, DesiredAccess: u32, TokenHandle: *mut HANDLE) -> i32;
+    fn LookupPrivilegeValueW(lpSystemName: *const u16, lpName: *const u16, lpLuid: *mut LUID) -> i32;
+    fn AdjustTokenPrivileges(TokenHandle: HANDLE, DisableAllPrivileges: i32, NewState: *const TOKEN_PRIVILEGES, BufferLength: u32, PreviousState: *mut c_void, ReturnLength: *mut u32) -> i32;
+}
 
 use crate::utils::{to_wstring, PathBuffer};
 

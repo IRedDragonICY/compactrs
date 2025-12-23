@@ -1,4 +1,4 @@
-#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use crate::ui::builder::ControlBuilder;
 use crate::ui::wrappers::ListView;
@@ -8,9 +8,28 @@ use crate::engine::scanner::scan_path_metrics;
 use crate::w;
 use crate::utils::format_size;
 use crate::ui::framework::WindowHandler;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, FILETIME, SYSTEMTIME};
-use windows_sys::Win32::Storage::FileSystem::FileTimeToLocalFileTime;
-use windows_sys::Win32::System::Time::FileTimeToSystemTime;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, FILETIME};
+
+#[repr(C)]
+struct SYSTEMTIME {
+    wYear: u16,
+    wMonth: u16,
+    wDayOfWeek: u16,
+    wDay: u16,
+    wHour: u16,
+    wMinute: u16,
+    wSecond: u16,
+    wMilliseconds: u16,
+}
+// use windows_sys::Win32::Storage::FileSystem::FileTimeToLocalFileTime; // Removed
+// use windows_sys::Win32::System::Time::FileTimeToSystemTime; // Removed
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn FileTimeToLocalFileTime(lpfiletime: *const FILETIME, lplocalfiletime: *mut FILETIME) -> i32;
+    fn FileTimeToSystemTime(lpfiletime: *const FILETIME, lpsystemtime: *mut SYSTEMTIME) -> i32;
+}
+
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_COMMAND, BN_CLICKED,
     DestroyWindow, MessageBoxW, SendMessageW,
@@ -350,8 +369,8 @@ impl WatcherState {
                 };
                 let mut st = std::mem::zeroed::<SYSTEMTIME>();
                 
-                if FileTimeToLocalFileTime(&ft, &mut local_ft) != 0
-                    && FileTimeToSystemTime(&local_ft, &mut st) != 0 {
+                if unsafe { FileTimeToLocalFileTime(&ft, &mut local_ft) } != 0
+                    && unsafe { FileTimeToSystemTime(&local_ft, &mut st) } != 0 {
                     format!("{:04}-{:02}-{:02} {:02}:{:02}", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute)
                 } else {
                     "Error".to_string()

@@ -71,8 +71,12 @@ pub fn log_internal(level: LogLevel, msg: String) {
         .unwrap_or_default()
         .as_secs();
 
-    // Windows thread ID
-    let thread_id = unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() };
+    // Manual binding for GetCurrentThreadId
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThreadId() -> u32;
+    }
+    let thread_id = unsafe { GetCurrentThreadId() };
 
     let entry = LogEntry {
         timestamp,

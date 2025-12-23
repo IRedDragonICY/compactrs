@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,8 +19,27 @@ pub fn start_watcher_thread(tasks: Arc<Mutex<Vec<WatcherTask>>>, tx: Sender<UiMe
             // Get current local time (simple approximation or using system calls)
             // Ideally we need a chrono-like functionality, but we want zero-deps.
             // We'll use Win32 API to get local time.
-            let mut system_time: windows_sys::Win32::Foundation::SYSTEMTIME = unsafe { std::mem::zeroed() };
-            unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut system_time) };
+            // Manual SYSTEMTIME definition
+            #[repr(C)]
+            struct SYSTEMTIME {
+                wYear: u16,
+                wMonth: u16,
+                wDayOfWeek: u16,
+                wDay: u16,
+                wHour: u16,
+                wMinute: u16,
+                wSecond: u16,
+                wMilliseconds: u16,
+            }
+
+            let mut system_time: SYSTEMTIME = unsafe { std::mem::zeroed() };
+            
+            // Manual binding for GetLocalTime
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn GetLocalTime(lpsystemtime: *mut SYSTEMTIME);
+            }
+            unsafe { GetLocalTime(&mut system_time) };
             
             let current_dow = if system_time.wDayOfWeek == 0 { 6 } else { system_time.wDayOfWeek - 1 } as u8; // Mon=0..Sun=6
             let current_hour = system_time.wHour as u8;
