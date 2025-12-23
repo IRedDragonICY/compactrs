@@ -4,6 +4,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 /// Macro to convert a string literal to a null-terminated UTF-16 array at compile time.
 /// 
+/// # Warning
+/// **This macro ONLY supports ASCII strings.** Multi-byte characters (Unicode) will be 
+/// cast to u16 incorrectly, resulting in garbled text (Mojibake). 
+/// For Unicode strings, use `to_wstring` at runtime.
+///
 /// # Example
 /// ```rust
 /// let wide_str = w!("Hello");

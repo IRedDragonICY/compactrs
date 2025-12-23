@@ -644,12 +644,13 @@ impl FileListView {
 
     /// Updates the playback controls (Start/Pause/Stop) for a row based on state.
     pub fn update_playback_controls(&self, row: i32, state: crate::ui::state::ProcessingState) {
-        let icon = match state {
-             crate::ui::state::ProcessingState::Idle | crate::ui::state::ProcessingState::Stopped => crate::w!("▶ Start"),
-             crate::ui::state::ProcessingState::Running => crate::w!("⏸   ⏹"),
-             crate::ui::state::ProcessingState::Paused => crate::w!("▶   ⏹"),
+        let text = match state {
+             crate::ui::state::ProcessingState::Idle | crate::ui::state::ProcessingState::Stopped => "▶ Start",
+             crate::ui::state::ProcessingState::Running => "⏸   ⏹",
+             crate::ui::state::ProcessingState::Paused => "▶   ⏹",
         };
-        self.update_item_text(row, columns::START, icon);
+        // Use to_wstring to ensure correct UTF-16 encoding for icons (avoiding w! macro limitation)
+        self.update_item_text(row, columns::START, &crate::utils::to_wstring(text));
     }
 
     /// Updates the status text for a row.
