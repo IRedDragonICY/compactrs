@@ -1,0 +1,15 @@
+[build]
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=/MERGE:.rdata=.text",
+    "-C", "link-arg=/MERGE:.pdata=.text",
+    "-C", "link-arg=/OPT:REF,ICF",
+    "-C", "link-arg=/INCREMENTAL:NO",
+    "-Z", "mir-opt-level=4",
+    "-Z", "location-detail=none",
+    "-Z", "fmt-debug=none",
+]
+
+[unstable]
+build-std = ["std", "panic_abort", "core", "alloc"]
+build-std-features = ["optimize_for_size"]
