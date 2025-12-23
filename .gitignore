@@ -12,3 +12,4 @@
 *.log
 build_fix_log.txt
 build_log*.txt
+err.txt
