@@ -25,7 +25,6 @@
 build-std = ["std", "panic_abort", "core", "alloc"]
 build-std-features = ["optimize_for_size"]
 
-# Target-specific optimizations for Windows MSVC
 [target.x86_64-pc-windows-msvc]
 rustflags = [
     # MIR optimizations (nightly)
@@ -34,9 +33,11 @@ rustflags = [
     "-Z", "fmt-debug=none",
     "-Z", "share-generics=y",
     "-Z", "inline-mir-threshold=0",
+    "-Z", "cross-crate-inline-threshold=0",
     # Stable optimizations
     "-C", "symbol-mangling-version=v0",
     "-C", "target-cpu=native",
+    "-C", "code-model=small",
     # Linker optimizations
     "-C", "link-arg=/MERGE:.rdata=.text",
     "-C", "link-arg=/MERGE:.pdata=.text",
