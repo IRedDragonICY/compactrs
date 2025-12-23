@@ -37,8 +37,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_WindowsProgramming",
 ] }
 
-[build-dependencies]
-winres = "0.1"
+# No build-dependencies needed - manual RC compilation in build.rs
 
 [profile.release]
 opt-level = "z"              # Optimize for size (z is 33KB smaller than s)

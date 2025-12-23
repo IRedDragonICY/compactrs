@@ -5,16 +5,18 @@
 # DEVELOPMENT (normal cargo run - uses stable toolchain):
 #   cargo run
 #
-# OPTIMIZED RELEASE (requires nightly):
-#   cargo +nightly build --release --target x86_64-pc-windows-msvc
+# OPTIMIZED RELEASE (requires nightly + explicit flags):
+#   cargo +nightly build --release ^
+#     -Z build-std=std,panic_abort,core,alloc ^
+#     -Z build-std-features=optimize_for_size ^
+#     -Z profile-rustflags ^
+#     --target x86_64-pc-windows-msvc
+#
+# NOTE: Do NOT put [unstable] section here! It applies to ALL builds including
+#       cargo run, which breaks the winres build script with RC2167 errors.
+#       The -Z flags must be passed via command line for release builds only.
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Unstable features for nightly builds
-[unstable]
-build-std = ["std", "panic_abort", "core", "alloc"]
-build-std-features = ["optimize_for_size"]
-
-# Target-specific config (only for explicit --target builds)
-[target.x86_64-pc-windows-msvc]
-# Note: linker flags are now in Cargo.toml [profile.release].rustflags
+# Target-specific config is NOT used since release builds need explicit --target flag
+# and we don't want any config to interfere with normal cargo run
