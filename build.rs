@@ -101,6 +101,17 @@ fn compile_resources() -> io::Result<()> {
     // Link the resource file
     println!("cargo:rustc-link-arg-bins={}", res_path.to_string_lossy());
 
+    // Explicitly set entry point and subsystem for no_main
+    println!("cargo:rustc-link-arg=/ENTRY:WinMainCRTStartup");
+    println!("cargo:rustc-link-arg=/SUBSYSTEM:WINDOWS");
+    
+    // Explicitly link CRT libraries for symbols like memset
+    #[cfg(target_env = "msvc")]
+    {
+        println!("cargo:rustc-link-lib=vcruntime");
+        println!("cargo:rustc-link-lib=ucrt");
+    }
+
     Ok(())
 }
 
