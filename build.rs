@@ -112,6 +112,13 @@ fn compile_resources() -> io::Result<()> {
         println!("cargo:rustc-link-lib=ucrt");
     }
 
+    // EXTREME Optimizations for Release Build
+    if profile == "release" {
+        println!("cargo:rustc-link-arg=/ALIGN:16");  
+        println!("cargo:rustc-link-arg=/EMITPOGOPHASEINFO"); // Strip POGO info
+        println!("cargo:rustc-link-arg=/DEBUG:NONE"); // Ensure no debug info
+    }
+
     Ok(())
 }
 
