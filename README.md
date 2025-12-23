@@ -12,7 +12,7 @@
   [![Architecture](https://img.shields.io/badge/Architecture-x64-lightgrey?style=flat-square)](https://en.wikipedia.org/wiki/X86-64)
   [![Dependencies](https://img.shields.io/badge/Dependencies-None-success?style=flat-square)](https://github.com/IRedDragonICY/compactrs)
   [![License](https://img.shields.io/github/license/IRedDragonICY/compactrs?style=flat-square&label=License)](LICENSE)
-  [![Download](https://img.shields.io/github/downloads/IRedDragonICY/ga/total?style=flat-square&label=Downloads&color=blue)](https://github.com/IRedDragonICY/compactrs/releases)
+  [![Download](https://img.shields.io/github/downloads/IRedDragonICY/compactrs/total?style=flat-square&label=Downloads&color=blue)](https://github.com/IRedDragonICY/compactrs/releases)
 
 </div>
 
