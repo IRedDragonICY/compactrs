@@ -1,6 +1,6 @@
 use windows_sys::Win32::Foundation::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, atomic::{AtomicU8, AtomicU64}};
+use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64}};
 use std::collections::HashMap;
 use crate::engine::wof::WofAlgorithm;
 use crate::config::AppConfig;
@@ -79,6 +79,9 @@ pub enum UiMessage {
     
     /// Estimated size update: (id, algorithm, estimated_size)
     UpdateEstimate(u32, WofAlgorithm, u64),
+
+    /// Watcher triggered processing: (Path, Algorithm)
+    WatcherTrigger(String, WofAlgorithm),
 }
 
 /// Action to perform on a batch item
@@ -282,6 +285,8 @@ pub struct AppState {
     // File Lock Dialog State
     pub active_lock_dialog: Option<String>,
     pub ignored_lock_processes: std::collections::HashSet<String>,
+
+    pub watcher_tasks: Arc<Mutex<Vec<crate::watcher_config::WatcherTask>>>,
 }
 
 impl AppState {
@@ -319,6 +324,7 @@ impl AppState {
             global_progress_total: Arc::new(AtomicU64::new(0)),
             active_lock_dialog: None,
             ignored_lock_processes: std::collections::HashSet::new(),
+            watcher_tasks: Arc::new(Mutex::new(Vec::new())),
         }
     }
     

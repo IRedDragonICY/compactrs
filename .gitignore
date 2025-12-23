@@ -9,3 +9,6 @@
 .idea/
 .vscode/
 .gemini/
+*.log
+build_fix_log.txt
+build_log*.txt

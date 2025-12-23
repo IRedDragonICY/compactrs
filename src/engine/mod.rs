@@ -1,8 +1,8 @@
 pub mod wof;
-pub mod process;
-
 pub mod estimator;
 pub mod worker;
-pub mod elevation;
 pub mod power;
+pub mod elevation;
+pub mod watcher;
 pub mod scanner;
+pub mod process;

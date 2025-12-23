@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     SendMessageW, SetWindowTextW, BM_GETCHECK, BM_SETCHECK,
     CB_GETCURSEL, CB_SETCURSEL, CB_ADDSTRING, CB_RESETCONTENT,
@@ -11,6 +11,10 @@ use windows_sys::Win32::UI::Controls::{
 
 pub const TBM_GETPOS: u32 = 0x0400;
 use crate::utils::to_wstring;
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows_sys::Win32::UI::Controls::{
+    NMCUSTOMDRAW, CDRF_NOTIFYITEMDRAW, CDRF_NEWFONT, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
+};
 
 /// Safe wrapper for Button controls (including Checkboxes and RadioButtons)
 #[derive(Clone, Copy)]
@@ -127,5 +131,184 @@ pub fn get_window_text(hwnd: HWND) -> String {
             }
         }
         String::new()
+    }
+
+}
+/// Safe wrapper for ListView controls
+#[derive(Clone, Copy)]
+pub struct ListView { hwnd: HWND }
+impl ListView {
+    pub fn new(hwnd: HWND) -> Self { Self { hwnd } }
+    
+    /// Clear all columns from the ListView
+    pub fn clear_columns(&self) {
+        const LVM_DELETECOLUMN: u32 = 0x101C;
+        // Delete columns from the end to avoid index shifting issues
+        loop {
+            let result = unsafe { SendMessageW(self.hwnd, LVM_DELETECOLUMN, 0, 0) };
+            if result == 0 { break; } // No more columns
+        }
+    }
+    
+    pub fn add_column(&self, index: i32, text: &str, width: i32) {
+        use windows_sys::Win32::UI::Controls::{LVCOLUMNW, LVCF_TEXT, LVCF_WIDTH, LVCF_SUBITEM, LVM_INSERTCOLUMNW, LVCF_FMT, LVCFMT_LEFT};
+        let w_text = to_wstring(text);
+        let mut col = unsafe { std::mem::zeroed::<LVCOLUMNW>() };
+        col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM | LVCF_FMT;
+        col.fmt = LVCFMT_LEFT as i32;
+        col.cx = width;
+        col.pszText = w_text.as_ptr() as *mut _;
+        col.iSubItem = index;
+        
+        unsafe { SendMessageW(self.hwnd, LVM_INSERTCOLUMNW, index as usize, &col as *const _ as isize); }
+    }
+    
+    /// Set column width. Use width = -2 for LVSCW_AUTOSIZE_USEHEADER (fill remaining space)
+    pub fn set_column_width(&self, index: i32, width: i32) {
+        const LVM_SETCOLUMNWIDTH: u32 = 0x101E;
+        unsafe { SendMessageW(self.hwnd, LVM_SETCOLUMNWIDTH, index as usize, width as isize); }
+    }
+    
+    pub fn insert_item(&self, index: i32, text: &str, image_index: i32) {
+        use windows_sys::Win32::UI::Controls::{LVITEMW, LVIF_TEXT, LVIF_IMAGE, LVM_INSERTITEMW};
+        let w_text = to_wstring(text);
+        let mut item = unsafe { std::mem::zeroed::<LVITEMW>() };
+        item.mask = LVIF_TEXT | LVIF_IMAGE;
+        item.iItem = index;
+        item.iSubItem = 0;
+        item.pszText = w_text.as_ptr() as *mut _;
+        item.iImage = image_index;
+        
+        unsafe { SendMessageW(self.hwnd, LVM_INSERTITEMW, 0, &item as *const _ as isize); }
+    }
+    
+    pub fn set_item_text(&self, index: i32, sub_index: i32, text: &str) {
+        use windows_sys::Win32::UI::Controls::{LVITEMW, LVIF_TEXT, LVM_SETITEMW};
+        let w_text = to_wstring(text);
+        let mut item = unsafe { std::mem::zeroed::<LVITEMW>() };
+        item.mask = LVIF_TEXT;
+        item.iItem = index;
+        item.iSubItem = sub_index;
+        item.pszText = w_text.as_ptr() as *mut _;
+        
+        unsafe { SendMessageW(self.hwnd, LVM_SETITEMW, 0, &item as *const _ as isize); }
+    }
+    
+    pub fn clear(&self) {
+        use windows_sys::Win32::UI::Controls::LVM_DELETEALLITEMS;
+        unsafe { SendMessageW(self.hwnd, LVM_DELETEALLITEMS, 0, 0); }
+    }
+
+    pub fn get_selection_mark(&self) -> i32 {
+         use windows_sys::Win32::UI::Controls::LVM_GETSELECTIONMARK;
+         unsafe { SendMessageW(self.hwnd, LVM_GETSELECTIONMARK, 0, 0) as i32 }
+    }
+
+    pub fn set_extended_style(&self, style: u32) {
+        unsafe {
+            use windows_sys::Win32::UI::Controls::LVM_SETEXTENDEDLISTVIEWSTYLE;
+            SendMessageW(self.hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, style as isize);
+        }
+    }
+
+    pub fn apply_theme(&self, is_dark: bool) {
+         unsafe { 
+             crate::ui::theme::allow_dark_mode_for_window(self.hwnd, is_dark);
+
+             // Apply theme (ItemsView/Explorer) matching FileListView logic
+             if is_dark {
+                 crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::ItemsView, true);
+             } else {
+                 crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::List, false);
+             }
+             
+             use windows_sys::Win32::UI::Controls::{LVM_SETBKCOLOR, LVM_SETTEXTCOLOR, LVM_SETTEXTBKCOLOR};
+             
+             let (bg, text) = if is_dark {
+                 (crate::ui::theme::COLOR_LIST_BG_DARK, crate::ui::theme::COLOR_LIST_TEXT_DARK)
+             } else {
+                 (crate::ui::theme::COLOR_LIST_BG_LIGHT, crate::ui::theme::COLOR_LIST_TEXT_LIGHT)
+             };
+             
+             SendMessageW(self.hwnd, LVM_SETBKCOLOR, 0, bg as isize);
+             SendMessageW(self.hwnd, LVM_SETTEXTCOLOR, 0, text as isize);
+             SendMessageW(self.hwnd, LVM_SETTEXTBKCOLOR, 0, bg as isize);
+
+             // Also theme the header
+             let h_header = SendMessageW(self.hwnd, windows_sys::Win32::UI::Controls::LVM_GETHEADER, 0, 0) as HWND;
+             if h_header != std::ptr::null_mut() {
+                 crate::ui::theme::allow_dark_mode_for_window(h_header, is_dark);
+                 crate::ui::theme::apply_theme(h_header, crate::ui::theme::ControlType::Header, is_dark);
+                 windows_sys::Win32::Graphics::Gdi::InvalidateRect(h_header, std::ptr::null(), 1);
+             }
+         }
+    }
+
+    /// Installs a subclass to handle custom drawing for the header in dark mode.
+    /// This is required because standard themes often fail to set white text for headers.
+    pub fn fix_header_dark_mode(&self, parent_check_hwnd: HWND) {
+        unsafe {
+            let _ = SetWindowSubclass(
+                self.hwnd,
+                Some(header_subclass_proc),
+                4242, // Subclass ID
+                parent_check_hwnd as usize,
+            );
+        }
+    }
+}
+
+/// Subclass procedure to force white text on ListView headers in dark mode.
+unsafe extern "system" fn header_subclass_proc(
+    hwnd: HWND,
+    umsg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _uidsubclass: usize,
+    dwrefdata: usize,
+) -> LRESULT {
+    use windows_sys::Win32::UI::WindowsAndMessaging::WM_NOTIFY;
+    use windows_sys::Win32::Graphics::Gdi::{SetTextColor, SetBkMode, TRANSPARENT};
+    use windows_sys::Win32::UI::Controls::LVM_GETHEADER;
+
+    unsafe {
+        if umsg == WM_NOTIFY {
+            let nmhdr = &*(lparam as *const NMHDR);
+            
+            if nmhdr.code == windows_sys::Win32::UI::Controls::NM_CUSTOMDRAW {
+                 // Check if it's from Header
+                 let h_header = SendMessageW(hwnd, LVM_GETHEADER, 0, 0) as HWND;
+                 if nmhdr.hwndFrom == h_header {
+                     // Check dark mode via parent HWND passed in refdata
+                     // We can also assume if we installed this, we want the fix, 
+                     // but checking the global theme state is safer.
+                     // The RefData is the parent window (Dialog) HWND.
+                     let _parent_hwnd = dwrefdata as HWND;
+                     // We need to resolve if it is actually dark.
+                     // If we don't have access to AppState easily, we can check system or window theme.
+                     // Simply checking if the background brush is dark or similar?
+                     // Or just use the global helper:
+                     // Note: ui::theme::is_app_dark_mode might not be available here easily if we don't impl WindowHandler?
+                     // But we can use the helper function from theme module if public.
+                     // crate::ui::theme::is_app_dark_mode takes a HWND.
+                     // Let's assume we want to apply it if the passed parent tells us? 
+                     // Actually, easiest is: check if system dark mode is on.
+                     let is_dark = crate::ui::theme::is_system_dark_mode(); // Or use passed HWND to check
+                     
+                     if is_dark {
+                         let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
+                         if nmcd.dwDrawStage == CDDS_PREPAINT {
+                             return CDRF_NOTIFYITEMDRAW as LRESULT;
+                         }
+                         if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
+                             SetTextColor(nmcd.hdc, crate::ui::theme::COLOR_HEADER_TEXT_DARK);
+                             SetBkMode(nmcd.hdc, TRANSPARENT as i32);
+                             return CDRF_NEWFONT as LRESULT;
+                         }
+                     }
+                 }
+            }
+        }
+        DefSubclassProc(hwnd, umsg, wparam, lparam)
     }
 }

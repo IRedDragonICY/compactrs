@@ -20,6 +20,7 @@ const ICON_SETTINGS: &[u16] = &[0xE713, 0]; // Settings
 const ICON_KEYBOARD: &[u16] = &[0xE765, 0]; // Keyboard
 const ICON_ABOUT: &[u16] = &[0xE946, 0];    // Info
 const ICON_CONSOLE: &[u16] = &[0xE756, 0];  // CommandPrompt
+const ICON_WATCHER: &[u16] = &[0xE9D2, 0];  // Clock/Alarm
 
 /// Configuration for HeaderPanel control IDs.
 pub struct HeaderPanelIds {
@@ -27,6 +28,7 @@ pub struct HeaderPanelIds {
     pub btn_about: u16,
     pub btn_shortcuts: u16,
     pub btn_console: u16,
+    pub btn_watcher: u16,
 }
 
 /// HeaderPanel component containing the top-right action buttons.
@@ -40,6 +42,7 @@ pub struct HeaderPanel {
     hwnd_about: HWND,
     hwnd_shortcuts: HWND,
     hwnd_console: HWND,
+    hwnd_watcher: HWND,
     ids: HeaderPanelIds,
 }
 
@@ -53,6 +56,7 @@ impl HeaderPanel {
             hwnd_about: std::ptr::null_mut(),
             hwnd_shortcuts: std::ptr::null_mut(),
             hwnd_console: std::ptr::null_mut(),
+            hwnd_watcher: std::ptr::null_mut(),
             ids,
         }
     }
@@ -79,6 +83,12 @@ impl HeaderPanel {
     #[inline]
     pub fn console_hwnd(&self) -> HWND {
         self.hwnd_console
+    }
+
+    /// Returns the Watcher button HWND.
+    #[inline]
+    pub fn watcher_hwnd(&self) -> HWND {
+        self.hwnd_watcher
     }
 
     /// Sets the font for all child controls.
@@ -124,6 +134,12 @@ impl Component for HeaderPanel {
 
             self.hwnd_console = ButtonBuilder::new(parent, self.ids.btn_console)
                 .text_w(ICON_CONSOLE)
+                .pos(0, 0).size(30, 25).dark_mode(is_dark)
+                .font(icon_font)
+                .build();
+
+            self.hwnd_watcher = ButtonBuilder::new(parent, self.ids.btn_watcher)
+                .text_w(ICON_WATCHER)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
@@ -188,6 +204,17 @@ impl Component for HeaderPanel {
                 header_height,
                 SWP_NOZORDER,
             );
+
+            // Position Watcher button (Left of Console)
+            SetWindowPos(
+                self.hwnd_watcher,
+                std::ptr::null_mut(),
+                width - padding - btn_width - 140,
+                padding,
+                btn_width,
+                header_height,
+                SWP_NOZORDER,
+            );
         }
     }
 
@@ -197,6 +224,7 @@ impl Component for HeaderPanel {
             apply_button_theme(self.hwnd_about, is_dark);
             apply_button_theme(self.hwnd_shortcuts, is_dark);
             apply_button_theme(self.hwnd_console, is_dark);
+            apply_button_theme(self.hwnd_watcher, is_dark);
         }
     }
 }
