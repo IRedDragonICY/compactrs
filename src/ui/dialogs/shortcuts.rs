@@ -2,11 +2,7 @@
 use crate::ui::builder::ControlBuilder;
 use crate::ui::framework::WindowHandler;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{
-    CreateFontIndirectW, GetObjectW, GetStockObject, DeleteObject,
-    FW_BOLD, FW_NORMAL, HFONT, LOGFONTW, DEFAULT_GUI_FONT,
-};
+use crate::types::*;
 
 const SHORTCUTS_TITLE: &str = "Keyboard Shortcuts";
 
@@ -111,7 +107,7 @@ impl WindowHandler for ShortcutsState {
 
     fn on_message(&mut self, _hwnd: HWND, msg: u32, _wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
-            if msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_DESTROY {
+            if msg == WM_DESTROY {
                 if self.h_font_bold != std::ptr::null_mut() {
                     DeleteObject(self.h_font_bold);
                 }

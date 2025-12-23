@@ -1,9 +1,5 @@
-use windows_sys::Win32::Foundation::HWND;
-use windows_sys::core::{GUID, HRESULT};
-use windows_sys::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
-use windows_sys::Win32::UI::Shell::{
-    TaskbarList, TBPFLAG, TBPF_NOPROGRESS, TBPF_INDETERMINATE, TBPF_NORMAL, TBPF_ERROR, TBPF_PAUSED
-};
+use crate::types::*;
+use std::ffi::c_void;
 
 type BOOL = i32;
 
@@ -15,7 +11,7 @@ pub struct ITaskbarList3 {
 
 #[repr(C)]
 pub struct ITaskbarList3Vtbl {
-    pub query_interface: unsafe extern "system" fn(*mut ITaskbarList3, *const GUID, *mut *mut std::ffi::c_void) -> HRESULT,
+    pub query_interface: unsafe extern "system" fn(*mut ITaskbarList3, *const GUID, *mut *mut c_void) -> HRESULT,
     pub add_ref: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
     pub release: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
     pub hr_init: unsafe extern "system" fn(*mut ITaskbarList3) -> HRESULT,
@@ -59,7 +55,7 @@ impl TaskbarProgress {
             // Main.rs does CoInitializeEx.
             
             let hr = CoCreateInstance(
-                &TaskbarList, 
+                &CLSID_TaskbarList, 
                 std::ptr::null_mut(), 
                 CLSCTX_ALL, 
                 &IID_ITASKBAR_LIST3, 

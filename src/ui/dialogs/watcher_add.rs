@@ -7,14 +7,7 @@ use crate::engine::wof::WofAlgorithm;
 use crate::w;
 use crate::utils::to_wstring;
 use crate::ui::framework::WindowHandler;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    WM_COMMAND, BN_CLICKED,
-    DestroyWindow, MessageBoxW,
-    MB_ICONERROR, MB_OK, SetWindowTextW, GetWindowTextW, GetWindowTextLengthW, GetDlgItem,
-    WM_DROPFILES, ChangeWindowMessageFilter, MSGFLT_ADD,
-};
-use windows_sys::Win32::UI::Shell::{DragAcceptFiles, DragQueryFileW, DragFinish, HDROP};
+use crate::types::*;
 use std::sync::{Arc, Mutex};
 
 const TITLE_ADD: &str = "Add Watcher Task";
@@ -106,9 +99,9 @@ impl WindowHandler for WatcherAddState {
             cb.set_selected_index(1); // Default 8K
 
             ControlBuilder::new(hwnd, 0).label(false).text("Time (HH:MM):").pos(padding + 200, y+3).size(90, 20).dark_mode(self.is_dark).build();
-            let h_hour = ControlBuilder::new(hwnd, IDC_EDIT_HOUR).edit().pos(padding + 290, y).size(30, 25).style(windows_sys::Win32::UI::WindowsAndMessaging::ES_NUMBER as u32).dark_mode(self.is_dark).build();
+            let h_hour = ControlBuilder::new(hwnd, IDC_EDIT_HOUR).edit().pos(padding + 290, y).size(30, 25).style(ES_NUMBER).dark_mode(self.is_dark).build();
             ControlBuilder::new(hwnd, 0).label(false).text(":").pos(padding + 325, y+3).size(10, 20).dark_mode(self.is_dark).build();
-            let h_min = ControlBuilder::new(hwnd, IDC_EDIT_MIN).edit().pos(padding + 335, y).size(30, 25).style(windows_sys::Win32::UI::WindowsAndMessaging::ES_NUMBER as u32).dark_mode(self.is_dark).build();
+            let h_min = ControlBuilder::new(hwnd, IDC_EDIT_MIN).edit().pos(padding + 335, y).size(30, 25).style(ES_NUMBER).dark_mode(self.is_dark).build();
             
             y += 35;
             

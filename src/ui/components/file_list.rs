@@ -4,50 +4,7 @@
 //! high-level Rust interface. All unsafe Win32 operations are contained within
 //! this module.
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    SetWindowPos, SendMessageW, CreateWindowExW, WS_VISIBLE, WS_CHILD, WS_BORDER, WM_NOTIFY,
-    SWP_NOZORDER, HMENU, GetClientRect,
-};
-use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, SetBkMode, SetTextColor, TRANSPARENT};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::Controls::{
-    LVM_DELETEITEM, LVM_DELETEALLITEMS, LVM_GETHEADER, LVM_GETNEXTITEM, LVM_INSERTCOLUMNW,
-    LVM_INSERTITEMW, LVM_SETBKCOLOR, LVM_SETEXTENDEDLISTVIEWSTYLE, LVM_SETITEMW,
-    LVM_SETTEXTBKCOLOR, LVM_SETTEXTCOLOR, LVCFMT_LEFT, LVCF_FMT, LVCF_TEXT, LVCF_WIDTH,
-    LVCOLUMNW, LVIF_PARAM, LVIF_TEXT, LVITEMW, LVNI_SELECTED, LVS_EX_DOUBLEBUFFER,
-    LVS_EX_FULLROWSELECT, LVS_REPORT, LVS_SHOWSELALWAYS, NM_CUSTOMDRAW, NMCUSTOMDRAW,
-    CDRF_NEWFONT, CDRF_NOTIFYITEMDRAW, CDRF_NOTIFYSUBITEMDRAW, CDDS_PREPAINT, CDDS_ITEMPREPAINT, NMHDR,
-    LVM_GETITEMCOUNT, LVM_SETITEMSTATE, LVIS_SELECTED, LVM_SORTITEMS, LVM_SETCOLUMNWIDTH,
-    HDN_BEGINTRACKW, HDN_DIVIDERDBLCLICKW, LVM_GETITEMTEXTW, LVM_FINDITEMW, LVFINDINFOW,
-    LVFI_PARAM,
-};
-// COLORREF is a type alias for u32 in Win32 (0x00BBGGRR format)
-type COLORREF = u32;
-
-// ============================================================================
-// Win32 Constants and Structures for Subitem Custom Draw
-// ============================================================================
-
-/// CDDS_SUBITEM flag: Combined with CDDS_ITEMPREPAINT to handle subitem-level drawing
-const CDDS_SUBITEM: u32 = 0x00020000;
-
-/// NMLVCUSTOMDRAW structure for ListView-specific custom draw
-/// This extends NMCUSTOMDRAW with ListView-specific fields like iSubItem.
-#[repr(C)]
-struct NMLVCUSTOMDRAW {
-    /// Embedded NMCUSTOMDRAW structure (must be first for layout compatibility)
-    nmcd: NMCUSTOMDRAW,
-    /// Text color for the item/subitem
-    clr_text: u32,
-    /// Background color for the item/subitem
-    clr_text_bk: u32,
-    /// For report mode: index of the subitem being drawn (0 = main item)
-    i_sub_item: i32,
-    // Additional fields exist but are not needed for this implementation:
-    // dwItemType, clrFace, iIconEffect, iIconPhase, iPartId, iStateId, rcText, uAlign
-}
-use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use crate::types::*;
 
 use super::base::Component;
 use crate::engine::wof::{WofAlgorithm, CompressionState};
@@ -111,7 +68,7 @@ impl FileListView {
     /// This function is unsafe because it calls Win32 APIs that require valid window handles.
     pub unsafe fn new(parent: HWND, x: i32, y: i32, w: i32, h: i32, id: u16) -> Self { unsafe {
         // SAFETY: GetModuleHandleW with null returns the current module handle.
-        let instance = GetModuleHandleW(std::ptr::null());
+        let instance = GetModuleHandleW(std::ptr::null_mut());
 
         let class_name = w!("SysListView32");
         let empty_str = w!("");
@@ -129,7 +86,7 @@ impl FileListView {
             parent,
             id as usize as HMENU,
             instance,
-            std::ptr::null(),
+            std::ptr::null_mut(),
         );
 
         if hwnd == std::ptr::null_mut() {
@@ -371,9 +328,9 @@ impl FileListView {
     pub fn find_item_by_id(&self, id: u32) -> Option<i32> {
         let mut find_info = LVFINDINFOW {
             flags: LVFI_PARAM,
-            psz: std::ptr::null(),
+            psz: std::ptr::null_mut(),
             lParam: id as isize,
-            pt: windows_sys::Win32::Foundation::POINT { x: 0, y: 0 },
+            pt: POINT { x: 0, y: 0 },
             vkDirection: 0,
         };
 
@@ -497,7 +454,7 @@ impl FileListView {
             }
 
             // Force redraw
-            let _ = InvalidateRect(self.hwnd, std::ptr::null(), 1);
+            let _ = InvalidateRect(self.hwnd, std::ptr::null_mut(), 1);
         }
     }
 
@@ -695,17 +652,17 @@ impl FileListView {
     pub fn get_subitem_rect(&self, row: i32, col: i32) -> RECT {
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         rect.top = col; // weird API: top holds the subitem index
-        rect.left = windows_sys::Win32::UI::Controls::LVIR_BOUNDS as i32;
+        rect.left = LVIR_BOUNDS as i32;
         unsafe {
-            SendMessageW(self.hwnd, windows_sys::Win32::UI::Controls::LVM_GETSUBITEMRECT, row as usize, &mut rect as *mut _ as isize);
+            SendMessageW(self.hwnd, LVM_GETSUBITEMRECT, row as usize, &mut rect as *mut _ as isize);
         }
         rect
     }
 
     /// Sets the font for the ListView.
-    pub fn set_font(&self, hfont: windows_sys::Win32::Graphics::Gdi::HFONT) {
+    pub fn set_font(&self, hfont: crate::types::HFONT) {
         unsafe {
-            SendMessageW(self.hwnd, windows_sys::Win32::UI::WindowsAndMessaging::WM_SETFONT, hfont as usize, 1);
+            SendMessageW(self.hwnd, WM_SETFONT, hfont as usize, 1);
         }
     }
 

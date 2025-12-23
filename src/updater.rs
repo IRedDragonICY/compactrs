@@ -1,6 +1,5 @@
 //! Self-update module - Downloads and applies updates from GitHub releases.
-use windows_sys::Win32::Foundation::GetLastError;
-use windows_sys::Win32::Storage::FileSystem::{DeleteFileW, MoveFileExW, MOVEFILE_REPLACE_EXISTING};
+use crate::types::*;
 use std::{ffi::c_void, io::Write, ptr};
 use crate::utils::to_wstring;
 use crate::w;

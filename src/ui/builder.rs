@@ -1,12 +1,5 @@
 /* --- src/ui/builder.rs --- */
-use windows_sys::Win32::Foundation::HWND;
-use windows_sys::Win32::Graphics::Gdi::HFONT;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, SendMessageW, WS_CHILD, WS_VISIBLE, WS_TABSTOP, WS_VSCROLL,
-    BS_PUSHBUTTON, BS_AUTOCHECKBOX, BS_AUTORADIOBUTTON, BS_GROUPBOX,
-    CBS_DROPDOWNLIST, CBS_HASSTRINGS, HMENU, WM_SETFONT,
-};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use crate::types::*;
 use crate::utils::to_wstring;
 use crate::ui::theme::{self, ControlType};
 use crate::w;
@@ -125,6 +118,7 @@ impl ControlBuilder {
 
     pub fn build(self) -> HWND {
         unsafe {
+            // GetModuleHandleW takes LPCWSTR (*const u16), so null() is correct
             let instance = GetModuleHandleW(std::ptr::null());
             // No conversion needed, self.text and self.class_name are already [u16]
             let text_ptr = self.text.as_ptr();
@@ -136,7 +130,7 @@ impl ControlBuilder {
             let hwnd = CreateWindowExW(
                 self.ex_style, class_ptr, text_ptr, style_initial,
                 self.x, self.y, self.w, self.h,
-                self.parent, self.id as isize as HMENU, instance, std::ptr::null(),
+                self.parent, self.id as isize as HMENU, instance, std::ptr::null_mut(),
             );
 
             let ctl_type = self.detect_control_type();
@@ -146,12 +140,11 @@ impl ControlBuilder {
             SendMessageW(hwnd, WM_SETFONT, font as usize, 1);
 
             if self.checked {
-                 use windows_sys::Win32::UI::WindowsAndMessaging::BM_SETCHECK;
+                 const BM_SETCHECK: u32 = 0x00F1;
                  SendMessageW(hwnd, BM_SETCHECK, 1, 0);
             }
 
             if wants_visible {
-                use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOW};
                 ShowWindow(hwnd, SW_SHOW);
             }
 
@@ -177,4 +170,3 @@ impl ControlBuilder {
         else { ControlType::Button }
     }
 }
-

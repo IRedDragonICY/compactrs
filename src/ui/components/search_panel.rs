@@ -1,15 +1,6 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use windows_sys::Win32::Foundation::{HWND, RECT};
-use windows_sys::Win32::Graphics::Gdi::HFONT;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    WS_CHILD, WS_VISIBLE, WS_CLIPSIBLINGS, CreateWindowExW, SetWindowPos, SWP_NOZORDER,
-    SendMessageW, WM_SETFONT, WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_CTLCOLOREDIT, DefWindowProcW,
-    RegisterClassW, WNDCLASSW, CS_HREDRAW, CS_VREDRAW, WM_ERASEBKGND,
-    SetPropW, GetPropW, RemovePropW, WM_DESTROY, WM_COMMAND,
-    GetParent,
-};
-use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
+use crate::types::*;
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
@@ -99,7 +90,7 @@ impl SearchPanel {
 
 impl Component for SearchPanel {
     unsafe fn create(&mut self, parent: HWND) -> Result<(), String> { unsafe {
-        let instance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
+        let instance = GetModuleHandleW(std::ptr::null_mut());
         
         // Create container window with custom class for message handling
         let class_name = w!("CompactRsSearchPanel");
@@ -121,13 +112,13 @@ impl Component for SearchPanel {
         self.hwnd_panel = CreateWindowExW(
             0,
             class_name.as_ptr(), 
-            std::ptr::null(),
+            std::ptr::null_mut(),
             WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
             0, 0, 100, 100, // Size set later in on_resize
             parent,
             std::ptr::null_mut(),
             instance,
-            std::ptr::null(),
+            std::ptr::null_mut(),
         );
 
         let is_dark = crate::ui::theme::is_system_dark_mode();
@@ -306,7 +297,7 @@ impl Component for SearchPanel {
         SetPropW(self.hwnd_panel, crate::w!("CompactRs_Theme").as_ptr(), prop_val as isize as _);
 
         // Update: Custom class handles it now. Force repaint.
-        windows_sys::Win32::Graphics::Gdi::InvalidateRect(self.hwnd_panel, std::ptr::null(), 1);
+        InvalidateRect(self.hwnd_panel, std::ptr::null(), 1);
     }
 }
 
@@ -337,9 +328,9 @@ unsafe extern "system" fn search_panel_proc(hwnd: HWND, umsg: u32, wparam: usize
         },
         WM_ERASEBKGND => {
             // Handle background erasure to prevent white flash
-            let hdc = wparam as windows_sys::Win32::Graphics::Gdi::HDC;
+            let hdc = wparam as HDC;
             let mut rect: RECT = std::mem::zeroed();
-            windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect(hwnd, &mut rect);
+            GetClientRect(hwnd, &mut rect);
             
             let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
             let is_dark = if prop_val != 0 {
@@ -355,7 +346,7 @@ unsafe extern "system" fn search_panel_proc(hwnd: HWND, umsg: u32, wparam: usize
             };
             
             unsafe {
-                windows_sys::Win32::Graphics::Gdi::FillRect(hdc, &rect, brush);
+                FillRect(hdc, &rect, brush);
             }
             return 1;
         },

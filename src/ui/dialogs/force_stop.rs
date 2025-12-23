@@ -3,19 +3,7 @@ use crate::ui::theme;
 use crate::ui::framework::get_window_state;
 use crate::utils::to_wstring;
 use crate::w;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, LoadCursorW, RegisterClassW,
-    CS_HREDRAW, CS_VREDRAW, IDC_ARROW, WM_DESTROY, WNDCLASSW,
-    WS_VISIBLE, WM_CREATE, WM_COMMAND, SetWindowLongPtrW, GWLP_USERDATA,
-    WS_CHILD, WS_CAPTION, WS_SYSMENU, WS_POPUP,
-    PostQuitMessage, WM_CLOSE, WM_TIMER, SetTimer, KillTimer,
-    DestroyWindow, SetWindowTextW, GetDlgItem,
-    GetWindowRect, HMENU, CREATESTRUCTW,
-};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
+use crate::types::*;
 
 
 const TIMER_ID: usize = 1;
@@ -31,7 +19,7 @@ struct DialogState {
 }
 
 pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: bool) -> bool { unsafe {
-    let instance = GetModuleHandleW(std::ptr::null());
+    let instance = GetModuleHandleW(std::ptr::null_mut());
     let cls = w!("CompactRS_ForceStopDialog");
     let title = w!("File Locked");
     
@@ -45,7 +33,7 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
         cbClsExtra: 0,
         cbWndExtra: 0,
         hIcon: std::ptr::null_mut(),
-        lpszMenuName: std::ptr::null(),
+        lpszMenuName: std::ptr::null_mut(),
     };
     RegisterClassW(&wc);
 
@@ -107,7 +95,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
             let state_ptr = createstruct.lpCreateParams as *mut DialogState;
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
             
-            let instance = GetModuleHandleW(std::ptr::null());
+            let instance = GetModuleHandleW(std::ptr::null_mut());
             
             if let Some(st) = state_ptr.as_ref() {
                 let is_dark = st.is_dark;
@@ -129,7 +117,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                     hwnd,
                     IDC_LBL_MSG as isize as HMENU,
                     instance,
-                    std::ptr::null()
+                    std::ptr::null_mut()
                 );
                 
                 // Yes Button

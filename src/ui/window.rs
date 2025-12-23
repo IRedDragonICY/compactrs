@@ -1,48 +1,13 @@
 /* --- src/ui/window.rs --- */
 #![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
-use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM, RECT, TRUE, FALSE};
-use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CW_USEDEFAULT, WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_SIZE, WM_COMMAND,
-    WM_DROPFILES, SendMessageW, SetWindowTextW, WM_TIMER, SetTimer,
-    WM_NOTIFY, GetClientRect, GetWindowRect, WM_LBUTTONDOWN, WM_LBUTTONDBLCLK,
-    ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA, WM_CONTEXTMENU, 
-    SetForegroundWindow, GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, 
-    WM_DESTROY, KillTimer, WM_SETTINGCHANGE, WM_CLOSE, MessageBoxW, MB_YESNO, MB_ICONWARNING, IDNO, DestroyWindow,
-    FlashWindowEx, FLASHWINFO, FLASHW_ALL, FLASHW_TIMERNOFG,
-};
-// use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT; // Removed
-// use windows_sys::Win32::System::Threading::GetCurrentThreadId; // Removed manual binding below
-use windows_sys::Win32::UI::Shell::DragAcceptFiles;
-use windows_sys::Win32::UI::Controls::{
-    NMITEMACTIVATE, NMHDR, NM_CLICK, NM_DBLCLK, NM_CUSTOMDRAW,
-    InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_WIN95_CLASSES, ICC_STANDARD_CLASSES,
-    LVN_ITEMCHANGED, LVN_KEYDOWN, NMLVKEYDOWN, LVN_COLUMNCLICK, NM_RCLICK,
-};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_DELETE};
+use crate::types::*;
 use std::sync::atomic::Ordering;
 
-#[link(name = "user32")]
-unsafe extern "system" {
-    fn AttachThreadInput(idAttach: u32, idAttachTo: u32, fAttach: i32) -> i32;
-}
 
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn GetCurrentThreadId() -> u32;
-}
-
-#[repr(C)]
-pub struct COPYDATASTRUCT {
-    pub dwData: usize,
-    pub cbData: u32,
-    pub lpData: *mut std::ffi::c_void,
-}
 
 use crate::ui::controls::*;
 use crate::ui::wrappers::{Button, ComboBox, Label, ProgressBar};
-// FIX: Added BatchAction
 use crate::ui::state::{AppState, Controls, UiMessage, BatchStatus, AppTheme, BatchAction, ProcessingState};
 use crate::ui::taskbar::{TaskbarProgress, TaskbarState};
 use crate::ui::components::{
@@ -56,12 +21,19 @@ use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings, format_size};
 use crate::w;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, load_app_icon};
 use crate::config::AppConfig;
+use crate::engine::dynamic_import;
 
 const WINDOW_CLASS_NAME: &str = "CompactRS_Class";
 const WINDOW_TITLE: &str = "CompactRS";
 
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
     unsafe {
+        // Initialize Dynamic Imports
+        if !dynamic_import::init() {
+            return Err("Failed to initialize dynamic imports".to_string());
+        }
+        let win_api = dynamic_import::WinApi::get();
+
         // Enable dark mode for the application
         theme::set_preferred_app_mode(true);
 
@@ -70,7 +42,7 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
             dwICC: ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES,
         };
-        InitCommonControlsEx(&iccex);
+        (win_api.InitCommonControlsEx.unwrap())(&iccex as *const _ as *const _);
 
         // Check dark mode
         let is_dark = theme::is_system_dark_mode();
@@ -124,21 +96,21 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
             .build(std::ptr::null_mut())?;
 
         // Hostile Takeover: Force window to foreground (Bypass ASLR/Focus restrictions)
-        let foreground_hwnd = GetForegroundWindow();
+        let foreground_hwnd = (win_api.GetForegroundWindow.unwrap())();
         if !foreground_hwnd.is_null() {
-            let foreground_thread = GetWindowThreadProcessId(foreground_hwnd, std::ptr::null_mut());
-            let current_thread = GetCurrentThreadId();
+            let foreground_thread = (win_api.GetWindowThreadProcessId.unwrap())(foreground_hwnd, std::ptr::null_mut());
+            let current_thread = (win_api.GetCurrentThreadId.unwrap())();
             
             if foreground_thread != current_thread {
-                AttachThreadInput(foreground_thread, current_thread, TRUE);
-                BringWindowToTop(hwnd);
-                SetForegroundWindow(hwnd);
-                AttachThreadInput(foreground_thread, current_thread, FALSE);
+                (win_api.AttachThreadInput.unwrap())(foreground_thread, current_thread, TRUE);
+                (win_api.BringWindowToTop.unwrap())(hwnd);
+                (win_api.SetForegroundWindow.unwrap())(hwnd);
+                (win_api.AttachThreadInput.unwrap())(foreground_thread, current_thread, FALSE);
             } else {
-                SetForegroundWindow(hwnd);
+                (win_api.SetForegroundWindow.unwrap())(hwnd);
             }
         } else {
-            SetForegroundWindow(hwnd);
+            (win_api.SetForegroundWindow.unwrap())(hwnd);
         }
 
         Ok(hwnd)
@@ -153,7 +125,10 @@ unsafe fn flash_window(hwnd: HWND) {
         uCount: 0, // Flash until window comes to foreground
         dwTimeout: 0,
     };
-    FlashWindowEx(&mut fwi);
+    let win_api = crate::engine::dynamic_import::WinApi::get();
+    if let Some(flash) = win_api.FlashWindowEx {
+        flash(&mut fwi as *mut _ as *const _);
+    }
 }
 
 impl WindowHandler for AppState {
@@ -163,7 +138,6 @@ impl WindowHandler for AppState {
 
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
-             // Taskbar creation
             self.taskbar = Some(TaskbarProgress::new(hwnd));
             
             // 1. StatusBar
@@ -276,10 +250,7 @@ impl WindowHandler for AppState {
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
-            // Accent Button Drawing
-            const WM_DRAWITEM: u32 = 0x002B;
             if msg == WM_DRAWITEM {
-                use windows_sys::Win32::UI::Controls::DRAWITEMSTRUCT;
                 let dis = &*(lparam as *const DRAWITEMSTRUCT);
                 if dis.CtlID == IDC_BTN_PROCESS_ALL as u32 {
                     crate::ui::controls::draw_accent_button(lparam);
@@ -381,7 +352,7 @@ impl WindowHandler for AppState {
                 WM_NOTIFY => Some(self.handle_notify(hwnd, lparam)),
                 WM_CONTEXTMENU => Some(self.handle_context_menu(hwnd, wparam)),
                 0x0100 => Some(self.handle_keydown(hwnd, wparam)), // WM_KEYDOWN
-                WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+                WM_LBUTTONDOWN | crate::types::WM_LBUTTONDBLCLK => {
                     // Clicking on the window background (outside listview) deselects all
                     if let Some(ctrls) = &self.controls {
                         ctrls.file_list.deselect_all();
@@ -612,7 +583,7 @@ impl AppState {
                  },
                  // --- Search Panel Handlers ---
                  IDC_SEARCH_EDIT => {
-                     if notification_code as u32 == windows_sys::Win32::UI::WindowsAndMessaging::EN_CHANGE {
+                     if notification_code as u32 == EN_CHANGE {
                         if let Some(ctrls) = &self.controls {
                             let text = crate::ui::wrappers::get_window_text(ctrls.search_panel.search_hwnd());
                             self.search_state.text = text;
@@ -791,12 +762,14 @@ impl AppState {
                          self.global_state.store(crate::ui::state::ProcessingState::Idle as u8, std::sync::atomic::Ordering::Relaxed);
                          if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::NoProgress); }
                          if let Some(ctrls) = &self.controls {
-                             windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
+                             EnableWindow(ctrls.action_panel.cancel_hwnd(), FALSE);
                          }
                          handlers::update_process_button_state(self);
 
-                         if GetForegroundWindow() != hwnd {
-                             flash_window(hwnd);
+                         // Re-acquire WinAPI
+                         let win_api = crate::engine::dynamic_import::WinApi::get();
+                         if (win_api.GetForegroundWindow.unwrap())() != hwnd {
+                             flash_window(hwnd); // we need to update flash_window too
                          }
                      }
                  },

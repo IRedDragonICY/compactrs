@@ -6,24 +6,7 @@ use crate::utils::to_wstring;
 use crate::logger::LogEntry;
 use crate::ui::state::AppState;
 use crate::w;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
-
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    WM_CTLCOLOREDIT, WM_COMMAND,
-    CreateWindowExW, DestroyWindow, 
-    ShowWindow, SetForegroundWindow, BringWindowToTop,
-    CW_USEDEFAULT, SW_RESTORE, WM_DESTROY,
-    WS_OVERLAPPEDWINDOW, WS_VISIBLE, WM_SIZE, SetWindowPos, SWP_NOZORDER,
-    WS_CHILD, WS_VSCROLL, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL,
-    SendMessageW, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW,
-    HMENU, WM_TIMER, SetTimer, KillTimer,
-};
-use windows_sys::Win32::UI::Controls::{EM_SETSEL, EM_REPLACESEL, SetWindowTheme, EM_SETLIMITTEXT};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData};
-use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-use windows_sys::Win32::Graphics::Gdi::{COLOR_WINDOW, HBRUSH};
+use crate::types::*;
 use std::collections::VecDeque;
 
 const CONSOLE_TITLE: &str = "Debug Console";
@@ -100,12 +83,12 @@ impl ConsoleState {
         if let Some(edit) = self.edit_hwnd {
              if self.is_dark {
                  let dark_mode = w!("DarkMode_Explorer");
-                 SetWindowTheme(edit, dark_mode.as_ptr(), std::ptr::null());
+                 SetWindowTheme(edit, dark_mode.as_ptr(), std::ptr::null_mut());
              } else {
                  let explorer = w!("Explorer");
-                 SetWindowTheme(edit, explorer.as_ptr(), std::ptr::null());
+                 SetWindowTheme(edit, explorer.as_ptr(), std::ptr::null_mut());
              }
-             InvalidateRect(edit, std::ptr::null(), 1);
+             InvalidateRect(edit, std::ptr::null_mut(), 1);
         }
         
         if let Some(btn) = self.btn_copy_hwnd {
@@ -115,7 +98,7 @@ impl ConsoleState {
             apply_button_theme(btn, self.is_dark);
         }
         
-        InvalidateRect(hwnd, std::ptr::null(), 1);
+        InvalidateRect(hwnd, std::ptr::null_mut(), 1);
     }
 
     /// Re-renders the entire history to the edit control
@@ -191,21 +174,21 @@ impl WindowHandler for ConsoleState {
 
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
-             let instance = GetModuleHandleW(std::ptr::null());
+             let instance = GetModuleHandleW(std::ptr::null_mut());
              let edit_cls = to_wstring("EDIT");
              
              // Create Edit Control
              let edit = CreateWindowExW(
                  0,
                  edit_cls.as_ptr(),
-                 std::ptr::null(),
+                 std::ptr::null_mut(),
                  WS_CHILD | WS_VISIBLE | WS_VSCROLL | 
                  (ES_MULTILINE as u32) | (ES_READONLY as u32) | (ES_AUTOVSCROLL as u32),
                  0, 0, 0, 0,
                  hwnd,
                  IDC_EDIT_CONSOLE as isize as HMENU,
                  instance,
-                 std::ptr::null()
+                 std::ptr::null_mut()
              );
              
              SendMessageW(edit, EM_SETLIMITTEXT, EDIT_LIMIT, 0);

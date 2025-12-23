@@ -8,7 +8,7 @@ use crate::engine::scanner::scan_path_metrics;
 use crate::w;
 use crate::utils::format_size;
 use crate::ui::framework::WindowHandler;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, FILETIME};
+use crate::types::*;
 
 #[repr(C)]
 struct SYSTEMTIME {
@@ -21,8 +21,8 @@ struct SYSTEMTIME {
     wSecond: u16,
     wMilliseconds: u16,
 }
-// use windows_sys::Win32::Storage::FileSystem::FileTimeToLocalFileTime; // Removed
-// use windows_sys::Win32::System::Time::FileTimeToSystemTime; // Removed
+
+
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -30,15 +30,6 @@ unsafe extern "system" {
     fn FileTimeToSystemTime(lpfiletime: *const FILETIME, lpsystemtime: *mut SYSTEMTIME) -> i32;
 }
 
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    WM_COMMAND, BN_CLICKED,
-    DestroyWindow, MessageBoxW, SendMessageW,
-    MB_OK, MoveWindow, GetClientRect,
-    WS_POPUP, WS_CAPTION, WS_SYSMENU, WS_VISIBLE, WS_THICKFRAME, WS_MAXIMIZEBOX,
-    WM_SIZE, WM_GETMINMAXINFO,
-};
-use windows_sys::Win32::UI::WindowsAndMessaging::MINMAXINFO;
-use windows_sys::Win32::UI::Controls::{LVM_GETITEMCOUNT, NMITEMACTIVATE, NM_CLICK, NM_DBLCLK};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
 use crate::ui::state::UiMessage;
@@ -75,7 +66,8 @@ pub unsafe fn show_watcher_modal(
     let bg_brush = crate::ui::theme::get_background_brush(is_dark);
     
     // Check for existing window
-    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, ShowWindow, SetForegroundWindow, SW_RESTORE};
+    
+
     let class_name = "CompactRS_Watcher";
     let class_name_w = crate::utils::to_wstring(class_name);
     let existing_hwnd = unsafe { FindWindowW(class_name_w.as_ptr(), std::ptr::null()) };
@@ -118,13 +110,13 @@ impl WindowHandler for WatcherState {
                 .listview()
                 .pos(padding, y)
                 .size(660, 200)
-                .style(windows_sys::Win32::UI::WindowsAndMessaging::WS_BORDER | windows_sys::Win32::UI::Controls::LVS_REPORT | windows_sys::Win32::UI::Controls::LVS_SINGLESEL | windows_sys::Win32::UI::Controls::LVS_SHOWSELALWAYS)
+                .style(WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS)
                 .dark_mode(self.is_dark)
                 .build();
             
             let lv = ListView::new(h_list);
             // Match FileListView styles for correct theming behavior
-            lv.set_extended_style(windows_sys::Win32::UI::Controls::LVS_EX_FULLROWSELECT | windows_sys::Win32::UI::Controls::LVS_EX_DOUBLEBUFFER);
+            lv.set_extended_style(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
             lv.fix_header_dark_mode(hwnd);
             
             // Clear any existing columns first
@@ -165,13 +157,13 @@ impl WindowHandler for WatcherState {
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
             match msg {
-                windows_sys::Win32::UI::WindowsAndMessaging::WM_NOTIFY => {
-                    let nmhdr = lparam as *const windows_sys::Win32::UI::Controls::NMHDR;
+                WM_NOTIFY => {
+                    let nmhdr = lparam as *const NMHDR;
                     if (*nmhdr).code == NM_DBLCLK {
                         let nmitem = lparam as *const NMITEMACTIVATE;
                         if (*nmitem).iItem >= 0 {
                             show_watcher_add_modal(hwnd, self.tasks.clone(), self.is_dark, Some((*nmitem).iItem as usize));
-                            let h_list = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
+                            let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
                             self.refresh_list(h_list);
                         }
                     } else if (*nmhdr).code == NM_CLICK {
@@ -198,19 +190,19 @@ impl WindowHandler for WatcherState {
                         IDC_BTN_ADD => {
                             if code == BN_CLICKED as u16 {
                                 show_watcher_add_modal(hwnd, self.tasks.clone(), self.is_dark, None);
-                                let h_list = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
+                                let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
                                 self.refresh_list(h_list);
                             }
                         },
                         IDC_BTN_REMOVE => {
                              if code == BN_CLICKED as u16 {
-                                 let h_list = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
+                                 let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
                                  // let lv = ListView::new(h_list); // Unused
                                  let count = SendMessageW(h_list, LVM_GETITEMCOUNT, 0, 0) as i32;
                                  let mut selected_idx = -1;
                                  for i in 0..count {
-                                     let state = SendMessageW(h_list, windows_sys::Win32::UI::Controls::LVM_GETITEMSTATE, i as WPARAM, windows_sys::Win32::UI::Controls::LVIS_SELECTED as LPARAM);
-                                     if (state & windows_sys::Win32::UI::Controls::LVIS_SELECTED as LRESULT) != 0 {
+                                     let state = SendMessageW(h_list, LVM_GETITEMSTATE, i as WPARAM, LVIS_SELECTED as LPARAM);
+                                     if (state & LVIS_SELECTED as LRESULT) != 0 {
                                          selected_idx = i;
                                          break;
                                      }
@@ -230,7 +222,7 @@ impl WindowHandler for WatcherState {
                         },
                         IDC_BTN_REFRESH => {
                             if code == BN_CLICKED as u16 {
-                                let h_list = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
+                                let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
                                 self.refresh_list(h_list);
                             }
                         },
@@ -263,7 +255,7 @@ impl WindowHandler for WatcherState {
 impl WatcherState {
     fn on_resize(&mut self, hwnd: HWND, _width: i32, _height: i32) {
         unsafe {
-            use windows_sys::Win32::Foundation::RECT;
+            use RECT;
             let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
             GetClientRect(hwnd, &mut rc);
             let w = rc.right - rc.left;
@@ -275,23 +267,23 @@ impl WatcherState {
             
             // Resize List View: Fill top area up to buttons
             let list_h = if btn_y > padding { btn_y - padding - 10 } else { 100 };
-            let h_list = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
+            let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
             if h_list != std::ptr::null_mut() {
                 MoveWindow(h_list, padding, padding, w - (padding * 2), list_h, 1);
             }
             
             // Move Buttons
             // Left aligned: Add, Remove, Refresh
-            let h_btn_add = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_ADD as i32);
-            let h_btn_rem = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_REMOVE as i32);
-            let h_btn_ref = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_REFRESH as i32);
+            let h_btn_add = GetDlgItem(hwnd, IDC_BTN_ADD as i32);
+            let h_btn_rem = GetDlgItem(hwnd, IDC_BTN_REMOVE as i32);
+            let h_btn_ref = GetDlgItem(hwnd, IDC_BTN_REFRESH as i32);
             
             if h_btn_add != std::ptr::null_mut() { MoveWindow(h_btn_add, padding, btn_y, 80, btn_height, 1); }
             if h_btn_rem != std::ptr::null_mut() { MoveWindow(h_btn_rem, padding + 90, btn_y, 80, btn_height, 1); }
             if h_btn_ref != std::ptr::null_mut() { MoveWindow(h_btn_ref, padding + 180, btn_y, 80, btn_height, 1); }
             
             // Right aligned: Close
-            let h_btn_close = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CLOSE as i32);
+            let h_btn_close = GetDlgItem(hwnd, IDC_BTN_CLOSE as i32);
             if h_btn_close != std::ptr::null_mut() {
                 MoveWindow(h_btn_close, w - 100 - padding, btn_y, 100, btn_height, 1);
             }

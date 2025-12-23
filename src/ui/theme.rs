@@ -5,27 +5,7 @@
 //! with `uxtheme.dll` for advanced styling.
 
 use std::sync::OnceLock;
-use windows_sys::Win32::Foundation::{HWND, LRESULT, WPARAM};
-use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE};
-use windows_sys::Win32::Graphics::Gdi::{
-    CreateFontW, CreateSolidBrush, FillRect, GetStockObject, HBRUSH, HDC, HFONT, 
-    SetBkMode, SetTextColor, TRANSPARENT, WHITE_BRUSH, DEFAULT_CHARSET, 
-    DEFAULT_PITCH, FF_DONTCARE, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, 
-    CLEARTYPE_QUALITY, FW_NORMAL,
-};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_ERASEBKGND, WM_CTLCOLORDLG, WM_SETFONT, 
-    WM_CTLCOLOREDIT, SendMessageW
-};
-
-use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows_sys::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, RegCloseKey, RegOpenKeyExW, RegQueryValueExW, KEY_READ};
-use windows_sys::Win32::UI::Controls::SetWindowTheme;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindow, GW_CHILD, GW_HWNDNEXT, GetClassNameW, GetWindowLongW, GWL_STYLE, 
-    BS_GROUPBOX, BS_CHECKBOX, BS_RADIOBUTTON, BS_AUTOCHECKBOX, BS_AUTORADIOBUTTON, BS_3STATE, BS_AUTO3STATE
-};
-
+use crate::types::*;
 use crate::utils::to_wstring;
 use crate::ui::state::AppTheme;
 
@@ -157,7 +137,6 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
 
     if is_dark {
         // Force the control to update its theme data immediately
-        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_THEMECHANGED};
         SendMessageW(hwnd, WM_THEMECHANGED, 0, 0);
     }
 }
@@ -344,11 +323,9 @@ pub unsafe fn handle_standard_colors(
         WM_CTLCOLOREDIT => {
              let hdc = wparam as HDC;
              if is_dark {
-                 use windows_sys::Win32::Graphics::Gdi::{SetBkColor};
-                 use windows_sys::Win32::Graphics::Gdi::OPAQUE;
-                 SetTextColor(hdc, COLOR_DARK_TEXT);
-                 SetBkColor(hdc, COLOR_DARK_BG); // Solid background for text
-                 SetBkMode(hdc, OPAQUE as i32);  // Ensure solid background is used
+                  SetTextColor(hdc, COLOR_DARK_TEXT);
+                  SetBkColor(hdc, COLOR_DARK_BG); // Solid background for text
+                  SetBkMode(hdc, OPAQUE as i32);  // Ensure solid background is used
                  Some(get_dark_brush() as LRESULT)
              } else {
                  SetTextColor(hdc, COLOR_LIGHT_TEXT);

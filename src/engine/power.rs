@@ -1,51 +1,8 @@
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
-use windows_sys::Win32::Foundation::HANDLE;
+use crate::types::*;
 use std::mem::zeroed;
-use std::ffi::c_void;
 
 // --- Manual Bindings & Structs ---
-
-#[repr(C)]
-struct PROCESS_POWER_THROTTLING_STATE {
-    Version: u32,
-    ControlMask: u32,
-    StateMask: u32,
-}
-
-#[repr(C)]
-struct THREAD_POWER_THROTTLING_STATE {
-    Version: u32,
-    ControlMask: u32,
-    StateMask: u32,
-}
-
-#[repr(C)]
-struct SYSTEM_INFO {
-    wProcessorArchitecture: u16,
-    wReserved: u16,
-    dwPageSize: u32,
-    lpMinimumApplicationAddress: *mut c_void,
-    lpMaximumApplicationAddress: *mut c_void,
-    dwActiveProcessorMask: usize,
-    dwNumberOfProcessors: u32,
-    dwProcessorType: u32,
-    dwAllocationGranularity: u32,
-    wProcessorLevel: u16,
-    wProcessorRevision: u16,
-}
-
-const ProcessPowerThrottling: u32 = 4;
-const ThreadPowerThrottling: u32 = 1;
-const THREAD_PRIORITY_IDLE: i32 = -15;
-const IDLE_PRIORITY_CLASS: u32 = 64;
-const NORMAL_PRIORITY_CLASS: u32 = 32;
-
-// Version 1 is standard for EcoQoS
-const PROCESS_POWER_THROTTLING_CURRENT_VERSION: u32 = 1;
-const PROCESS_POWER_THROTTLING_EXECUTION_SPEED: u32 = 1;
-
-const THREAD_POWER_THROTTLING_CURRENT_VERSION: u32 = 1;
-const THREAD_POWER_THROTTLING_EXECUTION_SPEED: u32 = 1;
 
 #[link(name = "kernel32")]
 unsafe extern "system" {

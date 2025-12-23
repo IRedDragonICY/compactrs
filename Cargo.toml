@@ -14,28 +14,7 @@ keywords = ["windows", "compression", "wof", "compactos", "utility"]
 categories = ["os::windows-apis", "filesystem", "command-line-utilities"]
 
 [dependencies]
-windows-sys = { version = "0.61.2", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Controls",
-    "Win32_UI_Shell",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_Graphics_Gdi",
-    "Win32_Graphics_Dwm",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Memory",
-    "Win32_System_SystemServices",
-    "Win32_System_Com",
-    "Win32_Storage_FileSystem",
-    "Win32_Security",
-    "Win32_System_Registry",
-    "Win32_System_RestartManager",
-    "Win32_System_DataExchange",
-    "Win32_System_IO",
-    "Win32_Security_Authorization",
-    "Win32_System_Services",
-    "Win32_System_WindowsProgramming",
-] }
+
 
 # No build-dependencies needed - manual RC compilation in build.rs
 

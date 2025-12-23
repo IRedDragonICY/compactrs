@@ -1,14 +1,6 @@
 #![windows_subsystem = "windows"]
 
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    MessageBoxW, MB_ICONERROR, MB_OK, SW_SHOW, FindWindowW, SendMessageW,
-    WM_COPYDATA,
-};
-use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
-use windows_sys::Win32::UI::Shell::{IsUserAnAdmin, ShellExecuteW};
-use windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW;
+use crate::types::*;
 use std::ptr;
 use std::sync::OnceLock;
 
@@ -21,6 +13,7 @@ pub mod utils;
 pub mod updater;
 pub mod watcher_config;
 mod logger;
+pub mod types;
 
 pub mod com;
 
@@ -206,8 +199,8 @@ fn main() {
     unsafe {
         // Initialize COM for IFileOpenDialog
         // Ignore result, it might already be initialized
-        // Note: windows-sys defines COINIT_APARTMENTTHREADED as i32 (0x2), CoInitializeEx expects u32
-        let _ = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED as u32);
+        // Note: crate::types uses u32 for COINIT_APARTMENTTHREADED
+        let _ = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED);
 
         let instance = GetModuleHandleW(ptr::null());
         
@@ -227,7 +220,7 @@ fn main() {
         ui::framework::run_message_loop(hwnd_main);
 
         // Clean up COM
-        windows_sys::Win32::System::Com::CoUninitialize();
+        CoUninitialize();
         
         // Force process exit to ensure no background threads start
         std::process::exit(0);

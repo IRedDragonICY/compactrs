@@ -5,19 +5,7 @@
 //! This component manages the status display area at the bottom of the main window,
 //! containing a static text label for status messages and a progress bar.
 
-use windows_sys::Win32::Foundation::{HWND, RECT};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::Controls::{PBS_SMOOTH, PROGRESS_CLASSW};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, SetWindowPos, SWP_NOZORDER, WS_CHILD, WS_VISIBLE,
-    SendMessageW, WM_SETFONT, HMENU,
-    GetWindowLongW, SetWindowLongW, GWL_STYLE, GWL_EXSTYLE,
-    WS_BORDER, WS_DLGFRAME, WS_EX_CLIENTEDGE, WS_EX_STATICEDGE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_FRAMECHANGED,
-    SetWindowLongPtrW, CallWindowProcW, GWLP_WNDPROC, WM_NCPAINT, WM_NCCALCSIZE,
-    WM_DESTROY, SetPropW, GetPropW, RemovePropW,
-};
-use windows_sys::Win32::Graphics::Gdi::HFONT;
+use crate::types::*;
 
 use super::base::Component;
 
@@ -131,7 +119,7 @@ impl StatusBar {
 impl Component for StatusBar {
     unsafe fn create(&mut self, parent: HWND) -> Result<(), String> {
         unsafe {
-            let instance = GetModuleHandleW(std::ptr::null());
+            let instance = GetModuleHandleW(std::ptr::null_mut());
 
             // Create header/status label
             let label_text = w!("Drag and drop files or folders, or use 'Files'/'Folder' buttons. Then click 'Process All'.");
@@ -149,7 +137,7 @@ impl Component for StatusBar {
                 parent,
                 self.label_id as usize as HMENU,
                 instance,
-                std::ptr::null(),
+                std::ptr::null_mut(),
             );
             
             if self.hwnd_label == std::ptr::null_mut() {
@@ -171,7 +159,7 @@ impl Component for StatusBar {
                 parent,
                 self.progress_id as usize as HMENU,
                 instance,
-                std::ptr::null(),
+                std::ptr::null_mut(),
             );
 
             if self.hwnd_progress == std::ptr::null_mut() {

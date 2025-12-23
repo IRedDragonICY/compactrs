@@ -1,45 +1,6 @@
 #![allow(non_snake_case, non_camel_case_types)]
 use crate::utils::to_wstring;
-use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, FILETIME, HANDLE};
-
-// --- Manual Bindings for RestartManager & Threading ---
-
-const PROCESS_TERMINATE: u32 = 0x0001;
-const CCH_RM_SESSION_KEY: u32 = 32;
-// const RmRebootReasonNone: u32 = 0; // Not strictly needed if passed as 0/none
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct RM_UNIQUE_PROCESS {
-    dwProcessId: u32,
-    ProcessStartTime: FILETIME,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct RM_PROCESS_INFO {
-    Process: RM_UNIQUE_PROCESS,
-    strAppName: [u16; 256],
-    strServiceShortName: [u16; 64],
-    ApplicationType: u32, // RM_APP_TYPE enum
-    AppStatus: u32,
-    TSSessionId: u32,
-    bRestartable: i32,
-}
-
-#[link(name = "rstrtmgr")]
-unsafe extern "system" {
-    fn RmStartSession(pSessionHandle: *mut u32, dwSessionFlags: u32, strSessionKey: *mut u16) -> u32;
-    fn RmRegisterResources(dwSessionHandle: u32, nFiles: u32, rgsFileNames: *const *const u16, nApplications: u32, rgApplications: *const std::ffi::c_void, nServices: u32, rgsServiceNames: *const *const u16) -> u32;
-    fn RmGetList(dwSessionHandle: u32, pnProcInfoNeeded: *mut u32, pnProcInfo: *mut u32, rgAffectedApps: *mut RM_PROCESS_INFO, lpdwRebootReasons: *mut u32) -> u32;
-    fn RmEndSession(dwSessionHandle: u32) -> u32;
-}
-
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> HANDLE;
-    fn TerminateProcess(hProcess: HANDLE, uExitCode: u32) -> i32;
-}
+use crate::types::*;
 
 #[derive(Debug, Clone)]
 pub struct ProcessInfo {

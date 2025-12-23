@@ -1,6 +1,5 @@
 /* --- src/utils.rs --- */
-use windows_sys::Win32::UI::Shell::{StrFormatByteSizeW, ShellExecuteW};
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+use crate::types::*;
 
 /// Macro to convert a string literal to a null-terminated UTF-16 array at compile time.
 /// 
@@ -24,13 +23,14 @@ macro_rules! w {
                 let mut out = [0u16; LEN];
                 let mut i = 0;
                 while i < S.len() {
-                    out[i] = S[i] as u16;
+                    // Unsafe pointer access to bypass const-index limitations on older Rust
+                    out[i] = unsafe { *S.as_ptr().add(i) } as u16;
                     i += 1;
                 }
                 out[LEN - 1] = 0;
                 out
             };
-            &UTF16[..]
+            &UTF16 as &[u16]
         }
     };
 }

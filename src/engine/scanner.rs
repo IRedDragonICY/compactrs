@@ -3,12 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use std::sync::mpsc::Sender;
 
-use windows_sys::Win32::Storage::FileSystem::{
-    FindFirstFileExW, FindNextFileW, FindClose, FindExInfoBasic, FindExSearchNameMatch,
-    FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-};
-use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-
+use crate::types::*;
 use crate::utils::PathBuffer;
 use crate::engine::wof::{get_real_file_size, get_wof_algorithm, WofAlgorithm, CompressionState};
 use crate::ui::state::{UiMessage, ProcessingState};
@@ -100,6 +95,7 @@ where
     let original_len = buffer.len();
     buffer.push("*");
     
+    // Safety: zeroed is safe for WIN32_FIND_DATAW
     let mut find_data: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
 
     unsafe {
@@ -108,12 +104,13 @@ where
             FindExInfoBasic,
             &mut find_data as *mut _ as *mut _,
             FindExSearchNameMatch,
-            std::ptr::null(),
+            std::ptr::null_mut(), // lpSearchFilter is optional/reserved often, but defined as *mut c_void
             FIND_FIRST_EX_LARGE_FETCH,
         );
 
         buffer.truncate(original_len); // Restore path
 
+        // INVALID_HANDLE_VALUE logic
         if handle == INVALID_HANDLE_VALUE {
             return;
         }

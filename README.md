@@ -42,9 +42,9 @@ Unlike traditional archivers (Zip, 7z, Rar), CompactRS performs **Transparent Co
 The decompression happens on-the-fly in the kernel driver level with negligible CPU overhead.
 
 ### Zero Dependency Philosophy
-This application is engineered in pure **Rust** utilizing the `windows` crate for direct Win32 API calls.
+This application is engineered in pure **Rust** utilizing **manual FFI definitions** for direct Win32 API calls. It has **zero external runtime dependencies** (not even the `windows` or `windows-sys` crates).
 *   **No Runtime Requirements:** Does not require .NET Framework, Java, Python, or Visual C++ Redistributables.
-*   **Standalone Binary:** The output is a single, static executable file (<1MB) that runs out-of-the-box on any Windows 10/11 system.
+*   **Ultra-Compact Binary:** The output is a single, static executable file (**~296 KB**) that runs out-of-the-box on any Windows 10/11 system.
 *   **Native UI:** Draws standard Windows controls via `user32.dll` and `uxtheme.dll` for a native look and feel that respects system DPI settings.
 
 ---
@@ -81,14 +81,17 @@ Built directly on top of the Windows Message Loop (`GetMessage`, `DispatchMessag
 
 ## 3. Comparison: CompactRS vs. Others
 
-| Feature | CompactRS (WOF) | NTFS Compression (LZNT1) | 7-Zip / WinRAR |
-| :--- | :--- | :--- | :--- |
-| **Access Method** | Instant / Transparent | Instant / Transparent | Must Extract First |
-| **Algorithm** | LZX / XPRESS (Modern) | LZNT1 (Legacy) | LZMA / LZMA2 |
-| **Ratio** | High (30-60%) | Low (15-25%) | Ultra (40-70%) |
-| **Performance** | Multi-threaded | Single-threaded | Multi-threaded |
-| **Write Speed** | Slow (Re-compression) | Fast | N/A (Archive update) |
-| **Dependencies** | None (Native) | None (Native) | Runtime / DLLs |
+| Feature | **CompactRS** | **Compactor** | **CompactGUI** | **compact.exe** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Interface** | **Native Win32 UI** | WebView UI | Modern WPF GUI | CLI |
+| **Language** | **Rust (Manual FFI)** | Rust | C# / .NET 9 | C/C++ |
+| **Binary Size** | **~296 KB** | ~617 KB (.zip) | ~10 MB (+Runtime)<br>~67 MB (Standalone) | N/A (Built-in) |
+| **Dependencies** | **Zero (Static)** | WebView2 | .NET 9 Desktop Runtime | None |
+| **Memory** | **~3-4 MB** | ~20 MB+ | ~60 MB+ | Low |
+| **Compresstimation** | **Yes** (Heuristic) | **Yes** (Statistical) | No | No |
+| **Folder Monitoring** | **Yes** | No | **Yes** | No |
+| **Game Database** | No | No | **Yes** | No |
+| **Pause/Resume** | **Yes** | **Yes** | Yes | No |
 
 ---
 

@@ -1,18 +1,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use std::ffi::c_void;
+
 use std::marker::PhantomData;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, HINSTANCE, RECT};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::Graphics::Gdi::HBRUSH;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, GetWindowLongPtrW, LoadCursorW, RegisterClassW, SetWindowLongPtrW,
-    CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, IDC_ARROW, WM_CREATE, WM_NCCREATE, WNDCLASSW,
-    CREATESTRUCTW, HICON, LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED,
-    GetWindowRect, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
-    WM_CLOSE, WM_DESTROY, DestroyWindow, PostQuitMessage,
-    MSG, GetMessageW, TranslateMessage, DispatchMessageW,
-    WS_VISIBLE, WS_OVERLAPPEDWINDOW, IsDialogMessageW,
-};
+use crate::types::*;
+
 use crate::utils::to_wstring;
 
 /// Defines how the window should be positioned.
@@ -212,7 +202,7 @@ impl<T: WindowHandler> Window<T> {
             parent,
             std::ptr::null_mut(),
             instance,
-            state as *mut T as *mut c_void,
+            state as *mut T as *mut std::ffi::c_void,
         ) };
 
         if hwnd == std::ptr::null_mut() {

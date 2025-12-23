@@ -1,6 +1,6 @@
 /* --- src/ui/controls.rs --- */
 #![allow(unsafe_op_in_unsafe_fn)]
-use windows_sys::Win32::Foundation::HWND;
+use crate::types::HWND;
 use crate::ui::theme::{self, ControlType};
 
 // Control IDs
@@ -60,8 +60,8 @@ pub unsafe fn apply_edit_theme(hwnd: HWND, is_dark: bool) {
 /// Applies Windows 11 Fluent blue accent styling to a button.
 /// Uses owner-draw for custom painting with accent blue color.
 pub unsafe fn apply_accent_button_theme(hwnd: HWND, _is_dark: bool) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, GWL_STYLE, BS_OWNERDRAW};
-    use windows_sys::Win32::Graphics::Gdi::InvalidateRect;
+    use crate::types::{GetWindowLongW, SetWindowLongW, GWL_STYLE, BS_OWNERDRAW};
+    use crate::types::InvalidateRect;
     
     // Change to owner-draw style for custom painting
     let style = GetWindowLongW(hwnd, GWL_STYLE);
@@ -83,11 +83,9 @@ pub const COLOR_ACCENT_BLUE_PRESSED: u32 = 0x00C06000; // Darker blue for presse
 /// Draws an accent button with Windows 11 Fluent blue style.
 /// Call this from WM_DRAWITEM handler.
 pub unsafe fn draw_accent_button(lparam: isize) {
-    use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_SELECTED, ODS_DISABLED};
-    use windows_sys::Win32::Graphics::Gdi::{
-        CreateSolidBrush, DeleteObject, SetBkMode, SetTextColor, 
-        SelectObject, TRANSPARENT, RoundRect, CreatePen, PS_SOLID,
-    };
+    use crate::types::{DRAWITEMSTRUCT, ODS_SELECTED, ODS_DISABLED}; 
+    // GDI functions are available via crate::types::* if imported or via crate::types directly
+    use crate::types::*;
     
     let dis = &*(lparam as *const DRAWITEMSTRUCT);
     
@@ -131,12 +129,12 @@ pub unsafe fn draw_accent_button(lparam: isize) {
     SetTextColor(dis.hDC, text_color);
     
     // Get button text
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW;
+    
+
     let mut text_buf: [u16; 64] = [0; 64];
     let text_len = GetWindowTextW(dis.hwndItem, text_buf.as_mut_ptr(), 64);
     
     if text_len > 0 {
-        use windows_sys::Win32::Graphics::Gdi::{DrawTextW, DT_CENTER, DT_VCENTER, DT_SINGLELINE};
         let mut rc = dis.rcItem;
         DrawTextW(dis.hDC, text_buf.as_ptr(), text_len, &mut rc, 
                   DT_CENTER | DT_VCENTER | DT_SINGLELINE);

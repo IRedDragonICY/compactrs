@@ -1,8 +1,6 @@
 #![allow(non_snake_case, non_camel_case_types)]
 
-use windows_sys::core::{GUID, HRESULT, PCWSTR};
-use windows_sys::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-use windows_sys::Win32::System::Com::STGM_READ;
+use crate::types::*;
 use std::ffi::c_void;
 use crate::utils::to_wstring;
 
@@ -18,13 +16,7 @@ struct IShellLinkWVtbl {
     pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
     pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
     pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub GetPath: unsafe extern "system" fn(*mut c_void, PCWSTR, i32, *mut c_void, u32) -> HRESULT,
-    // We only need GetPath, but we must provide padding for the rest of the VTable if we were to implement more.
-    // However, since we are only calling GetPath (index 3) and IUnknown methods (0-2),
-    // and we are NOT implementing the interface but CALLING it,
-    // we only need to define the struct up to the method we call.
-    // Wait, strictly speaking, to map the VTable layout correctly for calling,
-    // we just need the function pointers in the correct order.
+    pub GetPath: unsafe extern "system" fn(*mut c_void, LPCWSTR, i32, *mut c_void, u32) -> HRESULT,
 }
 
 #[repr(C)]
@@ -34,8 +26,7 @@ struct IPersistFileVtbl {
     pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
     pub GetClassID: unsafe extern "system" fn(*mut c_void, *mut GUID) -> HRESULT, // IPersist
     pub IsDirty: unsafe extern "system" fn(*mut c_void) -> HRESULT,
-    pub Load: unsafe extern "system" fn(*mut c_void, PCWSTR, u32) -> HRESULT,
-    // Methods after Load are not used, so we can omit them in this definition.
+    pub Load: unsafe extern "system" fn(*mut c_void, LPCWSTR, u32) -> HRESULT,
 }
 
 /// Resolves a shortcut (.lnk) file to its target path.
@@ -87,16 +78,9 @@ pub fn resolve_shortcut(path: &str) -> Option<String> {
         }
 
         // 4. Get the target path using IShellLinkW
-        // MAX_PATH is usually 260, but let's use a larger buffer to be safe (e.g. 32768 for long paths support in some contexts, though IShellLink might limited)
-        // Standard MAX_PATH is 260.
         let mut target_path = [0u16; 32768]; 
-        // WIN32_FIND_DATAW is needed as the 4th argument, but can be NULL if we don't care about it?
-        // documentation says: pfd [out, optional] in newer versions, but older docs say it's required.
-        // Let's allocate a dummy buffer for WIN32_FIND_DATAW just in case.
-        // WIN32_FIND_DATAW is 592 bytes.
-        // windows_sys::Win32::Storage::FileSystem::WIN32_FIND_DATAW
         
-        let mut fd: windows_sys::Win32::Storage::FileSystem::WIN32_FIND_DATAW = std::mem::zeroed();
+        let mut fd: WIN32_FIND_DATAW = std::mem::zeroed();
 
         // flags: SLGP_RAWPATH (0x1) or SLGP_UNCPRIORITY (0x2). 0 is standard.
         // We use 0.

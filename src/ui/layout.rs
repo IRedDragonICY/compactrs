@@ -1,5 +1,4 @@
-use windows_sys::Win32::Foundation::{HWND, RECT};
-use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOZORDER, HWND_TOP};
+use crate::types::*;
 
 #[derive(Clone, Copy)]
 pub enum SizePolicy {

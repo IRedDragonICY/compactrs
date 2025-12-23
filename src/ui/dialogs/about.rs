@@ -3,20 +3,7 @@ use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
 use crate::w;
 use crate::ui::framework::WindowHandler;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    STM_SETICON, LoadImageW, IMAGE_ICON, LR_DEFAULTCOLOR,
-    SendMessageW, GetClientRect,
-};
-
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-// unused imports removed
-use windows_sys::Win32::UI::Shell::ShellExecuteW;
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-use windows_sys::Win32::Graphics::Gdi::{
-    CreateFontW, FW_BOLD, FW_NORMAL, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
-    DEFAULT_PITCH, FF_DONTCARE, FW_LIGHT, InvalidateRect, HFONT,
-};
+use crate::types::*;
 
 const ABOUT_TITLE: &str = "About CompactRS";
 const GITHUB_URL: &str = "https://github.com/IRedDragonICY/compactrs";

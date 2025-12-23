@@ -5,14 +5,7 @@ use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::fs::OpenOptionsExt; 
-use windows_sys::Win32::Foundation::{
-    CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LUID, ERROR_ACCESS_DENIED
-};
-use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, GetCompressedFileSizeW, GetFileAttributesW, SetFileAttributesW, 
-    FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY, FILE_FLAG_BACKUP_SEMANTICS, 
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-};
+use crate::types::*;
 
 // --- Manual Bindings & Constants ---
 
@@ -39,18 +32,7 @@ struct TOKEN_PRIVILEGES {
     Privileges: [LUID_AND_ATTRIBUTES; 1],
 }
 
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn DeviceIoControl(hDevice: HANDLE, dwIoControlCode: u32, lpInBuffer: *const c_void, nInBufferSize: u32, lpOutBuffer: *mut c_void, nOutBufferSize: u32, lpBytesReturned: *mut u32, lpOverlapped: *mut c_void) -> i32;
-    fn GetCurrentProcess() -> HANDLE;
-}
 
-#[link(name = "advapi32")]
-unsafe extern "system" {
-    fn OpenProcessToken(ProcessHandle: HANDLE, DesiredAccess: u32, TokenHandle: *mut HANDLE) -> i32;
-    fn LookupPrivilegeValueW(lpSystemName: *const u16, lpName: *const u16, lpLuid: *mut LUID) -> i32;
-    fn AdjustTokenPrivileges(TokenHandle: HANDLE, DisableAllPrivileges: i32, NewState: *const TOKEN_PRIVILEGES, BufferLength: u32, PreviousState: *mut c_void, ReturnLength: *mut u32) -> i32;
-}
 
 use crate::utils::{to_wstring, PathBuffer};
 
@@ -58,7 +40,8 @@ pub fn get_real_file_size(path: &str) -> u64 {
     unsafe {
         let wide = PathBuffer::from(path);
         let mut high: u32 = 0;
-        let low = GetCompressedFileSizeW(wide.as_ptr(), &mut high);
+        let win_api = crate::engine::dynamic_import::WinApi::get();
+        let low = (win_api.GetCompressedFileSizeW.unwrap())(wide.as_ptr(), &mut high);
         
         if low == u32::MAX && GetLastError() != 0 {
             // If error, fall back to logical size or 0
@@ -74,7 +57,8 @@ pub fn get_real_file_size(path: &str) -> u64 {
 pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
     unsafe {
         let wide = PathBuffer::from(path);
-        let handle = CreateFileW(
+        let win_api = crate::engine::dynamic_import::WinApi::get();
+        let handle = (win_api.CreateFileW.unwrap())(
             wide.as_ptr(),
             0x80000000, // GENERIC_READ
             FILE_SHARE_READ,
@@ -89,7 +73,7 @@ pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
         }
 
         let result = get_wof_algorithm_from_handle(handle);
-        CloseHandle(handle);
+        (win_api.CloseHandle.unwrap())(handle);
         result
     }
 }
@@ -105,7 +89,8 @@ pub fn get_wof_algorithm_from_handle(handle: HANDLE) -> Option<WofAlgorithm> {
         let mut out_buffer = [0u8; 1024];
         let mut bytes_returned = 0u32;
         
-        let result = DeviceIoControl(
+        let win_api = crate::engine::dynamic_import::WinApi::get();
+        let result = (win_api.DeviceIoControl.unwrap())(
             handle,
             FSCTL_GET_EXTERNAL_BACKING,
             std::ptr::null(),
@@ -327,8 +312,9 @@ fn smart_compress_with_backup_semantics(path: &str, algo: WofAlgorithm, force: b
     unsafe {
         let wide = PathBuffer::from(path);
         let access = 0x80000000 | 0x40000000; // GENERIC_READ | GENERIC_WRITE
+        let win_api = crate::engine::dynamic_import::WinApi::get();
         
-        let handle = CreateFileW(
+        let handle = (win_api.CreateFileW.unwrap())(
             wide.as_ptr(),
             access,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -346,7 +332,7 @@ fn smart_compress_with_backup_semantics(path: &str, algo: WofAlgorithm, force: b
         if !force {
             if let Some(current_algo) = get_wof_algorithm_from_handle(handle) {
                 if current_algo == algo {
-                    CloseHandle(handle);
+                    (win_api.CloseHandle.unwrap())(handle);
                     return Ok(true);
                 }
             }
@@ -364,13 +350,14 @@ fn smart_compress_with_backup_semantics(path: &str, algo: WofAlgorithm, force: b
 fn force_remove_readonly(path: &str) {
     unsafe {
         let wide = PathBuffer::from(path);
+        let win_api = crate::engine::dynamic_import::WinApi::get();
         
-        let attrs = GetFileAttributesW(wide.as_ptr());
+        let attrs = (win_api.GetFileAttributesW.unwrap())(wide.as_ptr());
         if attrs != u32::MAX { // INVALID_FILE_ATTRIBUTES
             // Remove read-only flag
             let new_attrs = attrs & !FILE_ATTRIBUTE_READONLY;
             let new_attrs = if new_attrs == 0 { FILE_ATTRIBUTE_NORMAL } else { new_attrs };
-            SetFileAttributesW(wide.as_ptr(), new_attrs);
+            (win_api.SetFileAttributesW.unwrap())(wide.as_ptr(), new_attrs);
         }
     }
 }
@@ -380,8 +367,13 @@ fn force_remove_readonly(path: &str) {
 pub fn enable_backup_privileges() {
     unsafe {
         let mut token_handle: HANDLE = std::ptr::null_mut(); // Initialize with null_mut
-        if OpenProcessToken(
-            GetCurrentProcess(),
+        let win_api = crate::engine::dynamic_import::WinApi::get();
+        
+        // Using -1 as pseudo handle for current process
+        let current_process = -1isize as HANDLE;
+        
+        if (win_api.OpenProcessToken.unwrap())(
+            current_process,
             TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
             &mut token_handle
         ) == 0 {
@@ -397,7 +389,7 @@ pub fn enable_backup_privileges() {
         
         for priv_name in privileges {
             let mut luid = LUID { LowPart: 0, HighPart: 0 };
-            if LookupPrivilegeValueW(std::ptr::null(), priv_name.as_ptr(), &mut luid) != 0 {
+            if (win_api.LookupPrivilegeValueW.unwrap())(std::ptr::null(), priv_name.as_ptr(), &mut luid as *mut _ as *mut _) != 0 {
                 let tp = TOKEN_PRIVILEGES {
                     PrivilegeCount: 1,
                     Privileges: [LUID_AND_ATTRIBUTES {
@@ -405,10 +397,10 @@ pub fn enable_backup_privileges() {
                         Attributes: SE_PRIVILEGE_ENABLED,
                     }],
                 };
-                AdjustTokenPrivileges(
+                (win_api.AdjustTokenPrivileges.unwrap())(
                     token_handle,
                     0, // FALSE
-                    &tp,
+                    &tp as *const _ as *const _,
                     0,
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
@@ -416,7 +408,7 @@ pub fn enable_backup_privileges() {
             }
         }
         
-        CloseHandle(token_handle);
+        (win_api.CloseHandle.unwrap())(token_handle);
     }
 }
 
@@ -428,7 +420,7 @@ fn compress_file_with_backup_semantics(path: &str, algo: WofAlgorithm, force: bo
         // GENERIC_READ (0x80000000) | GENERIC_WRITE (0x40000000)
         let access = 0x80000000 | 0x40000000;
         
-        let handle = CreateFileW(
+        let handle = (crate::engine::dynamic_import::WinApi::get().CreateFileW.unwrap())(
             wide.as_ptr(),
             access,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -484,7 +476,8 @@ pub fn compress_file_handle(file: &File, algo: WofAlgorithm, force: bool) -> Res
     let mut bytes_returned = 0u32;
     
     unsafe {
-        let result = DeviceIoControl(
+        let win_api = crate::engine::dynamic_import::WinApi::get();
+        let result = (win_api.DeviceIoControl.unwrap())(
             handle,
             FSCTL_SET_EXTERNAL_BACKING,
             input_buffer.as_ptr() as *const c_void,
@@ -503,7 +496,7 @@ pub fn compress_file_handle(file: &File, algo: WofAlgorithm, force: bool) -> Res
                  if force {
                      // Fallback to NTFS Compression (LZNT1)
                      let compression_state: u16 = COMPRESSION_FORMAT_DEFAULT;
-                     let _ = DeviceIoControl(
+                     let _ = (crate::engine::dynamic_import::WinApi::get().DeviceIoControl.unwrap())(
                         handle,
                         FSCTL_SET_COMPRESSION,
                         &compression_state as *const _ as *const c_void,
@@ -543,7 +536,8 @@ pub fn uncompress_file_handle(file: &File) -> Result<(), u32> {
     let mut bytes_returned = 0u32;
 
     unsafe {
-        if DeviceIoControl(
+        let win_api = crate::engine::dynamic_import::WinApi::get();
+        if (win_api.DeviceIoControl.unwrap())(
             handle,
             FSCTL_DELETE_EXTERNAL_BACKING,
             std::ptr::null(),
@@ -566,7 +560,7 @@ pub fn uncompress_file_handle(file: &File) -> Result<(), u32> {
         // FSCTL_SET_COMPRESSION(COMPRESSION_FORMAT_NONE)
         let compression_state: u16 = COMPRESSION_FORMAT_NONE; 
         
-        let _ = DeviceIoControl(
+        let _ = (win_api.DeviceIoControl.unwrap())(
             handle,
             FSCTL_SET_COMPRESSION,
             &compression_state as *const _ as *const c_void,

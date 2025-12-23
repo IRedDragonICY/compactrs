@@ -1,9 +1,5 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use windows_sys::Win32::Foundation::HWND;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, ShowWindow, SetForegroundWindow, SW_RESTORE, 
-    WS_POPUP, WS_CAPTION, WS_SYSMENU, WS_VISIBLE
-};
+use crate::types::*;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, show_modal};
 
 /// Helper to show a modal dialog, or bring it to front if already exists.

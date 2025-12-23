@@ -5,8 +5,7 @@
 //! This component manages the action bar at the bottom of the main window,
 //! containing buttons for file operations, algorithm selection, and process control.
 
-use windows_sys::Win32::Foundation::{HWND, RECT};
-use windows_sys::Win32::Graphics::Gdi::HFONT;
+use crate::types::*;
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;

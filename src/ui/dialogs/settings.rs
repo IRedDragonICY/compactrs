@@ -4,18 +4,7 @@ use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
 use crate::w;
 use crate::ui::framework::WindowHandler;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
-use windows_sys::Win32::Graphics::Gdi::{
-    InvalidateRect, CreateFontIndirectW, GetObjectW, DeleteObject, LOGFONTW, FW_BOLD, HFONT,
-    GetStockObject, DEFAULT_GUI_FONT,
-};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    WM_COMMAND, WM_HSCROLL,
-    BN_CLICKED, CBN_SELCHANGE,
-    DestroyWindow, FindWindowW, MessageBoxW, SendMessageW,
-    MB_ICONERROR, MB_OK, MB_YESNO, MB_ICONWARNING, IDYES,
-    AdjustWindowRect, GetWindowLongW, GWL_STYLE,
-};
+use crate::types::*;
 use crate::ui::wrappers::{Button, Label, Trackbar, ComboBox};
 
 const SETTINGS_TITLE: &str = "Settings";
@@ -361,7 +350,7 @@ impl WindowHandler for SettingsState {
                     .text(&self.max_concurrent_items.to_string())
                     .pos(x + 90, y + 5)
                     .size(50, 20)
-                    .style((windows_sys::Win32::UI::WindowsAndMessaging::ES_NUMBER | windows_sys::Win32::UI::WindowsAndMessaging::ES_CENTER) as u32)
+                    .style(ES_NUMBER | ES_CENTER)
                     .dark_mode(is_dark_mode)
                     .build()
             });
@@ -400,7 +389,7 @@ impl WindowHandler for SettingsState {
                 .text(&self.skip_extensions)
                 .pos(30, current_y)
                 .size(480, 50)
-                .style((windows_sys::Win32::UI::WindowsAndMessaging::ES_AUTOVSCROLL | windows_sys::Win32::UI::WindowsAndMessaging::ES_MULTILINE) as u32) 
+                .style(ES_AUTOVSCROLL | ES_MULTILINE) 
                 .dark_mode(is_dark_mode)
                 .build();
                 
@@ -461,7 +450,7 @@ impl WindowHandler for SettingsState {
             if !self.log_enabled {
                 let ids = [IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
                 for &id in &ids {
-                    let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id as i32);
+                    let h = GetDlgItem(hwnd, id as i32);
                     if h != std::ptr::null_mut() {
                         Button::new(h).set_enabled(false);
                     }
@@ -553,8 +542,7 @@ impl WindowHandler for SettingsState {
             let total_width = rect.right - rect.left;
             let total_height = rect.bottom - rect.top;
 
-            use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos;
-            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, total_width, total_height, windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER);
+            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, total_width, total_height, SWP_NOMOVE | SWP_NOZORDER);
 
             // Apply recursively to catch any stragglers
             crate::ui::theme::apply_theme_recursive(hwnd, self.is_dark);
@@ -565,7 +553,7 @@ impl WindowHandler for SettingsState {
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
             match msg {
-                windows_sys::Win32::UI::WindowsAndMessaging::WM_DESTROY => {
+                WM_DESTROY => {
                     if self.h_font_bold != std::ptr::null_mut() {
                         DeleteObject(self.h_font_bold);
                         self.h_font_bold = std::ptr::null_mut();
@@ -575,7 +563,7 @@ impl WindowHandler for SettingsState {
                 WM_HSCROLL => {
                      // Check if it's our slider
                      let h_ctl = lparam as HWND;
-                     let h_slider = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_SLIDER_THREADS as i32);
+                     let h_slider = GetDlgItem(hwnd, IDC_SLIDER_THREADS as i32);
                      if h_ctl == h_slider {
                          // Get Position
                          let pos = Trackbar::new(h_slider).get_pos();
@@ -590,7 +578,7 @@ impl WindowHandler for SettingsState {
                          // I should probably find the control.
                          // Actually, let's just ignore the real-time subtitle update for now unless we need it perfect. 
                          // Or, find IDC_LBL_THREADS_VALUE:
-                         let _h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_THREADS_VALUE as i32);
+                         let _h_lbl = GetDlgItem(hwnd, IDC_LBL_THREADS_VALUE as i32);
                          // If I commented it out in on_create, this won't work.
                          // Let's rely on standard trackbar tooltip if available, 
                          // or user just sees it when they open it.
@@ -604,8 +592,8 @@ impl WindowHandler for SettingsState {
                     self.update_status = *status;
                     
                     // Update UI based on status
-                    let h_btn = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
-                    let h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
+                    let h_btn = GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
+                    let h_lbl = GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
                     
                     match &self.update_status {
                         UpdateStatus::Available(ver, _) => {
@@ -649,7 +637,7 @@ impl WindowHandler for SettingsState {
                      match id {
                          IDC_COMBO_THEME => {
                             if (code as u32) == CBN_SELCHANGE {
-                                let h_combo = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_COMBO_THEME as i32);
+                                let h_combo = GetDlgItem(hwnd, IDC_COMBO_THEME as i32);
                                 let idx = ComboBox::new(h_combo).get_selected_index();
                                 let theme = match idx {
                                     0 => AppTheme::System,
@@ -682,7 +670,7 @@ impl WindowHandler for SettingsState {
                                 InvalidateRect(hwnd, std::ptr::null(), 1);
                                 
                                 // Notify Parent Immediately
-                                use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                use GetParent;
                                 let parent = GetParent(hwnd);
                                 if parent != std::ptr::null_mut() {
                                     let theme_val = match theme {
@@ -711,12 +699,12 @@ impl WindowHandler for SettingsState {
                          },
                          IDC_BTN_CANCEL => {
                              // Read concurrent items from edit box before closing
-                             let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_CONCURRENT as i32);
+                             let h_edit = GetDlgItem(hwnd, IDC_EDIT_CONCURRENT as i32);
                              if h_edit != std::ptr::null_mut() {
-                                 let len = windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(h_edit);
+                                 let len = GetWindowTextLengthW(h_edit);
                                  if len > 0 {
                                      let mut buf = vec![0u16; (len + 1) as usize];
-                                     windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW(h_edit, buf.as_mut_ptr(), len + 1);
+                                     GetWindowTextW(h_edit, buf.as_mut_ptr(), len + 1);
                                      let s = String::from_utf16_lossy(&buf[..len as usize]);
                                      let clean: String = s.chars().take_while(|c| c.is_digit(10)).collect();
                                      if let Ok(val) = clean.parse::<u32>() {
@@ -730,13 +718,13 @@ impl WindowHandler for SettingsState {
                          },
                           IDC_CHK_SKIP_EXT => {
                               if (code as u32) == BN_CLICKED {
-                                  let h_chk = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_SKIP_EXT as i32);
+                                  let h_chk = GetDlgItem(hwnd, IDC_CHK_SKIP_EXT as i32);
                                   let checked = Button::new(h_chk).is_checked();
                                   self.enable_skip_heuristics = checked;
                                   
                                   // Enable/Disable Edit and Reset Button
-                                  let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
-                                  let h_reset = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_RESET_EXT as i32);
+                                  let h_edit = GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                                  let h_reset = GetDlgItem(hwnd, IDC_BTN_RESET_EXT as i32);
                                   
                                   if h_edit != std::ptr::null_mut() { Button::new(h_edit).set_enabled(checked); }
                                   if h_reset != std::ptr::null_mut() { Button::new(h_reset).set_enabled(checked); }
@@ -746,19 +734,19 @@ impl WindowHandler for SettingsState {
                               if (code as u32) == BN_CLICKED {
                                   // Reset text to default
                                    let default_skip = "zip,7z,rar,gz,bz2,xz,zst,lz4,jpg,jpeg,png,gif,webp,avif,heic,mp4,mkv,avi,webm,mov,wmv,mp3,flac,aac,ogg,opus,wma,pdf";
-                                   let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                                   let h_edit = GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
                                    if h_edit != std::ptr::null_mut() {
-                                       windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW(h_edit, to_wstring(default_skip).as_ptr());
+                                       SetWindowTextW(h_edit, to_wstring(default_skip).as_ptr());
                                    }
                               }
                           },
                           IDC_EDIT_EXTENSIONS => {
-                               if (code as u32) == windows_sys::Win32::UI::WindowsAndMessaging::EN_CHANGE {
-                                   let h_edit = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                               if (code as u32) == EN_CHANGE {
+                                   let h_edit = GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
                                    if h_edit != std::ptr::null_mut() {
-                                       let len = windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(h_edit);
+                                       let len = GetWindowTextLengthW(h_edit);
                                        let mut buf = vec![0u16; (len + 1) as usize];
-                                       windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW(h_edit, buf.as_mut_ptr(), len + 1);
+                                       GetWindowTextW(h_edit, buf.as_mut_ptr(), len + 1);
                                        self.skip_extensions = String::from_utf16_lossy(&buf[..len as usize]);
                                    }
                                }
@@ -766,14 +754,14 @@ impl WindowHandler for SettingsState {
                           IDC_CHK_FORCE_STOP => {
                               if (code as u32) == BN_CLICKED {
                                    let mut checked = false;
-                                   let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_FORCE_STOP as i32);
+                                   let h_ctl = GetDlgItem(hwnd, IDC_CHK_FORCE_STOP as i32);
                                    if h_ctl != std::ptr::null_mut() {
                                        checked = Button::new(h_ctl).is_checked();
                                        self.enable_force_stop = checked;
                                    }
                                    
                                    // Notify Parent immediately (WM_APP + 3)
-                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                   use GetParent;
                                    let parent = GetParent(hwnd);
                                    if parent != std::ptr::null_mut() {
                                        let val = if checked { 1 } else { 0 };
@@ -784,7 +772,7 @@ impl WindowHandler for SettingsState {
                           IDC_CHK_CONTEXT_MENU => {
                                if (code as u32) == BN_CLICKED {
                                     let mut checked = false;
-                                    let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
+                                    let h_ctl = GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
                                     if h_ctl != std::ptr::null_mut() {
                                         checked = Button::new(h_ctl).is_checked();
                                         self.enable_context_menu = checked;
@@ -805,7 +793,7 @@ impl WindowHandler for SettingsState {
                                             );
                                             self.enable_context_menu = false;
                                             
-                                            let h_ctl_revert = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
+                                            let h_ctl_revert = GetDlgItem(hwnd, IDC_CHK_CONTEXT_MENU as i32);
                                             if h_ctl_revert != std::ptr::null_mut() {
                                                 Button::new(h_ctl_revert).set_checked(false);
                                             }
@@ -815,7 +803,7 @@ impl WindowHandler for SettingsState {
                                     }
                                     
                                     // Notify Parent immediately (WM_APP + 5)
-                                    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                    use GetParent;
                                     let parent = GetParent(hwnd);
                                     if parent != std::ptr::null_mut() {
                                         let val = if self.enable_context_menu { 1 } else { 0 };
@@ -826,14 +814,14 @@ impl WindowHandler for SettingsState {
                           IDC_CHK_LOW_POWER => {
                                if (code as u32) == BN_CLICKED {
                                    let mut checked = false;
-                                    let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_LOW_POWER as i32);
+                                    let h_ctl = GetDlgItem(hwnd, IDC_CHK_LOW_POWER as i32);
                                     if h_ctl != std::ptr::null_mut() {
                                         checked = Button::new(h_ctl).is_checked();
                                         self.low_power_mode = checked;
                                     }
                                     
                                     // Notify Parent immediately (WM_APP + 7)
-                                    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                    use GetParent;
                                     let parent = GetParent(hwnd);
                                     if parent != std::ptr::null_mut() {
                                         let val = if checked { 1 } else { 0 };
@@ -844,14 +832,14 @@ impl WindowHandler for SettingsState {
                           IDC_CHK_SYSTEM_GUARD => {
                               if (code as u32) == BN_CLICKED {
                                    let mut checked = false;
-                                   let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_CHK_SYSTEM_GUARD as i32);
+                                   let h_ctl = GetDlgItem(hwnd, IDC_CHK_SYSTEM_GUARD as i32);
                                    if h_ctl != std::ptr::null_mut() {
                                        checked = Button::new(h_ctl).is_checked();
                                        self.enable_system_guard = checked;
                                    }
                                    
                                    // Notify Parent immediately (WM_APP + 6)
-                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                   use GetParent;
                                    let parent = GetParent(hwnd);
                                    if parent != std::ptr::null_mut() {
                                        let val = if checked { 1 } else { 0 };
@@ -873,8 +861,8 @@ impl WindowHandler for SettingsState {
                                                     SendMessageW(clone_hwnd, WM_APP_UPDATE_CHECK_RESULT, 0, Box::into_raw(status) as LPARAM);
                                                } else {
                                                     // Restart Application
-                                                    use windows_sys::Win32::UI::Shell::ShellExecuteW;
-                                                    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOW;
+                                                    use ShellExecuteW;
+                                                    use SW_SHOW;
                                                     
                                                     let exe = std::env::current_exe().unwrap_or_default();
                                                     let exe_path = crate::utils::to_wstring(exe.to_str().unwrap_or(""));
@@ -896,9 +884,9 @@ impl WindowHandler for SettingsState {
                                           // Check for update
                                           self.update_status = UpdateStatus::Checking;
                                           
-                                          let h_btn = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
+                                          let h_btn = GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
                                           Button::new(h_btn).set_enabled(false); // Disable button
-                                          let h_lbl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
+                                          let h_lbl = GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
                                           Label::new(h_lbl).set_text("Checking for updates...");
 
                                           let clone_hwnd_ptr = hwnd as usize;
@@ -918,7 +906,7 @@ impl WindowHandler for SettingsState {
                           },
                           IDC_CHK_LOG_ENABLED | IDC_CHK_LOG_ERRORS | IDC_CHK_LOG_WARNS | IDC_CHK_LOG_INFO | IDC_CHK_LOG_TRACE => {
                               if (code as u32) == BN_CLICKED {
-                                   let h_ctl = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id as i32);
+                                   let h_ctl = GetDlgItem(hwnd, id as i32);
                                    let checked = Button::new(h_ctl).is_checked();
                                    
                                    match id {
@@ -927,7 +915,7 @@ impl WindowHandler for SettingsState {
                                            // Enable/Disable child checkboxes
                                            let ids = [IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
                                            for &child_id in &ids {
-                                               let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, child_id as i32);
+                                               let h = GetDlgItem(hwnd, child_id as i32);
                                                if h != std::ptr::null_mut() {
                                                    Button::new(h).set_enabled(checked);
                                                }
@@ -942,7 +930,7 @@ impl WindowHandler for SettingsState {
                                    
                                    // Notify Parent immediately (WM_APP + 8)
                                    // Send (Enabled: bool) in WPARAM, (Mask: u8) in LPARAM
-                                   use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                   use GetParent;
                                    let parent = GetParent(hwnd);
                                    if parent != std::ptr::null_mut() {
                                        let w = if self.log_enabled { 1 } else { 0 };
@@ -988,12 +976,12 @@ impl WindowHandler for SettingsState {
                                     
                                     // Helper to set check
                                     let set_chk = |id, val| {
-                                        let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id as i32);
+                                        let h = GetDlgItem(hwnd, id as i32);
                                         if h != std::ptr::null_mut() { Button::new(h).set_checked(val); }
                                     };
                                     
                                     // Theme Combo
-                                    let h_combo = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_COMBO_THEME as i32);
+                                    let h_combo = GetDlgItem(hwnd, IDC_COMBO_THEME as i32);
                                     if h_combo != std::ptr::null_mut() { ComboBox::new(h_combo).set_selected_index(0); }
                                     
                                     set_chk(IDC_CHK_FORCE_STOP, false);
@@ -1002,26 +990,26 @@ impl WindowHandler for SettingsState {
                                     set_chk(IDC_CHK_LOW_POWER, false);
                                     
                                     // Performance
-                                    let h_slider = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_SLIDER_THREADS as i32);
+                                    let h_slider = GetDlgItem(hwnd, IDC_SLIDER_THREADS as i32);
                                     let cpu_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as u32;
                                     if h_slider != std::ptr::null_mut() { Trackbar::new(h_slider).set_pos(cpu_count); }
                                     
-                                    let h_edit_conc = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_CONCURRENT as i32);
+                                    let h_edit_conc = GetDlgItem(hwnd, IDC_EDIT_CONCURRENT as i32);
                                     if h_edit_conc != std::ptr::null_mut() { 
-                                        use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW;
+                                        use SetWindowTextW;
                                         SetWindowTextW(h_edit_conc, w!("0").as_ptr());
                                     }
                                     
                                     // Filtering
                                     set_chk(IDC_CHK_SKIP_EXT, true);
-                                     let h_edit_ext = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                                     let h_edit_ext = GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
                                     if h_edit_ext != std::ptr::null_mut() { 
                                         Button::new(h_edit_ext).set_enabled(true);
-                                        use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW;
+                                        use SetWindowTextW;
                                         let txt = to_wstring(&self.skip_extensions);
                                         SetWindowTextW(h_edit_ext, txt.as_ptr());
                                     }
-                                    let h_btn_reset = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_RESET_EXT as i32);
+                                    let h_btn_reset = GetDlgItem(hwnd, IDC_BTN_RESET_EXT as i32);
                                     if h_btn_reset != std::ptr::null_mut() { Button::new(h_btn_reset).set_enabled(true); }
 
                                     // Diagnostics
@@ -1034,14 +1022,14 @@ impl WindowHandler for SettingsState {
                                      // Disable child checkboxes for logs
                                      let ids = [IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
                                      for &child_id in &ids {
-                                         let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, child_id as i32);
+                                         let h = GetDlgItem(hwnd, child_id as i32);
                                          if h != std::ptr::null_mut() {
                                              Button::new(h).set_enabled(false);
                                          }
                                      }
                                     
                                     // Notify Parent of immediate changes
-                                    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                    use GetParent;
                                     let parent = GetParent(hwnd);
                                     if parent != std::ptr::null_mut() {
                                         // Theme

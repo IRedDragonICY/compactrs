@@ -5,11 +5,8 @@
 
 use crate::utils::to_wstring;
 use crate::w;
-use windows_sys::Win32::System::Registry::{
-    RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, RegCloseKey, RegOpenKeyExW,
-    HKEY, HKEY_CLASSES_ROOT, KEY_WRITE, KEY_READ, REG_SZ, REG_OPTION_NON_VOLATILE,
-};
-use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+use crate::types::*;
+
 
 /// Get the current executable path as a string
 fn get_exe_path() -> Option<String> {
@@ -29,7 +26,7 @@ unsafe fn create_key(parent: HKEY, subkey: &str) -> Result<HKEY, String> { unsaf
         std::ptr::null(),
         REG_OPTION_NON_VOLATILE,
         KEY_WRITE,
-        std::ptr::null(),
+        std::ptr::null_mut(),
         &mut hkey,
         &mut disposition,
     );

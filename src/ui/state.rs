@@ -1,4 +1,4 @@
-use windows_sys::Win32::Foundation::HWND;
+use crate::types::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64}};
 use std::collections::HashMap;

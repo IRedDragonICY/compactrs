@@ -5,9 +5,7 @@
 //! This component contains the Settings, About, and Console buttons
 //! positioned in the top-right corner of the main window.
 
-use windows_sys::Win32::Foundation::{HWND, RECT};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::Graphics::Gdi::HFONT;
+use crate::types::*;
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;

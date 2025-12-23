@@ -1,11 +1,6 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, DefWindowProcW, GetWindowLongPtrW, SetWindowLongPtrW, GWLP_WNDPROC,
-    WM_CHAR, WM_DESTROY, SendMessageW, SetPropW, GetPropW, RemovePropW,
-};
-use windows_sys::Win32::UI::Controls::{EM_GETSEL, EM_SETSEL, EM_REPLACESEL};
+use crate::types::*;
 use crate::w;
 // use crate::ui::theme::{SetPropW, GetPropW, RemovePropW}; // Removed bad import
 

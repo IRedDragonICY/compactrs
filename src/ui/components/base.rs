@@ -3,7 +3,7 @@
 //! Defines the `Component` interface that all modular UI widgets must implement,
 //! enabling consistent lifecycle management for creation, layout, and theming.
 
-use windows_sys::Win32::Foundation::{HWND, RECT};
+use crate::types::{HWND, RECT};
 
 /// A trait for modular UI components that can be created, resized, and themed.
 ///

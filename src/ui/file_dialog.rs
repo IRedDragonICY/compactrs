@@ -1,7 +1,8 @@
 #![allow(non_snake_case, non_camel_case_types, non_upper_case_globals)]
 
-use windows_sys::core::{GUID, HRESULT, PCWSTR};
-use windows_sys::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
+use crate::types::*;
+
+
 use std::ffi::c_void;
 
 // --- COM Interface Definitions (VTables) ---

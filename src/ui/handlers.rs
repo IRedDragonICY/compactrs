@@ -1,21 +1,7 @@
 /* --- src/ui/handlers.rs --- */
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, WPARAM, POINT};
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    MessageBoxW, MB_OK, MB_ICONINFORMATION,
-    GetCursorPos, TrackPopupMenu, CreatePopupMenu, AppendMenuW, DestroyMenu,
-    TPM_RETURNCMD, TPM_LEFTALIGN, MF_STRING,
-};
-use windows_sys::Win32::System::DataExchange::{
-    OpenClipboard, CloseClipboard, GetClipboardData, IsClipboardFormatAvailable
-};
-use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
-
-
-use windows_sys::Win32::UI::Shell::{DragQueryFileW, DragFinish, HDROP};
-use windows_sys::Win32::UI::Controls::{NM_CLICK, NM_DBLCLK, NMLISTVIEW};
-use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+use crate::types::*;
 use std::thread;
 use std::sync::atomic::Ordering;
 use std::cmp::Ordering as CmpOrdering;
@@ -95,8 +81,6 @@ pub unsafe fn on_clear_all(st: &mut AppState) {
     
     // Clear Console Window if open (Send IDC_BTN_CLEAR = 1003)
     if let Some(hwnd) = st.console_hwnd {
-        use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::WM_COMMAND;
         SendMessageW(hwnd, WM_COMMAND, 1003, 0); 
     }
     
@@ -624,10 +608,10 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
 }
 
 pub unsafe fn on_list_keydown(st: &mut AppState, _hwnd: HWND, key: u16) {
-    if key == windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_DELETE as u16 {
+    if key == VK_DELETE as u16 {
         on_remove_selected(st);
     } else if key == 0x41 { // 'A' key
-        let ctrl_pressed = (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetKeyState(windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL as i32) as u16 & 0x8000) != 0;
+        let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
         if ctrl_pressed {
              if let Some(ctrls) = &st.controls {
                  let count = ctrls.file_list.get_item_count();
@@ -661,11 +645,10 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                     WofAlgorithm::Xpress16K => 2003,
                     WofAlgorithm::Lzx => 2004,
                 };
-                use windows_sys::Win32::UI::WindowsAndMessaging::{CheckMenuItem, MF_CHECKED};
                 CheckMenuItem(menu, check_id, MF_CHECKED);
             }
 
-            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | windows_sys::Win32::UI::WindowsAndMessaging::TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
+            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
             DestroyMenu(menu);
 
             if cmd >= 2001 && cmd <= 2004 {
@@ -725,11 +708,10 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                     crate::ui::state::BatchAction::Compress => 3001,
                     crate::ui::state::BatchAction::Decompress => 3002,
                 };
-                use windows_sys::Win32::UI::WindowsAndMessaging::{CheckMenuItem, MF_CHECKED};
                 CheckMenuItem(menu, check_id, MF_CHECKED);
             }
 
-            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | windows_sys::Win32::UI::WindowsAndMessaging::TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
+            let cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, std::ptr::null());
             DestroyMenu(menu);
 
             if cmd >= 3001 && cmd <= 3002 {
@@ -811,7 +793,7 @@ pub unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM)
                     DestroyMenu(menu);
                     
                     match _cmd {
-                        1003 => { Button::new(windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CANCEL as i32)).set_enabled(false); on_stop_processing(st); },
+                        1003 => { Button::new(GetDlgItem(hwnd, IDC_BTN_CANCEL as i32)).set_enabled(false); on_stop_processing(st); },
                         1004 => { on_remove_selected(st); },
                         1005 => {
                              start_processing(st, hwnd, selected.clone());
