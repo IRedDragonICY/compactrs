@@ -1,4 +1,4 @@
-cargo-features = ["panic-immediate-abort", "trim-paths"]
+cargo-features = ["panic-immediate-abort", "trim-paths", "profile-rustflags"]
 
 [package]
 name = "compactrs"
@@ -12,6 +12,7 @@ repository = "https://github.com/IRedDragonICY/compactrs"
 readme = "README.md"
 keywords = ["windows", "compression", "wof", "compactos", "utility"]
 categories = ["os::windows-apis", "filesystem", "command-line-utilities"]
+
 [dependencies]
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
@@ -36,19 +37,22 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_WindowsProgramming",
 ] }
 
-
-
 [build-dependencies]
 winres = "0.1"
 
-
 [profile.release]
-opt-level = "z"              # Optimize for size
-lto = "fat"                   # Link Time Optimization
+opt-level = "z"              # Optimize for size (z is 33KB smaller than s)
+lto = "fat"                  # Link Time Optimization
 codegen-units = 1            # Maximize optimization
 panic = "immediate-abort"    # EXTREME: No panic handler at all
 strip = true                 # Strip symbols
 debug = false                # No debug info
 overflow-checks = false      # No overflow checks
 trim-paths = "all"           # Remove all paths from binary
-
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "link-arg=/MERGE:.rdata=.text",
+    "-C", "link-arg=/MERGE:.pdata=.text",
+    "-C", "link-arg=/OPT:REF,ICF",
+    "-C", "link-arg=/INCREMENTAL:NO",
+]

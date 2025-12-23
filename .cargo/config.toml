@@ -1,32 +1,20 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# Cargo Configuration for CompactRS
+# Cargo Configuration for CompactRS - EXTREME SIZE OPTIMIZATION
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # DEVELOPMENT (normal cargo run - uses stable toolchain):
 #   cargo run
 #
 # OPTIMIZED RELEASE (requires nightly):
-#   cargo +nightly build --release ^
-#     -Z build-std=std,panic_abort,core,alloc ^
-#     -Z build-std-features=optimize_for_size ^
-#     --target x86_64-pc-windows-msvc
+#   cargo +nightly build --release --target x86_64-pc-windows-msvc
 #
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Only apply linker optimizations for explicit target builds (release)
-# This does NOT affect normal "cargo run" which uses host target
-[target.x86_64-pc-windows-msvc]
-rustflags = [
-    "-C", "target-cpu=native",
-    "-C", "link-arg=/MERGE:.rdata=.text",
-    "-C", "link-arg=/MERGE:.pdata=.text",
-    "-C", "link-arg=/OPT:REF,ICF",
-    "-C", "link-arg=/INCREMENTAL:NO",
-]
+# Unstable features for nightly builds
+[unstable]
+build-std = ["std", "panic_abort", "core", "alloc"]
+build-std-features = ["optimize_for_size"]
 
-# NOTE: The following flags are passed via command line for nightly builds:
-#   -Z mir-opt-level=4
-#   -Z location-detail=none
-#   -Z fmt-debug=none
-#   -Z build-std=std,panic_abort,core,alloc
-#   -Z build-std-features=optimize_for_size
+# Target-specific config (only for explicit --target builds)
+[target.x86_64-pc-windows-msvc]
+# Note: linker flags are now in Cargo.toml [profile.release].rustflags

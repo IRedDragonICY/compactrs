@@ -84,14 +84,13 @@ jobs:
           cargo +nightly build --release `
             -Z build-std=std,panic_abort,core,alloc `
             -Z build-std-features=optimize_for_size `
-            -Z panic-immediate-abort `
-            -Z trim-paths `
+            -Z profile-rustflags `
             --target x86_64-pc-windows-msvc
           Copy-Item "target/x86_64-pc-windows-msvc/release/${{ env.BINARY_NAME }}.exe" "target/release/${{ env.BINARY_NAME }}.exe"
         shell: pwsh
         env:
           APP_VERSION: ${{ steps.version.outputs.VERSION }}
-          RUSTFLAGS: "-Zmir-opt-level=4 -Zlocation-detail=none -Zfmt-debug=none"
+          RUSTFLAGS: "-Zmir-opt-level=4 -Zlocation-detail=none -Zfmt-debug=none -Zshare-generics=y -Csymbol-mangling-version=v0 -Zinline-mir-threshold=0"
 
       - name: Compress binary with UPX
         run: |
