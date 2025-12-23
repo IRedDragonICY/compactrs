@@ -10,6 +10,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA, WM_CONTEXTMENU, 
     SetForegroundWindow, GetForegroundWindow, GetWindowThreadProcessId, BringWindowToTop, 
     WM_DESTROY, KillTimer, WM_SETTINGCHANGE, WM_CLOSE, MessageBoxW, MB_YESNO, MB_ICONWARNING, IDNO, DestroyWindow,
+    FlashWindowEx, FLASHWINFO, FLASHW_ALL, FLASHW_TIMERNOFG,
 };
 use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -130,6 +131,17 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
 
         Ok(hwnd)
     }
+}
+
+unsafe fn flash_window(hwnd: HWND) {
+    let mut fwi = FLASHWINFO {
+        cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+        hwnd,
+        dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
+        uCount: 0, // Flash until window comes to foreground
+        dwTimeout: 0,
+    };
+    FlashWindowEx(&mut fwi);
 }
 
 impl WindowHandler for AppState {
@@ -770,6 +782,10 @@ impl AppState {
                              windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow(ctrls.action_panel.cancel_hwnd(), 0);
                          }
                          handlers::update_process_button_state(self);
+
+                         if GetForegroundWindow() != hwnd {
+                             flash_window(hwnd);
+                         }
                      }
                  },
                  UiMessage::ScanProgress(id, logical, disk, count) => {
