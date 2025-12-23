@@ -1,3 +1,5 @@
+cargo-features = ["panic-immediate-abort", "trim-paths"]
+
 [package]
 name = "compactrs"
 version = "2025.12.23"
@@ -41,10 +43,12 @@ winres = "0.1"
 
 
 [profile.release]
-opt-level = "z"          # Optimize for size
-lto = "fat"               # Link Time Optimization
-codegen-units = 1        # Maximize optimization
-panic = "abort"          # No unwinding
-strip = true             # Strip symbols
-debug = false            # No debug info
-overflow-checks = false  # No overflow checks
+opt-level = "z"              # Optimize for size
+lto = "fat"                   # Link Time Optimization
+codegen-units = 1            # Maximize optimization
+panic = "immediate-abort"    # EXTREME: No panic handler at all
+strip = true                 # Strip symbols
+debug = false                # No debug info
+overflow-checks = false      # No overflow checks
+trim-paths = "all"           # Remove all paths from binary
+

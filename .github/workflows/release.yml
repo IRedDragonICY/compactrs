@@ -84,6 +84,8 @@ jobs:
           cargo +nightly build --release `
             -Z build-std=std,panic_abort,core,alloc `
             -Z build-std-features=optimize_for_size `
+            -Z panic-immediate-abort `
+            -Z trim-paths `
             --target x86_64-pc-windows-msvc
           Copy-Item "target/x86_64-pc-windows-msvc/release/${{ env.BINARY_NAME }}.exe" "target/release/${{ env.BINARY_NAME }}.exe"
         shell: pwsh
