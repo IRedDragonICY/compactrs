@@ -1,4 +1,4 @@
-cargo-features = ["panic-immediate-abort", "trim-paths", "profile-rustflags"]
+cargo-features = ["panic-immediate-abort", "trim-paths"]
 
 [package]
 name = "compactrs"
@@ -39,6 +39,7 @@ windows-sys = { version = "0.61.2", features = [
 
 # No build-dependencies needed - manual RC compilation in build.rs
 
+# Release profile - rustflags are in .cargo/config.toml
 [profile.release]
 opt-level = "z"              # Optimize for size (z is 33KB smaller than s)
 lto = "fat"                  # Link Time Optimization
@@ -48,10 +49,3 @@ strip = true                 # Strip symbols
 debug = false                # No debug info
 overflow-checks = false      # No overflow checks
 trim-paths = "all"           # Remove all paths from binary
-rustflags = [
-    "-C", "target-cpu=native",
-    "-C", "link-arg=/MERGE:.rdata=.text",
-    "-C", "link-arg=/MERGE:.pdata=.text",
-    "-C", "link-arg=/OPT:REF,ICF",
-    "-C", "link-arg=/INCREMENTAL:NO",
-]

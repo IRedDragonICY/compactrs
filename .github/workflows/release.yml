@@ -79,30 +79,15 @@ jobs:
           Write-Host "Determined Version: $version"
         shell: pwsh
 
-      # ==========================================================================
-      # EXTREME SIZE OPTIMIZATION BUILD
-      # Binary reduced from 439KB to 297KB (32% reduction)
-      # ==========================================================================
-      # UNSUPPORTED/INCOMPATIBLE FLAGS (tried but failed):
-      # - -Cembed-bitcode=no          -> Incompatible with LTO
-      # - -C relocation-model=static  -> Causes LNK2017 ADDR32 errors on MSVC
-      # - -C prefer-dynamic=no        -> Same linker errors as above
-      # - -Z virtual-function-elimination -> Requires thin LTO, incompatible with fat LTO
-      # - -Z threads=8                -> Not recognized by current nightly
-      # - panic_immediate_abort (build-std-feature) -> Deprecated, now use panic="immediate-abort"
-      # ==========================================================================
+      # Build configuration is in .cargo/config.toml
+      # See config.toml for all optimization flags and documentation
       - name: Build release binary
         run: |
-          cargo +nightly build --release `
-            -Z build-std=std,panic_abort,core,alloc `
-            -Z build-std-features=optimize_for_size `
-            -Z profile-rustflags `
-            --target x86_64-pc-windows-msvc
+          cargo +nightly build --release --target x86_64-pc-windows-msvc
           Copy-Item "target/x86_64-pc-windows-msvc/release/${{ env.BINARY_NAME }}.exe" "target/release/${{ env.BINARY_NAME }}.exe"
         shell: pwsh
         env:
           APP_VERSION: ${{ steps.version.outputs.VERSION }}
-          RUSTFLAGS: "-Zmir-opt-level=4 -Zlocation-detail=none -Zfmt-debug=none -Zshare-generics=y -Csymbol-mangling-version=v0 -Zinline-mir-threshold=0"
 
       - name: Compress binary with UPX
         run: |
