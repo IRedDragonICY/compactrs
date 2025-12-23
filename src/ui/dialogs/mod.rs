@@ -7,7 +7,9 @@ pub mod about;
 pub mod shortcuts;
 pub mod console;
 pub mod force_stop;
+pub mod watcher;
 pub mod base;
+pub mod watcher_add;
 
 // Flatten the API for consumers
 pub use settings::show_settings_modal;
@@ -15,3 +17,4 @@ pub use about::show_about_modal;
 pub use shortcuts::show_shortcuts_modal;
 pub use console::{show_console_window, append_log_entry, close_console};
 pub use force_stop::show_force_stop_dialog;
+pub use watcher::show_watcher_modal;

@@ -1,0 +1,17 @@
+    Checking compactrs v2025.12.22 (C:\Users\ireddragonicy\RustroverProjects\compactrs)
+error: unexpected closing delimiter: `}`
+   --> src\ui\dialogs\watcher.rs:192:1
+    |
+115 |         unsafe {
+    |                - this delimiter might not be properly closed...
+...
+182 |                         _ => {}
+    |                              -- block is empty, you might have not meant to close it
+...
+188 |             }
+    |             - ...as it matches this but it has different indentation
+...
+192 | }
+    | ^ unexpected closing delimiter
+
+error: could not compile `compactrs` (bin "compactrs") due to 1 previous error

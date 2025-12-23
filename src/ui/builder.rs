@@ -113,6 +113,16 @@ impl ControlBuilder {
         self
     }
 
+    pub fn listview(mut self) -> Self {
+        self.class_name = Cow::Borrowed(w!("SysListView32"));
+        // WS_BORDER | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS
+        // LVS_REPORT = 0x0001
+        // LVS_SINGLESEL = 0x0004
+        // LVS_SHOWSELALWAYS = 0x0008
+        self.style |= 0x00800000 | WS_TABSTOP | 0x0001 | 0x0004 | 0x0008;
+        self
+    }
+
     pub fn build(self) -> HWND {
         unsafe {
             let instance = GetModuleHandleW(std::ptr::null());
@@ -163,6 +173,7 @@ impl ControlBuilder {
         } else if self.class_name == w!("COMBOBOX") { ControlType::ComboBox }
         else if self.class_name == w!("msctls_trackbar32") { ControlType::Trackbar }
         else if self.class_name == w!("EDIT") { ControlType::Edit }
+        else if self.class_name == w!("SysListView32") { ControlType::List }
         else { ControlType::Button }
     }
 }

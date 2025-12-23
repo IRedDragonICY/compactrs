@@ -19,6 +19,7 @@ pub mod config;
 pub mod registry;
 pub mod utils;
 pub mod updater;
+pub mod watcher_config;
 mod logger;
 
 pub mod com;

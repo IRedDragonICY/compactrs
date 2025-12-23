@@ -377,6 +377,15 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     crate::engine::power::set_process_eco_mode(st.low_power_mode);
 }
 
+pub unsafe fn on_open_watcher_manager(st: &mut AppState, hwnd: HWND) {
+    let is_dark = theme::resolve_mode(st.theme);
+    
+    // We pass the Arc<Mutex> directly
+    let tasks = st.watcher_tasks.clone();
+    
+    crate::ui::dialogs::watcher::show_watcher_modal(hwnd, tasks, st.tx.clone(), is_dark);
+}
+
 // --- Notification Handlers (ListView) ---
 
 pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, code: u32) {

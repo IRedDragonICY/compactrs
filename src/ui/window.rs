@@ -85,7 +85,21 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         // Setup State
         // Main window state must live for the app lifetime.
         // We use Box::leak (conceptually similar to the previous manual pointer management).
-        let state = Box::new(AppState::new());
+        let mut state = Box::new(AppState::new());
+        // Load watcher tasks
+        let loaded_tasks = crate::watcher_config::WatcherConfig::load();
+        if loaded_tasks.len() > 0 {
+             state.watcher_tasks = std::sync::Arc::new(std::sync::Mutex::new(loaded_tasks));
+        }
+
+        // Start Watcher Thread
+        let watcher_tasks_ref = state.watcher_tasks.clone();
+        let watcher_tx = state.tx.clone();
+        // We spawn it detached, global state management handles exit
+        std::thread::spawn(move || {
+            crate::engine::watcher::start_watcher_thread(watcher_tasks_ref, watcher_tx);
+        });
+
         let state_ref = Box::leak(state);
 
         let hwnd = WindowBuilder::new(state_ref, WINDOW_CLASS_NAME, &title_str)
@@ -185,9 +199,9 @@ impl WindowHandler for AppState {
                 btn_about: IDC_BTN_ABOUT,
                 btn_shortcuts: IDC_BTN_SHORTCUTS,
                 btn_console: IDC_BTN_CONSOLE,
+                btn_watcher: crate::ui::controls::IDC_BTN_WATCHER,
             });
             let _ = header_panel.create(hwnd);
-            
             // Disable cancel and pause buttons initially
             crate::ui::wrappers::Button::new(action_panel.cancel_hwnd()).set_enabled(false);
             crate::ui::wrappers::Button::new(action_panel.pause_hwnd()).set_enabled(false);
@@ -637,6 +651,7 @@ impl AppState {
                          self.on_global_algo_changed();
                      }
                  },
+                 IDC_BTN_WATCHER => handlers::on_open_watcher_manager(self, hwnd),
                  _ => {}
             }
             0
@@ -884,6 +899,36 @@ impl AppState {
                          }
                      }
                      handlers::update_process_button_state(self);
+                 },
+                 UiMessage::WatcherTrigger(path, algo) => {
+                     // Auto-add and start processing for watcher
+                     if !self.batch_items.iter().any(|item| item.path == path) {
+                         // Only add if not already in list
+                         let id = self.add_batch_item(path.clone());
+                         self.set_item_algorithm(id, algo);
+                         
+                         // Add to UI
+                         if let Some(ctrls) = &self.controls {
+                             if let Some(item) = self.batch_items.last() {
+                                  ctrls.file_list.add_item(id, item, w!("Pending..."), w!("-"), w!("-"), CompressionState::None);
+                             }
+                             
+                             // Force "As Listed" mode so per-item algorithm is used
+                             let combo = crate::ui::wrappers::ComboBox::new(ctrls.action_panel.combo_hwnd());
+                             let original_idx = combo.get_selected_index();
+                             combo.set_selected_index(0); // "As Listed" is index 0
+                             
+                             // Trigger processing for this item immediately
+                             if let Some(pos) = self.batch_items.iter().position(|i| i.id == id) {
+                                 handlers::start_processing(self, hwnd, vec![pos]);
+                             }
+                             
+                             // Restore original combo selection
+                             if let Some(ctrls) = &self.controls {
+                                 crate::ui::wrappers::ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(original_idx);
+                             }
+                         }
+                     }
                  },
                  UiMessage::BatchItemAnalyzed(id, log, disk, state) => {
                      let log_str = format_size(log);

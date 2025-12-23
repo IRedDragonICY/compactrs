@@ -1,0 +1,126 @@
+    Checking compactrs v2025.12.22 (C:\Users\ireddragonicy\RustroverProjects\compactrs)
+error[E0599]: no method named `insert_column` found for struct `ListView` in the current scope
+   --> src\ui\dialogs\watcher.rs:95:16
+    |
+ 95 |             lv.insert_column(0, "Path", 220);
+    |                ^^^^^^^^^^^^^
+    |
+   ::: src\ui\wrappers.rs:139:1
+    |
+139 | pub struct ListView { hwnd: HWND }
+    | ------------------- method `insert_column` not found for this struct
+    |
+help: there is a method `insert_item` with a similar name
+    |
+ 95 -             lv.insert_column(0, "Path", 220);
+ 95 +             lv.insert_item(0, "Path", 220);
+    |
+
+error[E0599]: no method named `insert_column` found for struct `ListView` in the current scope
+   --> src\ui\dialogs\watcher.rs:96:16
+    |
+ 96 |             lv.insert_column(1, "Size", 70);
+    |                ^^^^^^^^^^^^^
+    |
+   ::: src\ui\wrappers.rs:139:1
+    |
+139 | pub struct ListView { hwnd: HWND }
+    | ------------------- method `insert_column` not found for this struct
+    |
+help: there is a method `insert_item` with a similar name
+    |
+ 96 -             lv.insert_column(1, "Size", 70);
+ 96 +             lv.insert_item(1, "Size", 70);
+    |
+
+error[E0599]: no method named `insert_column` found for struct `ListView` in the current scope
+   --> src\ui\dialogs\watcher.rs:97:16
+    |
+ 97 |             lv.insert_column(2, "On Disk", 70);
+    |                ^^^^^^^^^^^^^
+    |
+   ::: src\ui\wrappers.rs:139:1
+    |
+139 | pub struct ListView { hwnd: HWND }
+    | ------------------- method `insert_column` not found for this struct
+    |
+help: there is a method `insert_item` with a similar name
+    |
+ 97 -             lv.insert_column(2, "On Disk", 70);
+ 97 +             lv.insert_item(2, "On Disk", 70);
+    |
+
+error[E0599]: no method named `insert_column` found for struct `ListView` in the current scope
+   --> src\ui\dialogs\watcher.rs:98:16
+    |
+ 98 |             lv.insert_column(3, "Schedule", 140);
+    |                ^^^^^^^^^^^^^
+    |
+   ::: src\ui\wrappers.rs:139:1
+    |
+139 | pub struct ListView { hwnd: HWND }
+    | ------------------- method `insert_column` not found for this struct
+    |
+help: there is a method `insert_item` with a similar name
+    |
+ 98 -             lv.insert_column(3, "Schedule", 140);
+ 98 +             lv.insert_item(3, "Schedule", 140);
+    |
+
+error[E0599]: no method named `insert_column` found for struct `ListView` in the current scope
+   --> src\ui\dialogs\watcher.rs:99:16
+    |
+ 99 |             lv.insert_column(4, "Algorithm", 70);
+    |                ^^^^^^^^^^^^^
+    |
+   ::: src\ui\wrappers.rs:139:1
+    |
+139 | pub struct ListView { hwnd: HWND }
+    | ------------------- method `insert_column` not found for this struct
+    |
+help: there is a method `insert_item` with a similar name
+    |
+ 99 -             lv.insert_column(4, "Algorithm", 70);
+ 99 +             lv.insert_item(4, "Algorithm", 70);
+    |
+
+error[E0599]: no method named `insert_column` found for struct `ListView` in the current scope
+   --> src\ui\dialogs\watcher.rs:100:16
+    |
+100 |             lv.insert_column(5, "Last Run", 90);
+    |                ^^^^^^^^^^^^^
+    |
+   ::: src\ui\wrappers.rs:139:1
+    |
+139 | pub struct ListView { hwnd: HWND }
+    | ------------------- method `insert_column` not found for this struct
+    |
+help: there is a method `insert_item` with a similar name
+    |
+100 -             lv.insert_column(5, "Last Run", 90);
+100 +             lv.insert_item(5, "Last Run", 90);
+    |
+
+warning: unnecessary `unsafe` block
+   --> src\ui\dialogs\watcher.rs:184:43
+    |
+172 | ...   unsafe {
+    |       ------ because it's nested under this `unsafe` block
+...
+184 | ...                                     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW(h_edit, to_wstring(&pa...
+    |                                         ^^^^^^ unnecessary `unsafe` block
+    |
+    = note: `#[warn(unused_unsafe)]` (part of `#[warn(unused)]`) on by default
+
+warning: unnecessary `unsafe` block
+   --> src\ui\dialogs\watcher.rs:195:47
+    |
+172 | ...   unsafe {
+    |       ------ because it's nested under this `unsafe` block
+...
+195 | ...                                         unsafe { windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW(h_edit, to_wstring...
+    |                                             ^^^^^^ unnecessary `unsafe` block
+
+For more information about this error, try `rustc --explain E0599`.
+warning: `compactrs` (bin "compactrs") generated 2 warnings
+error: could not compile `compactrs` (bin "compactrs") due to 6 previous errors; 2 warnings emitted

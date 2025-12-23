@@ -1,0 +1,11 @@
+   Compiling compactrs v2025.12.22 (C:\Users\ireddragonicy\RustroverProjects\compactrs)
+error: this file contains an unclosed delimiter
+   --> src\ui\wrappers.rs:189:3
+    |
+119 | pub fn get_window_text(hwnd: HWND) -> String {
+    |                                              - unclosed delimiter
+...
+189 | }
+    |  ^
+
+error: could not compile `compactrs` (bin "compactrs") due to 1 previous error

@@ -228,7 +228,7 @@ impl Component for StatusBar {
                 std::ptr::null_mut(),
                 padding,
                 label_abs_y, 
-                width - padding - 160,
+                width - padding - 220, // Reserve 220px for header buttons (5 buttons × 35px + padding)
                 header_height,
                 SWP_NOZORDER,
             );

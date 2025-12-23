@@ -26,6 +26,7 @@ pub const IDC_BTN_CLEAR: u16 = 124;
 pub const IDC_BTN_PAUSE: u16 = 125;
 pub const IDC_LBL_OUTPUT: u16 = 126;
 pub const IDC_LBL_RATIO: u16 = 127;
+pub const IDC_BTN_WATCHER: u16 = 129;
 
 // Search Panel IDs
 pub const IDC_SEARCH_EDIT: u16 = 130;
