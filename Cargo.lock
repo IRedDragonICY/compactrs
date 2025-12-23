@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "compactrs"
-version = "2025.12.22"
+version = "2025.12.23"
 dependencies = [
  "windows-sys",
  "winres",

@@ -12,7 +12,7 @@
   [![Architecture](https://img.shields.io/badge/Architecture-x64-lightgrey?style=flat-square)](https://en.wikipedia.org/wiki/X86-64)
   [![Dependencies](https://img.shields.io/badge/Dependencies-None-success?style=flat-square)](https://github.com/IRedDragonICY/compactrs)
   [![License](https://img.shields.io/github/license/IRedDragonICY/compactrs?style=flat-square&label=License)](LICENSE)
-  [![Download](https://img.shields.io/github/downloads/IRedDragonICY/compactrs/total?style=flat-square&label=Downloads&color=blue)](https://github.com/IRedDragonICY/compactrs/releases)
+  [![Download](https://img.shields.io/github/downloads/IRedDragonICY/ga/total?style=flat-square&label=Downloads&color=blue)](https://github.com/IRedDragonICY/compactrs/releases)
 
 </div>
 
@@ -21,8 +21,10 @@
 ## Screenshots
 
 <div align="center">
-  <!-- Replace these with actual screenshots -->
-  <img src="docs/screenshot_main.png" alt="CompactRS Main Window - Windows 11 Style" width="800" />
+  <img src="docs/ss1.png" alt="Main Interface" width="800" />
+  <img src="docs/ss2.png" alt="Settings Dialog" width="800" />
+  <img src="docs/ss3.png" alt="Watcher Manager" width="800" />
+  <img src="docs/ss4.png" alt="Action Panel" width="800" />
 </div>
 
 ---
