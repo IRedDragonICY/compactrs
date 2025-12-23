@@ -13,6 +13,7 @@
   [![Dependencies](https://img.shields.io/badge/Dependencies-None-success?style=flat-square)](https://github.com/IRedDragonICY/compactrs)
   [![License](https://img.shields.io/github/license/IRedDragonICY/compactrs?style=flat-square&label=License)](LICENSE)
   [![Download](https://img.shields.io/github/downloads/IRedDragonICY/compactrs/total?style=flat-square&label=Downloads&color=blue)](https://github.com/IRedDragonICY/compactrs/releases)
+  [![Sponsor](https://img.shields.io/badge/Sponsor-IRedDragonICY-pink?style=flat-square&logo=github-sponsors)](https://github.com/sponsors/IRedDragonICY)
 
 </div>
 
