@@ -142,8 +142,23 @@ jobs:
           $shortSha = "${{ github.sha }}".Substring(0, 7)
           
           $commitMsg = git log -1 --pretty=format:"%s"
-          $commitBody = git log -1 --pretty=format:"%b"
+          # Get commit body and preserve newlines
+          $commitBodyRaw = git log -1 --pretty=format:"%b"
           $author = git log -1 --pretty=format:"%an"
+          
+          # Convert commit body lines to proper markdown list
+          $commitBodyLines = $commitBodyRaw -split "`n" | Where-Object { $_.Trim() -ne "" }
+          $commitBody = ""
+          foreach ($line in $commitBodyLines) {
+            $trimmedLine = $line.Trim()
+            if ($trimmedLine -match "^[-*]") {
+              # Already a list item, ensure proper markdown format
+              $trimmedLine = $trimmedLine -replace "^[-*]\s*", ""
+              $commitBody += "- $trimmedLine`n"
+            } else {
+              $commitBody += "$trimmedLine`n"
+            }
+          }
           
           $hash = (Get-FileHash "target/release/${{ env.BINARY_NAME }}.exe" -Algorithm SHA256).Hash
           $size = [math]::Round((Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length / 1KB, 2)
@@ -161,9 +176,9 @@ jobs:
           [void]$sb.AppendLine("")
           [void]$sb.AppendLine("## Changes")
           [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("$commitMsg")
+          [void]$sb.AppendLine("**$commitMsg**")
           [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("$commitBody")
+          [void]$sb.Append($commitBody)
           [void]$sb.AppendLine("")
           [void]$sb.AppendLine("## Build Information")
           [void]$sb.AppendLine("")
