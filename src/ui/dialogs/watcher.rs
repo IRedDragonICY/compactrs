@@ -14,8 +14,11 @@ use windows_sys::Win32::System::Time::FileTimeToSystemTime;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_COMMAND, BN_CLICKED,
     DestroyWindow, MessageBoxW, SendMessageW,
-    MB_OK,
+    MB_OK, MoveWindow, GetClientRect,
+    WS_POPUP, WS_CAPTION, WS_SYSMENU, WS_VISIBLE, WS_THICKFRAME, WS_MAXIMIZEBOX,
+    WM_SIZE, WM_GETMINMAXINFO,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::MINMAXINFO;
 use windows_sys::Win32::UI::Controls::{LVM_GETITEMCOUNT, NMITEMACTIVATE, NM_CLICK, NM_DBLCLK};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
@@ -50,14 +53,31 @@ pub unsafe fn show_watcher_modal(
         is_dark,
     };
 
-    crate::ui::dialogs::base::show_modal_singleton(
-        parent,
-        &mut state,
-        "CompactRS_Watcher",
-        WATCHER_TITLE,
-        700,
-        400, // Reduced height since form is gone
-        is_dark
+    let bg_brush = crate::ui::theme::get_background_brush(is_dark);
+    
+    // Check for existing window
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, ShowWindow, SetForegroundWindow, SW_RESTORE};
+    let class_name = "CompactRS_Watcher";
+    let class_name_w = crate::utils::to_wstring(class_name);
+    let existing_hwnd = unsafe { FindWindowW(class_name_w.as_ptr(), std::ptr::null()) };
+    
+    if existing_hwnd != std::ptr::null_mut() {
+        unsafe {
+            ShowWindow(existing_hwnd, SW_RESTORE);
+            SetForegroundWindow(existing_hwnd);
+        }
+        return;
+    }
+
+    use crate::ui::framework::{WindowBuilder, WindowAlignment, show_modal};
+    show_modal(
+        WindowBuilder::new(&mut state, class_name, WATCHER_TITLE)
+            // Use WS_OVERLAPPEDWINDOW for a normal resizable window, or mix styles
+            .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_THICKFRAME | WS_MAXIMIZEBOX)
+            .size(700, 400)
+            .align(WindowAlignment::CenterOnParent)
+            .background(bg_brush),
+        parent
     );
 }
 
@@ -120,6 +140,8 @@ impl WindowHandler for WatcherState {
         }
         0
     }
+
+
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
@@ -199,6 +221,15 @@ impl WindowHandler for WatcherState {
                         _ => {}
                     }
                 },
+                WM_SIZE => {
+                    let w = (lparam & 0xFFFF) as i32;
+                    let h = ((lparam >> 16) & 0xFFFF) as i32;
+                    self.on_resize(hwnd, w, h);
+                },
+                WM_GETMINMAXINFO => {
+                    let mmi = lparam as *mut MINMAXINFO;
+                    self.on_min_max_info(hwnd, mmi);
+                },
                 _ => {
                     return None;
                 }
@@ -206,9 +237,55 @@ impl WindowHandler for WatcherState {
         }
         Some(0)
     }
+
+
 }
 
 impl WatcherState {
+    fn on_resize(&mut self, hwnd: HWND, _width: i32, _height: i32) {
+        unsafe {
+            use windows_sys::Win32::Foundation::RECT;
+            let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            GetClientRect(hwnd, &mut rc);
+            let w = rc.right - rc.left;
+            let h = rc.bottom - rc.top;
+            
+            let padding = 10;
+            let btn_height = 30;
+            let btn_y = h - btn_height - padding;
+            
+            // Resize List View: Fill top area up to buttons
+            let list_h = if btn_y > padding { btn_y - padding - 10 } else { 100 };
+            let h_list = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
+            if h_list != std::ptr::null_mut() {
+                MoveWindow(h_list, padding, padding, w - (padding * 2), list_h, 1);
+            }
+            
+            // Move Buttons
+            // Left aligned: Add, Remove, Refresh
+            let h_btn_add = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_ADD as i32);
+            let h_btn_rem = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_REMOVE as i32);
+            let h_btn_ref = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_REFRESH as i32);
+            
+            if h_btn_add != std::ptr::null_mut() { MoveWindow(h_btn_add, padding, btn_y, 80, btn_height, 1); }
+            if h_btn_rem != std::ptr::null_mut() { MoveWindow(h_btn_rem, padding + 90, btn_y, 80, btn_height, 1); }
+            if h_btn_ref != std::ptr::null_mut() { MoveWindow(h_btn_ref, padding + 180, btn_y, 80, btn_height, 1); }
+            
+            // Right aligned: Close
+            let h_btn_close = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_CLOSE as i32);
+            if h_btn_close != std::ptr::null_mut() {
+                MoveWindow(h_btn_close, w - 100 - padding, btn_y, 100, btn_height, 1);
+            }
+        }
+    }
+
+    fn on_min_max_info(&mut self, _hwnd: HWND, mmi: *mut MINMAXINFO) {
+        unsafe {
+            // Set minimum size to prevent UI breaking
+            (*mmi).ptMinTrackSize.x = 600;
+            (*mmi).ptMinTrackSize.y = 300;
+        }
+    }
     unsafe fn refresh_list(&self, h_list: HWND) {
         let lv = ListView::new(h_list);
         lv.clear();

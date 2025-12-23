@@ -4,7 +4,7 @@ use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
 use crate::w;
 use crate::ui::framework::WindowHandler;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
     InvalidateRect, CreateFontIndirectW, GetObjectW, DeleteObject, LOGFONTW, FW_BOLD, HFONT,
     GetStockObject, DEFAULT_GUI_FONT,
@@ -14,6 +14,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     BN_CLICKED, CBN_SELCHANGE,
     DestroyWindow, FindWindowW, MessageBoxW, SendMessageW,
     MB_ICONERROR, MB_OK, MB_YESNO, MB_ICONWARNING, IDYES,
+    AdjustWindowRect, GetWindowLongW, GWL_STYLE,
 };
 use crate::ui::wrappers::{Button, Label, Trackbar, ComboBox};
 
@@ -82,6 +83,7 @@ const WM_APP_UPDATE_CHECK_RESULT: u32 = 0x8000 + 10;
 const IDC_BTN_CHECK_UPDATE: u16 = 2010;
 const IDC_LBL_UPDATE_STATUS: u16 = 2011;
 const IDC_BTN_RESTART_TI: u16 = 2012;
+const IDC_BTN_RESET_ALL: u16 = 2016;
 
 
 // Main settings modal function with proper data passing
@@ -130,7 +132,7 @@ pub unsafe fn show_settings_modal(
         "CompactRS_Settings", 
         SETTINGS_TITLE, 
         550, // Increased width slightly 
-        760, // Increased height for new group
+        680, // Target height < 700 for 768p screens
         is_dark
     );
     
@@ -187,7 +189,9 @@ impl WindowHandler for SettingsState {
             
             // --- Layout state ---
             let mut current_y = 10;
-            let row_height_base = 50;
+            let row_height_base = 36;
+            let client_width = 580;
+            let right_padding = 20; // "Rata tengah beneran" -> aligned nicely with standard padding
             
             // --- Helper to create a Section Header (no icon, just bold text) ---
             let create_section_header = |y: i32, text: &str| -> i32 {
@@ -199,7 +203,7 @@ impl WindowHandler for SettingsState {
                     .dark_mode(is_dark_mode)
                     .font(self.h_font_bold)
                     .build();
-                y + 30
+                y + 25
             };
             
             // --- Helper to create a Row with MDL2 Icon ---
@@ -219,17 +223,17 @@ impl WindowHandler for SettingsState {
                     .label(false)
                     .text(title)
                     .pos(55, y)
-                    .size(280, 20)
+                    .size(280, 18) // Reduced height
                     .dark_mode(is_dark_mode)
                     .font(self.h_font_bold)
                     .build();
                 
-                // Subtitle
+                // Subtitle (Moved up to y+15 to tighten gap and fit in 36px row)
                 let _h_sub = ControlBuilder::new(hwnd, 0)
                     .label(false)
                     .text(subtitle)
-                    .pos(55, y + 20)
-                    .size(330, 20)
+                    .pos(55, y + 15) 
+                    .size(330, 18) // Reduced height
                     .dark_mode(is_dark_mode)
                     .build();
                 
@@ -267,7 +271,7 @@ impl WindowHandler for SettingsState {
                 h_combo
             });
             
-            current_y += 10; // Extra spacing
+            // current_y += 5; // Extra spacing removed
 
             // 2. Behavior Section
             current_y = create_section_header(current_y, "General Behavior");
@@ -320,7 +324,7 @@ impl WindowHandler for SettingsState {
                     .build()
             });
 
-            current_y += 10; 
+ 
 
             // 3. Performance Section
             current_y = create_section_header(current_y, "Performance");
@@ -362,7 +366,7 @@ impl WindowHandler for SettingsState {
                     .build()
             });
             
-            current_y += 10;
+
             
             // 4. Filtering Section
             current_y = create_section_header(current_y, "File Filtering");
@@ -403,7 +407,7 @@ impl WindowHandler for SettingsState {
             let h_btn_reset = ControlBuilder::new(hwnd, IDC_BTN_RESET_EXT)
                 .button()
                 .text_w(w!("Reset Defaults"))
-                .pos(390, current_y + 55) // Below edit
+                .pos(client_width - 120 - right_padding, current_y + 55) // below edit
                 .size(120, 25)
                 .dark_mode(is_dark_mode)
                 .build();
@@ -431,26 +435,27 @@ impl WindowHandler for SettingsState {
              
              // Log Levels (Horizontal or indented?)
              // Let's do a horizontal row of small checkboxes for levels if enabled
-             let level_y = current_y - 10; // Pull up slightly or just next line
+             let level_y = current_y; 
              let _lbl_lv = ControlBuilder::new(hwnd, 0).label(false).text("Levels:").pos(30, level_y).size(50, 20).dark_mode(is_dark_mode).build();
              
-             let mk_chk = |id, txt, x, checked| {
+             let mk_chk = |id, txt, x, width, checked| {
                  ControlBuilder::new(hwnd, id)
                     .checkbox()
                     .text(txt)
                     .pos(x, level_y)
-                    .size(100, 20)
+                    .size(width, 20)
                     .dark_mode(is_dark_mode)
                     .checked(checked)
                     .build()
              };
              
-             mk_chk(IDC_CHK_LOG_ERRORS, "Errors", 80, self.log_level_mask & crate::logger::LOG_LEVEL_ERROR != 0);
-             mk_chk(IDC_CHK_LOG_WARNS, "Warnings", 170, self.log_level_mask & crate::logger::LOG_LEVEL_WARN != 0);
-             mk_chk(IDC_CHK_LOG_INFO, "Info", 260, self.log_level_mask & crate::logger::LOG_LEVEL_INFO != 0);
-             mk_chk(IDC_CHK_LOG_TRACE, "Trace", 340, self.log_level_mask & crate::logger::LOG_LEVEL_TRACE != 0);
+             // Adjusted widths and positions to prevent overlap (hitbox fix)
+             mk_chk(IDC_CHK_LOG_ERRORS, "Errors", 80, 70, self.log_level_mask & crate::logger::LOG_LEVEL_ERROR != 0);
+             mk_chk(IDC_CHK_LOG_WARNS, "Warnings", 160, 80, self.log_level_mask & crate::logger::LOG_LEVEL_WARN != 0);
+             mk_chk(IDC_CHK_LOG_INFO, "Info", 250, 60, self.log_level_mask & crate::logger::LOG_LEVEL_INFO != 0);
+             mk_chk(IDC_CHK_LOG_TRACE, "Trace", 320, 70, self.log_level_mask & crate::logger::LOG_LEVEL_TRACE != 0);
              
-             current_y += 40;
+             current_y += 25;
 
             // Disable child checkboxes if logging is not enabled
             if !self.log_enabled {
@@ -466,6 +471,16 @@ impl WindowHandler for SettingsState {
             // 6. About & Updates
             current_y = create_section_header(current_y, "About & Updates");
 
+            // Reset Application Defaults (Requested Feature)
+            let btn_reset_w = 180;
+            ControlBuilder::new(hwnd, IDC_BTN_RESET_ALL)
+                .button()
+                .text_w(w!("Reset Application Defaults"))
+                .pos(client_width - btn_reset_w - right_padding, current_y - 25) // Dynamic Right Align
+                .size(btn_reset_w, 25)
+                .dark_mode(is_dark_mode)
+                .build();
+            
             // MANUAL ROW for Updates (to bind IDC_LBL_UPDATE_STATUS to subtitle)
             // Title
             ControlBuilder::new(hwnd, 0)
@@ -488,15 +503,16 @@ impl WindowHandler for SettingsState {
                 .build();
             
             // Check Update Button
+            let btn_update_w = 140;
             ControlBuilder::new(hwnd, IDC_BTN_CHECK_UPDATE)
                 .button()
                 .text_w(w!("Check for Updates"))
-                .pos(400, current_y) // Right aligned
-                .size(140, 30)
+                .pos(client_width - btn_update_w - right_padding, current_y) // Dynamic Right Align
+                .size(btn_update_w, 30)
                 .dark_mode(is_dark_mode)
                 .build();
             
-            current_y += 50;
+            current_y += 35;
 
             // Restart TI Row - MDL2 glyph E7EF = Admin
             current_y = create_row(current_y, "\u{E7EF}", "Advanced Startup", "Restart with TrustedInstaller privileges", IDC_BTN_RESTART_TI, &|_x_pos, y_pos| {
@@ -505,27 +521,40 @@ impl WindowHandler for SettingsState {
                  ControlBuilder::new(hwnd, IDC_BTN_RESTART_TI)
                     .button()
                     .text_w(w!("Restart as TI"))
-                    .pos(400, y_pos) // Align with above
+                    .pos(client_width - 140 - right_padding, y_pos) // Dynamic Right Align
                     .size(140, 30) // Match width
                     .dark_mode(is_dark_mode)
                     .build()
             });
 
-            current_y += 30; // Spacing before close
-
-            // Close Button (Bottom Right)
-            ControlBuilder::new(hwnd, IDC_BTN_CANCEL)
-                .button()
-                .text_w(w!("Close"))
-                .pos(440, current_y) // Far right
-                .size(100, 30)
-                .dark_mode(is_dark_mode)
-                .build();
+            // Close Button Removed as per user request (Save space)
             
             // Resize Window to fit content
-            let final_h = current_y + 80;
+            // current_y is at the bottom of the last row (Restart TI)
+            // Add small padding
+            // Resize Window to fit content DYNAMICALLY
+            // current_y is the bottom of the client content.
+            // We need to calculate the actual window size required to hold this client area.
+            
+            let client_height = current_y + 20; // +Padding
+            // let client_width = 580; // Already defined above
+            
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: client_width,
+                bottom: client_height,
+            };
+            
+            // Get current style to calculate correct borders
+            let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+            AdjustWindowRect(&mut rect, style, 0); // 0 = false (no menu)
+            
+            let total_width = rect.right - rect.left;
+            let total_height = rect.bottom - rect.top;
+
             use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos;
-            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 580, final_h, windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER);
+            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, total_width, total_height, windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOZORDER);
 
             // Apply recursively to catch any stragglers
             crate::ui::theme::apply_theme_recursive(hwnd, self.is_dark);
@@ -937,6 +966,96 @@ impl WindowHandler for SettingsState {
                                   }
                               }
                           },
+                          IDC_BTN_RESET_ALL => {
+                            if (code as u32) == BN_CLICKED {
+                                let msg = w!("Are you sure you want to reset ALL settings to their default values?\n\nThis will revert theme, logging, threads, and extension filters.");
+                                let title = w!("Reset Settings");
+                                if MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONWARNING) == IDYES {
+                                    // Reset State
+                                    self.theme = AppTheme::System;
+                                    self.enable_force_stop = false;
+                                    self.enable_context_menu = false;
+                                    self.enable_system_guard = true;
+                                    self.low_power_mode = false;
+                                    self.max_threads = 0;
+                                    self.max_concurrent_items = 0;
+                                    self.log_enabled = false;
+                                    self.log_level_mask = crate::logger::LOG_LEVEL_ERROR | crate::logger::LOG_LEVEL_WARN;
+                                    self.enable_skip_heuristics = true;
+                                    self.skip_extensions = "zip,7z,rar,gz,bz2,xz,zst,lz4,jpg,jpeg,png,gif,webp,avif,heic,mp4,mkv,avi,webm,mov,wmv,mp3,flac,aac,ogg,wma,wav,iso,img,vhd,vhdx,pdf,doc,docx,xls,xlsx,ppt,pptx,exe,dll,sys,msi,cab".to_string();
+                                    
+                                    // Update UI Controls
+                                    
+                                    // Helper to set check
+                                    let set_chk = |id, val| {
+                                        let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id as i32);
+                                        if h != std::ptr::null_mut() { Button::new(h).set_checked(val); }
+                                    };
+                                    
+                                    // Theme Combo
+                                    let h_combo = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_COMBO_THEME as i32);
+                                    if h_combo != std::ptr::null_mut() { ComboBox::new(h_combo).set_selected_index(0); }
+                                    
+                                    set_chk(IDC_CHK_FORCE_STOP, false);
+                                    set_chk(IDC_CHK_CONTEXT_MENU, false);
+                                    set_chk(IDC_CHK_SYSTEM_GUARD, true);
+                                    set_chk(IDC_CHK_LOW_POWER, false);
+                                    
+                                    // Performance
+                                    let h_slider = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_SLIDER_THREADS as i32);
+                                    let cpu_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as u32;
+                                    if h_slider != std::ptr::null_mut() { Trackbar::new(h_slider).set_pos(cpu_count); }
+                                    
+                                    let h_edit_conc = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_CONCURRENT as i32);
+                                    if h_edit_conc != std::ptr::null_mut() { 
+                                        use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW;
+                                        SetWindowTextW(h_edit_conc, w!("0").as_ptr());
+                                    }
+                                    
+                                    // Filtering
+                                    set_chk(IDC_CHK_SKIP_EXT, true);
+                                     let h_edit_ext = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_EDIT_EXTENSIONS as i32);
+                                    if h_edit_ext != std::ptr::null_mut() { 
+                                        Button::new(h_edit_ext).set_enabled(true);
+                                        use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW;
+                                        let txt = to_wstring(&self.skip_extensions);
+                                        SetWindowTextW(h_edit_ext, txt.as_ptr());
+                                    }
+                                    let h_btn_reset = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, IDC_BTN_RESET_EXT as i32);
+                                    if h_btn_reset != std::ptr::null_mut() { Button::new(h_btn_reset).set_enabled(true); }
+
+                                    // Diagnostics
+                                    set_chk(IDC_CHK_LOG_ENABLED, false);
+                                    set_chk(IDC_CHK_LOG_ERRORS, true);
+                                    set_chk(IDC_CHK_LOG_WARNS, true);
+                                    set_chk(IDC_CHK_LOG_INFO, false);
+                                    set_chk(IDC_CHK_LOG_TRACE, false);
+                                    
+                                     // Disable child checkboxes for logs
+                                     let ids = [IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
+                                     for &child_id in &ids {
+                                         let h = windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, child_id as i32);
+                                         if h != std::ptr::null_mut() {
+                                             Button::new(h).set_enabled(false);
+                                         }
+                                     }
+                                    
+                                    // Notify Parent of immediate changes
+                                    use windows_sys::Win32::UI::WindowsAndMessaging::GetParent;
+                                    let parent = GetParent(hwnd);
+                                    if parent != std::ptr::null_mut() {
+                                        // Theme
+                                        SendMessageW(parent, 0x8000 + 4, 0, 0); // 0 = System
+                                        // Logging
+                                        let w_log = 0; // Disabled
+                                        let l_log = self.log_level_mask as isize;
+                                        SendMessageW(parent, 0x8000 + 8, w_log as WPARAM, l_log as LPARAM);
+                                        // System Guard
+                                        SendMessageW(parent, 0x8000 + 6, 1, 0);
+                                    }
+                                }
+                            }
+                         },
                           _ => {}
                      }
                      Some(0)

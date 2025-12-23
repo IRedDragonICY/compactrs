@@ -55,7 +55,9 @@ use crate::ui::state::BatchItem;
 use crate::utils::to_wstring;
 use crate::w;
 
-const ICON_START: &[u16] = &[0x25B6, 0]; // Play Triangle
+
+
+
 
 const DEFAULT_PATH_WIDTH: i32 = 250;
 
@@ -165,8 +167,9 @@ impl FileListView {
             // COLUMN_DEFS is string literal slices. 
             // We can leave to_wstring here as it runs once on startup.
             let mut fmt = LVCFMT_LEFT;
+            // Start column (10) should be LEFT aligned to ensure hit testing works correctly (Eye icon at x=0)
             if i == columns::START as usize {
-                fmt = windows_sys::Win32::UI::Controls::LVCFMT_CENTER;
+                fmt = LVCFMT_LEFT;
             }
             let col = LVCOLUMNW {
                 mask: LVCF_WIDTH | LVCF_TEXT | LVCF_FMT,
@@ -243,7 +246,9 @@ impl FileListView {
 
         // Show pending status initially
         let status_wide = w!("Pending");
-        let start_wide = ICON_START;
+        // Initial State: Watch Icon + Play Button
+        let start_wide_vec = crate::utils::to_wstring("\u{1F441}    ▶");
+        let start_wide = &start_wide_vec;
 
         // SAFETY: All wide strings are valid null-terminated UTF-16.
         unsafe {
@@ -643,14 +648,22 @@ impl FileListView {
     // Local allow_dark_mode_for_window removed in favor of theme::allow_dark_mode_for_window
 
     /// Updates the playback controls (Start/Pause/Stop) for a row based on state.
-    pub fn update_playback_controls(&self, row: i32, state: crate::ui::state::ProcessingState) {
-        let text = match state {
-             crate::ui::state::ProcessingState::Idle | crate::ui::state::ProcessingState::Stopped => "▶ Start",
-             crate::ui::state::ProcessingState::Running => "⏸   ⏹",
-             crate::ui::state::ProcessingState::Paused => "▶   ⏹",
+    pub fn update_playback_controls(&self, row: i32, state: crate::ui::state::ProcessingState, is_complete: bool) {
+        // Use to_wstring for combined strings
+        // Format: [Watch]   [Playback...]
+        // If complete: Only [Watch]
+        // If complete: Show Watch + Start (to allow re-run)
+        let text_wide = if is_complete {
+             crate::utils::to_wstring("\u{1F441}    ▶")
+        } else {
+             match state {
+                 crate::ui::state::ProcessingState::Idle | crate::ui::state::ProcessingState::Stopped => crate::utils::to_wstring("\u{1F441}    ▶"),
+                 crate::ui::state::ProcessingState::Running => crate::utils::to_wstring("\u{1F441}    \u{23F8}   \u{23F9}"),
+                 crate::ui::state::ProcessingState::Paused => crate::utils::to_wstring("\u{1F441}    \u{25B6}   \u{23F9}"),
+             }
         };
-        // Use to_wstring to ensure correct UTF-16 encoding for icons (avoiding w! macro limitation)
-        self.update_item_text(row, columns::START, &crate::utils::to_wstring(text));
+        
+        self.update_item_text(row, columns::START, &text_wide);
     }
 
     /// Updates the status text for a row.
@@ -1011,13 +1024,13 @@ unsafe extern "system" fn listview_subclass_proc(
     let is_dark = crate::ui::theme::is_app_dark_mode(main_hwnd);
 
     if umsg == WM_NOTIFY {
-        // SAFETY: lparam points to NMHDR struct provided by the system.
-        let nmhdr = &*(lparam as *const NMHDR);
+            // SAFETY: lparam points to NMHDR struct provided by the system.
+            let nmhdr = &*(lparam as *const NMHDR);
 
-        // Block manual column resizing (from header control)
-        if nmhdr.code == HDN_BEGINTRACKW || nmhdr.code == HDN_DIVIDERDBLCLICKW {
-            return 1; // Prevent resizing
-        }
+            // Block manual column resizing (from header control)
+            if nmhdr.code == HDN_BEGINTRACKW || nmhdr.code == HDN_DIVIDERDBLCLICKW {
+                return 1; // Prevent resizing
+            }
 
         if nmhdr.code == NM_CUSTOMDRAW {
             // Determine if this is from the header control or the ListView itself
@@ -1065,7 +1078,7 @@ unsafe extern "system" fn listview_subclass_proc(
                 if draw_stage == (CDDS_ITEMPREPAINT | CDDS_SUBITEM) {
                     let sub_item = nmlvcd.i_sub_item;
 
-                    // Only customize the Ratio column (index 7)
+                    // 1. Ratio Column (Color Tiers)
                     if sub_item == columns::RATIO {
                         let row = nmlvcd.nmcd.dwItemSpec as i32;
 
@@ -1087,8 +1100,8 @@ unsafe extern "system" fn listview_subclass_proc(
                         }
                     }
 
-                    // For non-Ratio columns or unparseable values, continue with default drawing
-                    // Return CDRF_NEWFONT anyway to ensure proper rendering
+                    // For non-Custom columns or unparseable values, continue with default drawing
+                    // Return CDRF_NEWFONT anyway to ensure proper rendering if we changed state
                     return CDRF_NEWFONT as LRESULT;
                 }
             }

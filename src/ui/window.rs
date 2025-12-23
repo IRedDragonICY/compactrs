@@ -875,8 +875,8 @@ impl AppState {
                                      ctrls.file_list.update_item_text(row, 6, &size_str);
                                  }
                                  
-                                 // Show Start Button again for reprocessing
-                                 ctrls.file_list.update_item_text(row, 10, &crate::utils::to_wstring("▶"));
+                                 // Update visuals for finished item (Watch button only, no Play button)
+                                 ctrls.file_list.update_playback_controls(row, ProcessingState::Stopped, true);
                              }
                          }
 

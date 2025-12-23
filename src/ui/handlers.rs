@@ -203,6 +203,11 @@ pub unsafe fn start_processing_internal(st: &mut AppState, hwnd: HWND, indices_t
         // Update button states now that we are running
         update_process_button_state(st);
         
+        // Update file list icons for items starting processing
+        for &idx in &indices_to_process {
+            ctrls.file_list.update_playback_controls(idx as i32, ProcessingState::Running, false);
+        }
+        
         let action_mode_idx = ComboBox::new(ctrls.action_panel.action_mode_hwnd()).get_selected_index();
         
         let items: Vec<_> = indices_to_process.into_iter().filter_map(|idx| {
@@ -256,9 +261,11 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
         Label::new(ctrls.status_bar.label_hwnd()).set_text("Stopping...");
         
         // Reset all items' visuals
-        for (i, _item) in st.batch_items.iter().enumerate() {
-             ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Stopped);
-             ctrls.file_list.update_status_text(i as i32, "Cancelled");
+        for (i, item) in st.batch_items.iter().enumerate() {
+             ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Stopped, item.status == BatchStatus::Complete);
+             if item.status != BatchStatus::Complete {
+                 ctrls.file_list.update_status_text(i as i32, "Cancelled");
+             }
         }
     }
 }
@@ -285,6 +292,30 @@ pub unsafe fn on_pause_clicked(st: &mut AppState) {
     }
     
     update_process_button_state(st);
+    
+    // Update all relevant file list items to reflect new state
+    if let Some(ctrls) = &st.controls {
+        for (i, item) in st.batch_items.iter().enumerate() {
+            // Only update items that are active (processing or pending execution)
+            if item.status == BatchStatus::Processing || item.status == BatchStatus::Pending {
+                 match new_state {
+                     ProcessingState::Paused => {
+                         ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Paused, false);
+                         ctrls.file_list.update_status_text(i as i32, "Paused");
+                     },
+                     ProcessingState::Running => {
+                         ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Running, false);
+                         if item.status == BatchStatus::Processing {
+                             ctrls.file_list.update_status_text(i as i32, "Processing");
+                         } else {
+                             ctrls.file_list.update_status_text(i as i32, "Pending");
+                         }
+                     },
+                     _ => {}
+                 }
+            }
+        }
+    }
 }
 
 pub unsafe fn update_process_button_state(st: &AppState) {
@@ -452,9 +483,6 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
               if let Some(ctrls) = &st.controls { ctrls.file_list.update_action(row, new_action); }
           }
     } else if col == 10 && code == NM_CLICK { // Start/Pause/Stop (Column 10)
-            // 1. Determine exact click location and needed action using immutable borrow
-            let mut action_to_take = None; // (IsStop, IsSystemStateChange, Row)
-            
             if let Some(ctrls) = &st.controls {
                 let rect = ctrls.file_list.get_subitem_rect(row, 10);
                 
@@ -465,80 +493,132 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                 }
                 
                 let width = rect.right - rect.left;
-                let is_right_half = if width > 0 {
-                    pt.x > (rect.left + width / 2)
-                } else {
-                    false
-                };
+                let rel_x = pt.x - rect.left;
                 
-                let current_state_val = st.global_state.load(Ordering::Relaxed);
-                let current_state = ProcessingState::from_u8(current_state_val);
+                // Click Zones:
+                // [ Eye (~35px) ] [ Playback ... ]
                 
-                match current_state {
-                    ProcessingState::Idle | ProcessingState::Stopped => {
-                        // Start
-                        action_to_take = Some((false, true, row)); 
-                    },
-                    ProcessingState::Running => {
-                        if is_right_half {
-                             // Stop
-                             action_to_take = Some((true, false, row));
-                        } else {
-                             // Pause
-                             action_to_take = Some((false, false, row));
-                        }
-                    },
-                    ProcessingState::Paused => {
-                        if is_right_half {
-                             // Stop
-                             action_to_take = Some((true, false, row));
-                        } else {
-                             // Resume
-                             action_to_take = Some((false, true, row));
-                        }
-                    },
-                }
-            }
-            
-            // 2. Execute Action (Mutable Borrow of st)
-            if let Some((is_stop, is_start_resume, r)) = action_to_take {
-                if is_stop {
-                    on_stop_processing(st);
-                    if let Some(ctrls) = &st.controls {
-                         ctrls.file_list.update_playback_controls(r, ProcessingState::Stopped);
-                    }
-                } else if is_start_resume {
-                    // Check if it's Start or Resume based on current global state
-                    let global = ProcessingState::from_u8(st.global_state.load(Ordering::Relaxed));
-                    if global == ProcessingState::Paused {
-                         // RESUME
-                         st.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
-                         if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
-                         
-                         if let Some(ctrls) = &st.controls {
-                             ctrls.file_list.update_playback_controls(r, ProcessingState::Running);
-                             ctrls.file_list.update_status_text(r, "Processing");
-                             Label::new(ctrls.status_bar.label_hwnd()).set_text("Resumed.");
-                         }
-                    } else {
-                         // START
-                         let indices = vec![r as usize];
-                         start_processing(st, hwnd, indices);
-                         if let Some(ctrls) = &st.controls {
-                             ctrls.file_list.update_playback_controls(r, ProcessingState::Running);
+                // Use a standard split point suitable for the Eye icon + padding
+                let split_x = 32; 
+                
+                if rel_x <= split_x {
+                    // --- ZONE 1: WATCH ---
+                    if let Some(item) = st.batch_items.get(row as usize) {
+                        let path = item.path.clone();
+                         // Add to watcher tasks
+                         {
+                             let mut tasks = st.watcher_tasks.lock().unwrap();
+                             // Check existence
+                             if !tasks.iter().any(|t| t.get_path() == path) {
+                                 let new_id = tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                                 let task = crate::watcher_config::WatcherTask::new(
+                                     new_id,
+                                     &path,
+                                     item.algorithm,
+                                     0b10000000, // Default: Every Day
+                                     12, 0 // Default: 12:00
+                                 );
+                                 tasks.push(task);
+                                 // Save immediately
+                                 let _ = crate::watcher_config::WatcherConfig::save(&tasks);
+                                 
+                                 // Optional: Visual Feedback?
+                                 let w_info = to_wstring("Info");
+                                 let w_msg = to_wstring("Added to File Watcher schedule!");
+                                 MessageBoxW(hwnd, w_msg.as_ptr(), w_info.as_ptr(), MB_OK | MB_ICONINFORMATION);
+                             } else {
+                                 let w_info = to_wstring("Info");
+                                 let w_msg = to_wstring("This path is already in the File Watcher.");
+                                 MessageBoxW(hwnd, w_msg.as_ptr(), w_info.as_ptr(), MB_OK | MB_ICONINFORMATION);
+                             }
                          }
                     }
                 } else {
-                     // PAUSE
-                     st.global_state.store(ProcessingState::Paused as u8, Ordering::Relaxed);
-                     if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
-                     
-                     if let Some(ctrls) = &st.controls {
-                         ctrls.file_list.update_playback_controls(r, ProcessingState::Paused);
-                         ctrls.file_list.update_status_text(r, "Paused");
-                         Label::new(ctrls.status_bar.label_hwnd()).set_text("Paused.");
-                     }
-                }
+                    // --- ZONE 2: PLAYBACK ---
+                    // No valid dead zone - logic must handle everything to the right
+                    
+                    let playback_width = width - split_x; 
+                    if playback_width <= 0 { return; } // Should not happen with min column width
+                    
+                    let rel_playback_x = rel_x - split_x;
+                    
+                    // 1. Determine exact click location and needed action using immutable borrow
+                    let mut action_to_take = None; // (IsStop, IsSystemStateChange, Row)
+                    
+                    let current_state_val = st.global_state.load(Ordering::Relaxed);
+                    let current_state = ProcessingState::from_u8(current_state_val);
+                    
+                    match current_state {
+                        ProcessingState::Idle | ProcessingState::Stopped => {
+                            // Only allow start if not complete (though button should be hidden)
+                            if let Some(_) = st.batch_items.get(row as usize) {
+                                // Allow start even if complete (Re-run)
+                                 action_to_take = Some((false, true, row));
+                            }
+                        },
+                        ProcessingState::Running => {
+                            if rel_playback_x > (playback_width / 2) {
+                                 // Stop (Right Half of playback zone)
+                                 action_to_take = Some((true, false, row));
+                            } else {
+                                 // Pause (Left Half of playback zone)
+                                 action_to_take = Some((false, false, row));
+                            }
+                        },
+                        ProcessingState::Paused => {
+                            if rel_playback_x > (playback_width / 2) {
+                                 // Stop (Right Half of playback zone)
+                                 action_to_take = Some((true, false, row));
+                            } else {
+                                 // Resume (Left Half of playback zone)
+                                 action_to_take = Some((false, true, row));
+                            }
+                        },
+                    }
+                    
+                    // 2. Execute Action (Mutable Borrow of st)
+                    if let Some((is_stop, is_start_resume, r)) = action_to_take {
+                        if is_stop {
+                            on_stop_processing(st);
+                            if let Some(ctrls) = &st.controls {
+                                // Re-update to Stopped, but preserve Watch icon (requires full update call)
+                                // actually update_playback_controls handles the icon prepending now.
+                                 ctrls.file_list.update_playback_controls(r, ProcessingState::Stopped, st.batch_items[r as usize].status == BatchStatus::Complete);
+                            }
+                        } else if is_start_resume {
+                            // ... (Existing start/resume logic) ...
+                            let global = ProcessingState::from_u8(st.global_state.load(Ordering::Relaxed));
+                            if global == ProcessingState::Paused {
+                                 // RESUME
+                                 st.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
+                                 if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
+                                 
+                                 if let Some(ctrls) = &st.controls {
+                                     ctrls.file_list.update_playback_controls(r, ProcessingState::Running, false);
+                                     ctrls.file_list.update_status_text(r, "Processing");
+                                     Label::new(ctrls.status_bar.label_hwnd()).set_text("Resumed.");
+                                 }
+                            } else {
+                                 // START
+                                 let indices = vec![r as usize];
+                                 start_processing(st, hwnd, indices);
+                                 if let Some(ctrls) = &st.controls {
+                                     ctrls.file_list.update_playback_controls(r, ProcessingState::Running, false);
+                                 }
+                            }
+                        } else {
+                             // PAUSE
+                             st.global_state.store(ProcessingState::Paused as u8, Ordering::Relaxed);
+                             if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
+                             
+                             if let Some(ctrls) = &st.controls {
+                                 ctrls.file_list.update_playback_controls(r, ProcessingState::Paused, false);
+                                 ctrls.file_list.update_status_text(r, "Paused");
+                                 Label::new(ctrls.status_bar.label_hwnd()).set_text("Paused.");
+                             }
+                        }
+                    }
+                } // End Zone 2
             }
     }
 }
