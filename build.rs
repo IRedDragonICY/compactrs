@@ -114,7 +114,7 @@ fn compile_resources() -> io::Result<()> {
 
     // EXTREME Optimizations for Release Build
     if profile == "release" {
-        println!("cargo:rustc-link-arg=/ALIGN:16");  
+        // println!("cargo:rustc-link-arg=/ALIGN:16"); // Disabled to fix "This app can't run on your PC" in CI
         println!("cargo:rustc-link-arg=/EMITPOGOPHASEINFO"); // Strip POGO info
         println!("cargo:rustc-link-arg=/DEBUG:NONE"); // Ensure no debug info
     }
