@@ -85,6 +85,7 @@ jobs:
         run: |
           cargo +nightly build --release --target x86_64-pc-windows-msvc
           Copy-Item "target/x86_64-pc-windows-msvc/release/${{ env.BINARY_NAME }}.exe" "target/release/${{ env.BINARY_NAME }}.exe"
+          Copy-Item "target/release/${{ env.BINARY_NAME }}.exe" "target/release/${{ env.BINARY_NAME }}-normal.exe"
         shell: pwsh
         env:
           APP_VERSION: ${{ steps.version.outputs.VERSION }}
@@ -103,33 +104,40 @@ jobs:
       - name: VirusTotal Upload
         id: virustotal
         run: |
-          $filePath = "target/release/${{ env.BINARY_NAME }}.exe"
+          $files = @(
+            @{ Type="NORMAL"; Path="target/release/${{ env.BINARY_NAME }}-normal.exe"; Description="Normal (Uncompressed)" },
+            @{ Type="UPX"; Path="target/release/${{ env.BINARY_NAME }}.exe"; Description="UPX Compressed" }
+          )
+          
           $vtApiKey = "${{ secrets.VIRUSTOTAL_API_KEY }}"
           
-          # SHA256 hash for VirusTotal permalink
-          $fileHash = (Get-FileHash $filePath -Algorithm SHA256).Hash.ToLower()
-          $vtPermalink = "https://www.virustotal.com/gui/file/$fileHash"
-          
-          Write-Host "SHA256: $fileHash"
-          Write-Host "VirusTotal: $vtPermalink"
-          
-          echo "VT_LINK=$vtPermalink" >> $env:GITHUB_OUTPUT
-          echo "VT_HASH=$fileHash" >> $env:GITHUB_OUTPUT
-          
-          if ([string]::IsNullOrEmpty($vtApiKey)) {
-            Write-Host "::notice::VIRUSTOTAL_API_KEY not set. Link is still valid once file is scanned."
-            exit 0
+          foreach ($file in $files) {
+            $filePath = $file.Path
+            $type = $file.Type
+            
+            # SHA256 hash
+            $fileHash = (Get-FileHash $filePath -Algorithm SHA256).Hash.ToLower()
+            $vtPermalink = "https://www.virustotal.com/gui/file/$fileHash"
+            
+            Write-Host "[$($file.Description)] SHA256: $fileHash"
+            Write-Host "[$($file.Description)] VirusTotal: $vtPermalink"
+            
+            echo "VT_LINK_${type}=$vtPermalink" >> $env:GITHUB_OUTPUT
+            echo "VT_HASH_${type}=$fileHash" >> $env:GITHUB_OUTPUT
+            
+            if ([string]::IsNullOrEmpty($vtApiKey)) {
+               Write-Host "::notice::VIRUSTOTAL_API_KEY not set. Link is still valid for $type once file is scanned."
+               continue
+            }
+            
+            Write-Host "Uploading $($file.Description) to VirusTotal..."
+            $result = curl.exe --silent --show-error `
+              -X POST "https://www.virustotal.com/api/v3/files" `
+              -H "x-apikey: $vtApiKey" `
+              -F "file=@$filePath"
+            
+            Write-Host "Response: $result"
           }
-          
-          # Upload using curl (more reliable for binary files)
-          Write-Host "Uploading to VirusTotal..."
-          $result = curl.exe --silent --show-error `
-            -X POST "https://www.virustotal.com/api/v3/files" `
-            -H "x-apikey: $vtApiKey" `
-            -F "file=@$filePath"
-          
-          Write-Host "Response: $result"
-          Write-Host "Results will be available at: $vtPermalink"
         shell: pwsh
 
       - name: Generate Changelog
@@ -159,17 +167,23 @@ jobs:
             }
           }
           
-          $hash = (Get-FileHash "target/release/${{ env.BINARY_NAME }}.exe" -Algorithm SHA256).Hash
-          $size = [math]::Round((Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length / 1KB, 2)
+          $hash_upx = "${{ steps.virustotal.outputs.VT_HASH_UPX }}"
+          $hash_normal = "${{ steps.virustotal.outputs.VT_HASH_NORMAL }}"
+          $size_upx = [math]::Round((Get-Item "target/release/${{ env.BINARY_NAME }}.exe").Length / 1KB, 2)
+          $size_normal = [math]::Round((Get-Item "target/release/${{ env.BINARY_NAME }}-normal.exe").Length / 1KB, 2)
           
-          $vtLink = "${{ steps.virustotal.outputs.VT_LINK }}"
+          $vtLink_upx = "${{ steps.virustotal.outputs.VT_LINK_UPX }}"
+          $vtLink_normal = "${{ steps.virustotal.outputs.VT_LINK_NORMAL }}"
           
           $sb = [System.Text.StringBuilder]::new()
           [void]$sb.AppendLine("## Security Verification")
           [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("[View VirusTotal Scan Report]($vtLink)")
+          [void]$sb.AppendLine("| Build Type | Size | SHA256 | VirusTotal |")
+          [void]$sb.AppendLine("|---|---|---|---|")
+          [void]$sb.AppendLine("| **Normal** | $size_normal KB | ``$hash_normal`` | [Scan Result]($vtLink_normal) |")
+          [void]$sb.AppendLine("| **UPX** | $size_upx KB | ``$hash_upx`` | [Scan Result]($vtLink_upx) |")
           [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("> **Note**: UPX-compressed binaries may trigger false positives in some antivirus engines.")
+          [void]$sb.AppendLine("> **Note**: UPX-compressed binaries may trigger false positives in some antivirus engines. Compare with the Normal build to verify.")
           [void]$sb.AppendLine("")
           [void]$sb.AppendLine("---")
           [void]$sb.AppendLine("")
@@ -184,7 +198,6 @@ jobs:
           [void]$sb.AppendLine("- **Commit:** ``${{ github.sha }}``")
           [void]$sb.AppendLine("- **Author:** $author")
           [void]$sb.AppendLine("- **Platform:** Windows x64")
-          [void]$sb.AppendLine("- **Binary Size:** $size KB (UPX compressed)")
           [void]$sb.AppendLine("- **Rust Toolchain:** Nightly")
           [void]$sb.AppendLine("")
           [void]$sb.AppendLine("## Installation")
@@ -193,16 +206,6 @@ jobs:
           [void]$sb.AppendLine("2. Run as Administrator (required for WOF compression)")
           [void]$sb.AppendLine("3. Drag and drop files or folders to compress")
           [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("## Checksum")
-          [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("``````")
-          [void]$sb.AppendLine("SHA256: $hash")
-          [void]$sb.AppendLine("``````")
-          [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("**Verify integrity:**")
-          [void]$sb.AppendLine("``````powershell")
-          [void]$sb.AppendLine("(Get-FileHash .\compactrs.exe -Algorithm SHA256).Hash -eq `"$hash`"")
-          [void]$sb.AppendLine("``````")
           
           $sb.ToString() | Out-File -FilePath changelog.md -Encoding utf8
         shell: pwsh
