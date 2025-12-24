@@ -1,4 +1,5 @@
-cargo-features = ["panic-immediate-abort", "trim-paths"]
+#trim-paths UNSUPPORTED on crates
+cargo-features = ["panic-immediate-abort"]
 
 [package]
 name = "compactrs"
@@ -31,4 +32,4 @@ panic = "immediate-abort"    # EXTREME: No panic handler at all
 strip = true                 # Strip symbols
 debug = false                # No debug info
 overflow-checks = false      # No overflow checks
-trim-paths = "all"           # Remove all paths from binary
+#  trim-paths = "all"           # Remove all paths from binary
