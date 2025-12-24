@@ -442,10 +442,10 @@ type FnGetUserNameW = unsafe extern "system" fn(lpBuffer: *mut u16, pcbBuffer: *
         let get_addr = GLOBAL_API.GetProcAddress.unwrap();
 
         // Resolve Kernel32 functions
-        GLOBAL_API.GetCurrentThreadId = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("GetCurrentThreadId"))));
-        GLOBAL_API.CreateFileW = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("CreateFileW"))));
-        GLOBAL_API.CloseHandle = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("CloseHandle"))));
-        GLOBAL_API.DeviceIoControl = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("DeviceIoControl"))));
+        GLOBAL_API.GetCurrentThreadId = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "GetCurrentThreadId\0".as_ptr())));
+        GLOBAL_API.CreateFileW = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "CreateFileW\0".as_ptr())));
+        GLOBAL_API.CloseHandle = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "CloseHandle\0".as_ptr())));
+        GLOBAL_API.DeviceIoControl = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "DeviceIoControl\0".as_ptr())));
 
         // Load User32
         let user32_name = "USER32.DLL\0";
@@ -469,14 +469,14 @@ type FnGetUserNameW = unsafe extern "system" fn(lpBuffer: *mut u16, pcbBuffer: *
          }
 
 
-        GLOBAL_API.GetCompressedFileSizeW = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("GetCompressedFileSizeW"))));
-        GLOBAL_API.GetFileAttributesW = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("GetFileAttributesW"))));
-        GLOBAL_API.SetFileAttributesW = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("SetFileAttributesW"))));
-        GLOBAL_API.OpenProcess = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("OpenProcess"))));
-        GLOBAL_API.CreateProcessW = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("CreateProcessW"))));
-        GLOBAL_API.InitializeProcThreadAttributeList = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("InitializeProcThreadAttributeList"))));
-        GLOBAL_API.UpdateProcThreadAttribute = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("UpdateProcThreadAttribute"))));
-        GLOBAL_API.DeleteProcThreadAttributeList = Some(core::mem::transmute(get_proc_address(kernel32, hash_str("DeleteProcThreadAttributeList"))));
+        GLOBAL_API.GetCompressedFileSizeW = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "GetCompressedFileSizeW\0".as_ptr())));
+        GLOBAL_API.GetFileAttributesW = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "GetFileAttributesW\0".as_ptr())));
+        GLOBAL_API.SetFileAttributesW = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "SetFileAttributesW\0".as_ptr())));
+        GLOBAL_API.OpenProcess = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "OpenProcess\0".as_ptr())));
+        GLOBAL_API.CreateProcessW = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "CreateProcessW\0".as_ptr())));
+        GLOBAL_API.InitializeProcThreadAttributeList = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "InitializeProcThreadAttributeList\0".as_ptr())));
+        GLOBAL_API.UpdateProcThreadAttribute = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "UpdateProcThreadAttribute\0".as_ptr())));
+        GLOBAL_API.DeleteProcThreadAttributeList = Some(core::mem::transmute(get_addr(kernel32 as HMODULE, "DeleteProcThreadAttributeList\0".as_ptr())));
 
         // Load Advapi32
         let advapi_name = "ADVAPI32.DLL\0";
