@@ -221,11 +221,14 @@ jobs:
           make_latest: true
           files: |
             target/release/${{ env.BINARY_NAME }}.exe
+            target/release/${{ env.BINARY_NAME }}-normal.exe
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BINARY_NAME }}-windows-x64
-          path: target/release/${{ env.BINARY_NAME }}.exe
+          path: |
+             target/release/${{ env.BINARY_NAME }}.exe
+             target/release/${{ env.BINARY_NAME }}-normal.exe
           retention-days: 30
