@@ -89,7 +89,11 @@ pub fn start_watcher_thread(tasks: Arc<Mutex<Vec<WatcherTask>>>, tx: Sender<UiMe
                             // Let's assume we add `WatcherTrigger(String, WofAlgorithm)` to UiMessage.
                             
                             // Log it
-                            let _ = tx.send(UiMessage::StatusText(format!("Watcher executing: {}", path)));
+                            // Manual construction to avoid format!
+                            let prefix = crate::w!("Watcher executing: ");
+                            let path_w = crate::utils::to_wstring(&path);
+                            let msg = crate::utils::concat_wstrings(&[prefix, &path_w]);
+                            let _ = tx.send(UiMessage::StatusText(msg));
                             
                             // We'll abuse `StatusText` for now if we don't want to change UiMessage enum in a big way yet, 
                             // BUT changing UiMessage is better.

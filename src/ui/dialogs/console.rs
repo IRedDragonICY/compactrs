@@ -104,12 +104,30 @@ impl ConsoleState {
     /// Re-renders the entire history to the edit control
     unsafe fn refresh_text(&self) {
         if let Some(edit) = self.edit_hwnd {
-            let mut combined = String::with_capacity(self.history.len() * 100);
+            // Use concat_wstrings or PathBuffer logic. We don't have a giant buffer helper exposed easily,
+            // but we can just use a Vec<u16> builder.
+            let total_len = self.history.len() * 100; // rough guess
+            let mut combined = crate::utils::PathBuffer::with_capacity(total_len);
+            
             for entry in &self.history {
-                combined.push_str(&format_log_entry(entry));
+                let line = format_log_entry(entry);
+                combined.push_u16_slice(&line);
             }
-            let text_wide = to_wstring(&combined);
-            SetWindowTextW(edit, text_wide.as_ptr());
+            // PathBuffer pushes nulls and path separators. Not ideal for generic text.
+            // We should use a simple Vec<u16> concatenation loop.
+            
+            let mut buf = Vec::with_capacity(total_len);
+            for entry in &self.history {
+                 let line = format_log_entry(entry);
+                 // line is null terminated? concat_wstrings strips it.
+                 // format_log_entry returns a Vec<u16> from concat_wstrings, so it HAS a null terminator.
+                 // We should strip it.
+                 let len = if line.last() == Some(&0) { line.len() - 1 } else { line.len() };
+                 buf.extend_from_slice(&line[..len]);
+            }
+            buf.push(0);
+            
+            SetWindowTextW(edit, buf.as_ptr());
             // Scroll to bottom
             let len = GetWindowTextLengthW(edit);
             SendMessageW(edit, EM_SETSEL, len as WPARAM, len as LPARAM);
@@ -121,7 +139,8 @@ impl ConsoleState {
         if self.pending.is_empty() { return; }
         
         if let Some(edit) = self.edit_hwnd {
-            let mut chunk = String::with_capacity(self.pending.len() * 100);
+            let mut chunk_wide = Vec::with_capacity(self.pending.len() * 100);
+            
             for entry in &self.pending {
                 // Add to history
                 if self.history.len() >= MAX_HISTORY {
@@ -130,15 +149,17 @@ impl ConsoleState {
                 self.history.push_back(entry.clone());
                 
                 // Format for display
-                chunk.push_str(&format_log_entry(entry));
+                let line = format_log_entry(entry);
+                let len = if line.last() == Some(&0) { line.len() - 1 } else { line.len() };
+                chunk_wide.extend_from_slice(&line[..len]);
             }
+            chunk_wide.push(0);
             self.pending.clear();
             
             // Append to Edit
             let len = GetWindowTextLengthW(edit);
             SendMessageW(edit, EM_SETSEL, len as WPARAM, len as LPARAM);
             
-            let chunk_wide = to_wstring(&chunk);
             SendMessageW(edit, EM_REPLACESEL, 0, chunk_wide.as_ptr() as LPARAM);
             
             // Check limit and truncation
@@ -152,15 +173,23 @@ impl ConsoleState {
     }
 }
 
-fn format_log_entry(entry: &LogEntry) -> String {
-    // [HH:MM:SS] [LEVEL] Message
-    // Simple UTC extraction from unix timestamp
-    let s = entry.timestamp % 86400;
-    let h = s / 3600;
-    let m = (s % 3600) / 60;
-    let s = s % 60;
+unsafe fn format_log_entry(entry: &LogEntry) -> Vec<u16> {
+    // [HH:MM:SS] [LEVEL] Message\r\n
+    let ts_w = crate::utils::fmt_timestamp(entry.timestamp);
     
-    format!("[{:02}:{:02}:{:02}] [{}] {}\r\n", h, m, s, entry.level.as_str(), entry.message)
+    // Level
+    // We could optimize this by returning static w-slices or using a small map
+    let level_str = match entry.level {
+        crate::logger::LogLevel::Error => w!(" [ERROR] "),
+        crate::logger::LogLevel::Warning => w!(" [WARN] "),
+        crate::logger::LogLevel::Info => w!(" [INFO] "),
+        crate::logger::LogLevel::Trace => w!(" [TRACE] "),
+    };
+    
+    let msg_w = to_wstring(&entry.message);
+    let newline = w!("\r\n");
+    
+    crate::utils::concat_wstrings(&[&ts_w, level_str, &msg_w, newline])
 }
 
 impl WindowHandler for ConsoleState {

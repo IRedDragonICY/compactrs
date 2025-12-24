@@ -196,7 +196,7 @@ impl WindowHandler for SettingsState {
             };
             
             // --- Helper to create a Row with MDL2 Icon ---
-            let create_row = |y: i32, icon_glyph: &str, title: &str, subtitle: &str, _control_id: u16, ctl_fn: &dyn Fn(i32, i32) -> HWND| -> i32 {
+            let create_row = |y: i32, icon_glyph: &str, title: &[u16], subtitle: &[u16], _control_id: u16, ctl_fn: &dyn Fn(i32, i32) -> HWND| -> i32 {
                 // Icon (using MDL2 Assets font)
                 let _h_icon = ControlBuilder::new(hwnd, 0)
                     .label(false)
@@ -210,7 +210,7 @@ impl WindowHandler for SettingsState {
                 // Title (offset for icon)
                 let _h_title = ControlBuilder::new(hwnd, 0)
                     .label(false)
-                    .text(title)
+                    .text_w(title)
                     .pos(55, y)
                     .size(280, 18) // Reduced height
                     .dark_mode(is_dark_mode)
@@ -220,7 +220,7 @@ impl WindowHandler for SettingsState {
                 // Subtitle (Moved up to y+15 to tighten gap and fit in 36px row)
                 let _h_sub = ControlBuilder::new(hwnd, 0)
                     .label(false)
-                    .text(subtitle)
+                    .text_w(subtitle)
                     .pos(55, y + 15) 
                     .size(330, 18) // Reduced height
                     .dark_mode(is_dark_mode)
@@ -238,7 +238,7 @@ impl WindowHandler for SettingsState {
             current_y = create_section_header(current_y, "Appearance");
             
             // App Theme - MDL2 glyph E713 = Settings
-            current_y = create_row(current_y, "\u{E713}", "Application Theme", "Choose between Light, Dark, or System Default", IDC_COMBO_THEME, &|x, y| {
+            current_y = create_row(current_y, "\u{E713}", crate::w!("Application Theme"), crate::w!("Choose between Light, Dark, or System Default"), IDC_COMBO_THEME, &|x, y| {
                 let h_combo = ControlBuilder::new(hwnd, IDC_COMBO_THEME)
                     .combobox()
                     .pos(x, y + 5) // Center vertically roughly
@@ -266,7 +266,7 @@ impl WindowHandler for SettingsState {
             current_y = create_section_header(current_y, "General Behavior");
 
             // Force Stop - MDL2 glyph E74D = Stop
-            current_y = create_row(current_y, "\u{E74D}", "Force Kill Processes", "Automatically terminate locking processes", IDC_CHK_FORCE_STOP, &|x, y| {
+            current_y = create_row(current_y, "\u{E74D}", crate::w!("Force Kill Processes"), crate::w!("Automatically terminate locking processes"), IDC_CHK_FORCE_STOP, &|x, y| {
                  ControlBuilder::new(hwnd, IDC_CHK_FORCE_STOP)
                     .checkbox()
                     .text("") // No text, just the box
@@ -278,7 +278,7 @@ impl WindowHandler for SettingsState {
             });
 
             // Context Menu - MDL2 glyph E8DE = More
-            current_y = create_row(current_y, "\u{E8DE}", "Explorer Context Menu", "Add 'CompactRS' to right-click menu", IDC_CHK_CONTEXT_MENU, &|x, y| {
+            current_y = create_row(current_y, "\u{E8DE}", crate::w!("Explorer Context Menu"), crate::w!("Add 'CompactRS' to right-click menu"), IDC_CHK_CONTEXT_MENU, &|x, y| {
                 ControlBuilder::new(hwnd, IDC_CHK_CONTEXT_MENU)
                     .checkbox()
                     .text("")
@@ -290,7 +290,7 @@ impl WindowHandler for SettingsState {
             });
             
             // System Guard - MDL2 glyph EA18 = Shield
-            current_y = create_row(current_y, "\u{EA18}", "System Safety Guard", "Prevent compression of critical system files", IDC_CHK_SYSTEM_GUARD, &|x, y| {
+            current_y = create_row(current_y, "\u{EA18}", crate::w!("System Safety Guard"), crate::w!("Prevent compression of critical system files"), IDC_CHK_SYSTEM_GUARD, &|x, y| {
                 ControlBuilder::new(hwnd, IDC_CHK_SYSTEM_GUARD)
                     .checkbox()
                     .text("")
@@ -302,7 +302,7 @@ impl WindowHandler for SettingsState {
             });
             
             // Low Power - MDL2 glyph EC48 = Battery Saver
-            current_y = create_row(current_y, "\u{EC48}", "Efficiency Mode", "Reduce background resource usage (Low Power)", IDC_CHK_LOW_POWER, &|x, y| {
+            current_y = create_row(current_y, "\u{EC48}", crate::w!("Efficiency Mode"), crate::w!("Reduce background resource usage (Low Power)"), IDC_CHK_LOW_POWER, &|x, y| {
                 ControlBuilder::new(hwnd, IDC_CHK_LOW_POWER)
                     .checkbox()
                     .text("")
@@ -323,7 +323,8 @@ impl WindowHandler for SettingsState {
             let current_threads = if self.max_threads == 0 { cpu_count } else { self.max_threads };
             
             // CPU Threads - MDL2 glyph E9D9 = Processing
-            current_y = create_row(current_y, "\u{E9D9}", "CPU Thread Limit", &format!("Maximum worker threads (Current: {})", current_threads), IDC_SLIDER_THREADS, &|x, y| {
+            let subtitle = crate::utils::concat_wstrings(&[crate::w!("Maximum worker threads (Current: "), &crate::utils::fmt_u32(current_threads), crate::w!(")")]);
+            current_y = create_row(current_y, "\u{E9D9}", crate::w!("CPU Thread Limit"), &subtitle, IDC_SLIDER_THREADS, &|x, y| {
                  // Label for value updates
                  let _lbl = ControlBuilder::new(hwnd, IDC_LBL_THREADS_VALUE)
                     .label(false)
@@ -344,7 +345,7 @@ impl WindowHandler for SettingsState {
             });
 
             // Queue - MDL2 glyph E902 = List
-            current_y = create_row(current_y, "\u{E902}", "Concurrent File Queue", "Files compressed simultaneously (0 = Unlimited)", IDC_EDIT_CONCURRENT, &|x, y| {
+            current_y = create_row(current_y, "\u{E902}", crate::w!("Concurrent File Queue"), crate::w!("Files compressed simultaneously (0 = Unlimited)"), IDC_EDIT_CONCURRENT, &|x, y| {
                  ControlBuilder::new(hwnd, IDC_EDIT_CONCURRENT)
                     .edit()
                     .text(&self.max_concurrent_items.to_string())
@@ -361,7 +362,7 @@ impl WindowHandler for SettingsState {
             current_y = create_section_header(current_y, "File Filtering");
             
             // Skip Heuristics - MDL2 glyph E71C = Filter
-            current_y = create_row(current_y, "\u{E71C}", "Smart Compression Skip", "Skip files that are unlikely to compress further", IDC_CHK_SKIP_EXT, &|x, y| {
+            current_y = create_row(current_y, "\u{E71C}", crate::w!("Smart Compression Skip"), crate::w!("Skip files that are unlikely to compress further"), IDC_CHK_SKIP_EXT, &|x, y| {
                 ControlBuilder::new(hwnd, IDC_CHK_SKIP_EXT)
                     .checkbox()
                     .text("")
@@ -411,7 +412,7 @@ impl WindowHandler for SettingsState {
              current_y = create_section_header(current_y, "Diagnostics");
              
              // Logging Master - MDL2 glyph E9D9 = Bug
-             current_y = create_row(current_y, "\u{EBE8}", "Enable Diagnostic Logging", "Show real-time logs in a console window", IDC_CHK_LOG_ENABLED, &|x, y| {
+             current_y = create_row(current_y, "\u{EBE8}", crate::w!("Enable Diagnostic Logging"), crate::w!("Show real-time logs in a console window"), IDC_CHK_LOG_ENABLED, &|x, y| {
                  ControlBuilder::new(hwnd, IDC_CHK_LOG_ENABLED)
                     .checkbox()
                     .text("")
@@ -482,10 +483,13 @@ impl WindowHandler for SettingsState {
                 .build();
             
             // Subtitle (Dynamic Status)
-            let version_str = format!("{} - Check for updates", env!("APP_VERSION"));
+            let version_str = crate::utils::concat_wstrings(&[
+                &crate::utils::to_wstring(env!("APP_VERSION")),
+                crate::w!(" - Check for updates")
+            ]);
             ControlBuilder::new(hwnd, IDC_LBL_UPDATE_STATUS)
                 .label(false)
-                .text(&version_str)
+                .text_w(&version_str)
                 .pos(30, current_y + 20)
                 .size(350, 20)
                 .dark_mode(is_dark_mode)
@@ -504,7 +508,7 @@ impl WindowHandler for SettingsState {
             current_y += 35;
 
             // Restart TI Row - MDL2 glyph E7EF = Admin
-            current_y = create_row(current_y, "\u{E7EF}", "Advanced Startup", "Restart with TrustedInstaller privileges", IDC_BTN_RESTART_TI, &|_x_pos, y_pos| {
+            current_y = create_row(current_y, "\u{E7EF}", crate::w!("Advanced Startup"), crate::w!("Restart with TrustedInstaller privileges"), IDC_BTN_RESTART_TI, &|_x_pos, y_pos| {
                  // Adjusted x_pos from helper is 350. Let's use 400 manually or stick to helper?
                  // Helper passes 350. 
                  ControlBuilder::new(hwnd, IDC_BTN_RESTART_TI)
@@ -573,7 +577,7 @@ impl WindowHandler for SettingsState {
                          // We didn't store the subtitle handle. 
                          // But we have `IDC_LBL_THREADS_VALUE` (2015) in the code.
                          // Let's use that if we can.
-                         let _label_text = format!("(Current: {})", pos); // Simplified
+                         // let _label_text = format!("(Current: {})", pos); // Simplified - REMOVED
                          // Wait, in on_create I didn't assign ID 2015 to the Subtitle, I assigned it to a hidden label?
                          // I should probably find the control.
                          // Actually, let's just ignore the real-time subtitle update for now unless we need it perfect. 
@@ -600,8 +604,12 @@ impl WindowHandler for SettingsState {
                              let txt = "Download and Restart";
                              Button::new(h_btn).set_text(txt);
                              
-                             let status_txt = format!("New version {} available!", ver);
-                             Label::new(h_lbl).set_text(&status_txt);
+                             let status_txt = crate::utils::concat_wstrings(&[
+                                 crate::w!("New version "),
+                                 &crate::utils::to_wstring(ver),
+                                 crate::w!(" available!")
+                             ]);
+                             Label::new(h_lbl).set_text_w(&status_txt);
                              
                              // Re-enable button so user can click it
                              Button::new(h_btn).set_enabled(true);
@@ -620,8 +628,11 @@ impl WindowHandler for SettingsState {
                              let txt = "Check for Updates";
                              Button::new(h_btn).set_text(txt);
                              
-                             let status_txt = format!("Error: {}", e);
-                             Label::new(h_lbl).set_text(&status_txt);
+                             let status_txt = crate::utils::concat_wstrings(&[
+                                 crate::w!("Error: "),
+                                 &crate::utils::to_wstring(&e.to_string())
+                             ]);
+                             Label::new(h_lbl).set_text_w(&status_txt);
                              
                              Button::new(h_btn).set_enabled(true);
                         },
@@ -947,7 +958,7 @@ impl WindowHandler for SettingsState {
                                   
                                   if res == IDYES {
                                       if let Err(e) = crate::engine::elevation::restart_as_trusted_installer() {
-                                          let err_msg = to_wstring(&format!("Failed to elevate: {}", e));
+                                          let err_msg = to_wstring(&("Failed to elevate: ".to_string() + &e.to_string()));
                                           let err_title = w!("Error");
                                           MessageBoxW(hwnd, err_msg.as_ptr(), err_title.as_ptr(), MB_ICONERROR | MB_OK);
                                       }

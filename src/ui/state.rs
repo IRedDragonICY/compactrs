@@ -67,7 +67,8 @@ pub enum UiMessage {
     Log(LogEntry),
     
     /// Status text message (UTF-8)
-    StatusText(String),
+    /// Status text message (UTF-16)
+    StatusText(Vec<u16>),
     
     Finished,
     
@@ -420,7 +421,7 @@ impl AppState {
                  let _est_str = crate::utils::format_size(estimated);
                  let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated));
             }
-            let _ = tx.send(UiMessage::StatusText("Ready.".to_string()));
+            let _ = tx.send(UiMessage::StatusText(to_wstring("Ready.")));
         });
     }
 }

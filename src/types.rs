@@ -796,6 +796,7 @@ unsafe extern "system" {
     pub fn ShowWindow(hWnd: HWND, nCmdShow: i32) -> BOOL;
     pub fn UpdateWindow(hWnd: HWND) -> BOOL;
     pub fn PeekMessageW(lpMsg: *mut MSG, hWnd: HWND, wMsgFilterMin: u32, wMsgFilterMax: u32, wRemoveMsg: u32) -> BOOL;
+    pub fn wsprintfW(output: LPWSTR, format: LPCWSTR, ...) -> i32;
     
     pub fn SetWindowLongPtrW(hWnd: HWND, nIndex: i32, dwNewLong: isize) -> isize;
     pub fn GetWindowLongPtrW(hWnd: HWND, nIndex: i32) -> isize;

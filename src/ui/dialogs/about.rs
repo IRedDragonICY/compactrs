@@ -112,10 +112,13 @@ impl WindowHandler for AboutState {
 
             // Version - Lighter font using ControlBuilder
             let h_ver = 20;
-            let ver_string = format!("Version {}", env!("APP_VERSION"));
+            let ver_string = crate::utils::concat_wstrings(&[
+                crate::w!("Version "),
+                &crate::utils::to_wstring(env!("APP_VERSION"))
+            ]);
             let _version = ControlBuilder::new(hwnd, 0)
                 .label(true)
-                .text(&ver_string)
+                .text_w(&ver_string)
                 .pos(x_start, current_y)
                 .size(content_width, h_ver)
                 .font(version_font)

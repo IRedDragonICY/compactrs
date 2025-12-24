@@ -67,6 +67,76 @@ pub fn u64_to_wstring(mut val: u64) -> Vec<u16> {
     buf
 }
 
+/// Formats a string using Win32 wsprintfW into a stack buffer.
+/// Returns a Vec<u16> for compatibility with existing APIs.
+pub unsafe fn fmt_u64(template: &[u16], value: u64) -> Vec<u16> {
+    let mut buffer = [0u16; 128];
+    unsafe {
+        crate::types::wsprintfW(buffer.as_mut_ptr(), template.as_ptr(), value);
+    }
+    let len = (0..128).take_while(|&i| buffer[i] != 0).count();
+    buffer[..=len].to_vec()
+}
+
+/// Formats a u32 using Win32 wsprintfW (%u)
+pub unsafe fn fmt_u32(value: u32) -> Vec<u16> {
+    let mut buffer = [0u16; 32];
+    let fmt = crate::w!("%u");
+    unsafe {
+        crate::types::wsprintfW(buffer.as_mut_ptr(), fmt.as_ptr(), value);
+    }
+    let len = (0..32).take_while(|&i| buffer[i] != 0).count();
+    buffer[..=len].to_vec()
+}
+
+/// Formats a u32 using Win32 wsprintfW (%02u)
+pub unsafe fn fmt_u32_padded(value: u32) -> Vec<u16> {
+    let mut buffer = [0u16; 32];
+    let fmt = crate::w!("%02u");
+    unsafe {
+        crate::types::wsprintfW(buffer.as_mut_ptr(), fmt.as_ptr(), value);
+    }
+    let len = (0..32).take_while(|&i| buffer[i] != 0).count();
+    buffer[..=len].to_vec()
+}
+
+/// Helper to format "Processed %I64u / %I64u"
+pub unsafe fn fmt_progress(current: u64, total: u64) -> Vec<u16> {
+    let mut buffer = [0u16; 128];
+    // %I64u is the Windows specifier for u64 in wsprintf
+    // We include "Processed " here to match the UI requirement in one go if possible,
+    // or just the numbers. The prompt snippet showed just numbers.
+    // However, to replace the existing logic "Processed {} / {}", it's better to verify what the prompt snippet in the text said.
+    // The prompt snippet: let fmt = crate::w!("%I64u / %I64u");
+    // So I will use that.
+    let fmt = crate::w!("%I64u / %I64u"); 
+    unsafe {
+        crate::types::wsprintfW(buffer.as_mut_ptr(), fmt.as_ptr(), current, total);
+    }
+    let len = (0..128).take_while(|&i| buffer[i] != 0).count();
+    buffer[..=len].to_vec()
+}
+
+/// Helper to format timestamp "[HH:MM:SS]"
+pub unsafe fn fmt_timestamp(ts: u64) -> Vec<u16> {
+    // [HH:MM:SS]
+    let s = ts % 86400;
+    let h = s / 3600;
+    let m = (s % 3600) / 60;
+    let s = s % 60;
+    
+    let mut buffer = [0u16; 32];
+    let fmt = crate::w!("[%02u:%02u:%02u]");
+    unsafe {
+       crate::types::wsprintfW(buffer.as_mut_ptr(), fmt.as_ptr(), h, m, s);
+    }
+    let len = (0..32).take_while(|&i| buffer[i] != 0).count();
+    // We do NOT return null terminator usually if we want to concat later?
+    // concat_wstrings expects null-terminated parts (it strips them).
+    // Our existing helpers return null-terminated vecs.
+    buffer[..=len].to_vec()
+}
+
 /// Efficiently concatenates multiple UTF-16 slices into a single null-terminated vector.
 /// Calculates total size upfront to perform exactly one allocation.
 pub fn concat_wstrings(parts: &[&[u16]]) -> Vec<u16> {
@@ -140,9 +210,24 @@ pub fn calculate_saved_percentage(logical: u64, disk: u64) -> f64 {
 pub fn calculate_ratio_string(logical: u64, disk: u64) -> Vec<u16> {
     if logical == 0 { return w!("-").to_vec(); }
     
-    let ratio = calculate_saved_percentage(logical, disk);
-    let s = format!("{:.1}%", ratio);
-    to_wstring(&s)
+    // (logical - disk) * 1000 / logical => gives us X.Y % as XY integer
+    let saved = if logical > disk { logical - disk } else { 0 };
+    
+    // Use u128 to prevent overflow during multiplication if file sizes are huge (exabytes)
+    // Though u64 max is 18 EB, * 1000 would overflow.
+    let ratio_10x = (saved as u128 * 1000) / (logical as u128);
+    let whole = (ratio_10x / 10) as u32;
+    let decimal = (ratio_10x % 10) as u32;
+
+    let mut buffer = [0u16; 32];
+    let fmt = crate::w!("%u.%u%%");
+    
+    unsafe {
+        crate::types::wsprintfW(buffer.as_mut_ptr(), fmt.as_ptr(), whole, decimal);
+    }
+    
+    let len = (0..32).take_while(|&i| buffer[i] != 0).count();
+    buffer[..=len].to_vec()
 }
 
 // ===== PATH BUFFER OPTIMIZATION =====

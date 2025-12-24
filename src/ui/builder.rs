@@ -12,12 +12,12 @@ const SS_ICON: u32 = 0x0003;
 const SS_REALSIZEIMAGE: u32 = 0x0800;
 const SS_CENTERIMAGE: u32 = 0x0200;
 
-pub struct ControlBuilder {
+pub struct ControlBuilder<'a> {
     parent: HWND,
     id: u16,
-    text: Cow<'static, [u16]>,
+    text: Cow<'a, [u16]>,
     x: i32, y: i32, w: i32, h: i32,
-    class_name: Cow<'static, [u16]>,
+    class_name: Cow<'a, [u16]>,
     style: u32,
     ex_style: u32,
     is_dark: bool,
@@ -25,7 +25,7 @@ pub struct ControlBuilder {
     checked: bool, // New: support default checked state
 }
 
-impl ControlBuilder {
+impl<'a> ControlBuilder<'a> {
     pub fn new(parent: HWND, id: u16) -> Self {
         Self {
             parent, id,
@@ -41,7 +41,7 @@ impl ControlBuilder {
     }
 
     pub fn text(mut self, text: &str) -> Self { self.text = Cow::Owned(to_wstring(text)); self }
-    pub fn text_w(mut self, text: &'static [u16]) -> Self { self.text = Cow::Borrowed(text); self }
+    pub fn text_w(mut self, text: &'a [u16]) -> Self { self.text = Cow::Borrowed(text); self }
     pub fn pos(mut self, x: i32, y: i32) -> Self { self.x = x; self.y = y; self }
     pub fn size(mut self, w: i32, h: i32) -> Self { self.w = w; self.h = h; self }
     pub fn style(mut self, style: u32) -> Self { self.style |= style; self }

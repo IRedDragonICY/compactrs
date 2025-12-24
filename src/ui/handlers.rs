@@ -883,12 +883,32 @@ pub unsafe extern "system" fn compare_items(lparam1: isize, lparam2: isize, lpar
         (Some(i1), Some(i2)) => {
             let ord = match state.sort_column {
                 0 => i1.path.to_lowercase().cmp(&i2.path.to_lowercase()), 
-                2 => format!("{:?}", i1.algorithm).cmp(&format!("{:?}", i2.algorithm)),
-                3 => format!("{:?}", i1.action).cmp(&format!("{:?}", i2.action)),
+                2 => {
+                    let p1 = match i1.algorithm {
+                        WofAlgorithm::Xpress4K => 0, WofAlgorithm::Xpress8K => 1, WofAlgorithm::Xpress16K => 2, WofAlgorithm::Lzx => 3,
+                    };
+                    let p2 = match i2.algorithm {
+                        WofAlgorithm::Xpress4K => 0, WofAlgorithm::Xpress8K => 1, WofAlgorithm::Xpress16K => 2, WofAlgorithm::Lzx => 3,
+                    };
+                    p1.cmp(&p2)
+                },
+                3 => {
+                    let p1 = match i1.action { BatchAction::Compress => 0, BatchAction::Decompress => 1 };
+                    let p2 = match i2.action { BatchAction::Compress => 0, BatchAction::Decompress => 1 };
+                    p1.cmp(&p2)
+                },
                 4 => i1.logical_size.cmp(&i2.logical_size),
                 5 => i1.estimated_size.cmp(&i2.estimated_size),
                 6 => i1.disk_size.cmp(&i2.disk_size),
-                8 => format!("{:?}", i1.status).cmp(&format!("{:?}", i2.status)),
+                8 => {
+                   let p1 = match &i1.status { 
+                       BatchStatus::Pending => 0, BatchStatus::Processing => 1, BatchStatus::Complete => 2, BatchStatus::Error(_) => 3 
+                   };
+                   let p2 = match &i2.status { 
+                       BatchStatus::Pending => 0, BatchStatus::Processing => 1, BatchStatus::Complete => 2, BatchStatus::Error(_) => 3 
+                   };
+                   p1.cmp(&p2)
+                },
                 _ => CmpOrdering::Equal,
             };
             

@@ -38,8 +38,8 @@ impl Drop for ExecutionStateGuard {
 #[derive(Debug, Clone)]
 pub enum ProcessResult {
     Success,
-    Skipped(String),
-    Failed(String),
+    Skipped(Vec<u16>),
+    Failed(Vec<u16>),
 }
 
 struct FileTask {
@@ -81,7 +81,7 @@ pub fn batch_process_worker(
     skip_extensions: String,
 ) {
     let _sleep_guard = ExecutionStateGuard::new();
-    let _ = tx.send(UiMessage::StatusText("Discovering files...".to_string()));
+    let _ = tx.send(UiMessage::StatusText(to_wstring("Discovering files...")));
     
     // 1. Discovery Phase
     let mut row_totals = std::collections::HashMap::new();
@@ -113,10 +113,10 @@ pub fn batch_process_worker(
                       else if low_power_mode { std::cmp::max(1, parallelism / 4) } 
                       else { parallelism };
     
-    crate::log_info!("Processing {} files with {} CPU Threads...", total_files, num_threads);
+    crate::log_info!(&["Processing ", &total_files.to_string(), " files with ", &num_threads.to_string(), " CPU Threads..."].concat());
     
     if total_files == 0 {
-        let _ = tx.send(UiMessage::StatusText("No files found.".to_string()));
+        let _ = tx.send(UiMessage::StatusText(to_wstring("No files found.")));
         let _ = tx.send(UiMessage::Finished);
         return;
     }
@@ -238,7 +238,7 @@ pub fn batch_process_worker(
     let _ = producer_handle.join();
 
     if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
-        let _ = tx.send(UiMessage::StatusText("Cancelled.".to_string()));
+        let _ = tx.send(UiMessage::StatusText(to_wstring("Cancelled.")));
         let _ = tx.send(UiMessage::Finished);
         return;
     }
@@ -267,47 +267,51 @@ fn process_file_core(
         BatchAction::Compress => {
             // Heuristics checks
             if guard_enabled && !force && is_critical_path(path) {
-                crate::log_info!("Skipped (Critical): {}", path);
-                return (ProcessResult::Skipped("System Path".to_string()), get_real_file_size(path));
+                crate::log_info!(&["Skipped (Critical): ", path].concat());
+                return (ProcessResult::Skipped(crate::utils::to_wstring("System Path")), get_real_file_size(path));
             }
             if !force {
                  if let Some(curr) = crate::engine::wof::get_wof_algorithm(path) {
                      if curr == algo {
-                         crate::log_info!("Skipped (Optimal): {}", path);
-                         return (ProcessResult::Skipped("Already optimal".to_string()), get_real_file_size(path));
+
+                         crate::log_info!(&["Skipped (Optimal): ", path].concat());
+                         return (ProcessResult::Skipped(crate::utils::to_wstring("Already optimal")), get_real_file_size(path));
                      }
                  }
                      if should_skip_extension(path, enable_skip, skip_ext_list) {
-                         crate::log_info!("Skipped (Ext): {}", path);
-                         return (ProcessResult::Skipped("Filtered extension".to_string()), get_real_file_size(path));
+                         crate::log_info!(&["Skipped (Ext): ", path].concat());
+                         return (ProcessResult::Skipped(crate::utils::to_wstring("Filtered extension")), get_real_file_size(path));
                      }
             }
 
             // Attempt Compression
             match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
                 Ok(true) => {
-                    crate::log_trace!("Compressed: {}", path);
+                    crate::log_trace!(&["Compressed: ", path].concat());
                     (ProcessResult::Success, get_real_file_size(path))
                 },
                 Ok(false) => {
-                    crate::log_info!("Skipped (Not beneficial): {}", path);
-                    (ProcessResult::Skipped("Not beneficial".to_string()), get_real_file_size(path))
+                    crate::log_info!(&["Skipped (Not beneficial): ", path].concat());
+                    (ProcessResult::Skipped(crate::utils::to_wstring("Not beneficial")), get_real_file_size(path))
                 },
                 Err(e) => {
-                    crate::log_error!("Failed {}: {}", path, e);
-                    (ProcessResult::Failed(e), get_real_file_size(path))
+                    crate::log_error!(&["Failed ", path, ": ", &e].concat());
+                    (ProcessResult::Failed(crate::utils::to_wstring(&e)), get_real_file_size(path))
                 }
             }
         },
         BatchAction::Decompress => {
             match uncompress_file(path) {
                 Ok(_) => {
-                    crate::log_trace!("Decompressed: {}", path);
+                    crate::log_trace!(&["Decompressed: ", path].concat());
                     (ProcessResult::Success, get_real_file_size(path))
                 },
                 Err(e) => {
-                    let msg = format!("Error {}", e);
-                    crate::log_error!("Failed {}: {}", path, msg);
+                    let prefix = crate::w!("Error ");
+                    let err_msg = e.to_string();
+                    let err_w = crate::utils::to_wstring(&err_msg);
+                    let msg = crate::utils::concat_wstrings(&[prefix, &err_w]);
+                    crate::log_error!(&["Failed ", path, ": ", &err_msg].concat());
                     (ProcessResult::Failed(msg), get_real_file_size(path))
                 }
             }

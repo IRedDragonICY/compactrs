@@ -114,7 +114,7 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
                     BatchAction::Compress => "compress",
                     BatchAction::Decompress => "decompress",
                 };
-                let payload = format!("{}|{}|{}", item.path, algo_str, action_str);
+                let payload = [&item.path, "|", algo_str, "|", action_str].concat();
                 let payload_w = to_wstring(&payload);
                 let cds = COPYDATASTRUCT {
                     dwData: 0xB00B,
@@ -139,7 +139,7 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
             let args_str = args.iter()
                 .map(|arg| {
                     if arg.contains(' ') || arg.contains('\t') || arg.is_empty() {
-                        format!("\"{}\"", arg)
+                        ["\"", arg, "\""].concat()
                     } else {
                         arg.clone()
                     }

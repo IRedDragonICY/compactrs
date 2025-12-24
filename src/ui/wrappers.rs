@@ -69,6 +69,10 @@ impl Label {
         let w = to_wstring(text);
         unsafe { SetWindowTextW(self.hwnd, w.as_ptr()); }
     }
+    
+    pub fn set_text_w(&self, text: &[u16]) {
+        unsafe { SetWindowTextW(self.hwnd, text.as_ptr()); }
+    }
 }
 
 /// Safe wrapper for ProgressBar controls
@@ -174,6 +178,17 @@ impl ListView {
         item.iItem = index;
         item.iSubItem = sub_index;
         item.pszText = w_text.as_ptr() as *mut _;
+        
+        
+        unsafe { SendMessageW(self.hwnd, LVM_SETITEMW, 0, &item as *const _ as isize); }
+    }
+
+    pub fn set_item_text_w(&self, index: i32, sub_index: i32, text: &[u16]) {
+        let mut item = unsafe { std::mem::zeroed::<LVITEMW>() };
+        item.mask = LVIF_TEXT;
+        item.iItem = index;
+        item.iSubItem = sub_index;
+        item.pszText = text.as_ptr() as *mut _;
         
         unsafe { SendMessageW(self.hwnd, LVM_SETITEMW, 0, &item as *const _ as isize); }
     }

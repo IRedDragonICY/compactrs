@@ -111,7 +111,7 @@ pub fn restart_as_trusted_installer() -> Result<(), String> {
         let pid = get_trusted_installer_pid().ok_or("Failed to start TrustedInstaller service".to_string())?;
         
         let process = (win_api.OpenProcess.unwrap())(PROCESS_CREATE_PROCESS, FALSE, pid);
-        if process.is_null() { return Err(format!("Failed to open TrustedInstaller process (PID: {})", pid)); }
+        if process.is_null() { return Err("Failed to open TrustedInstaller process (PID: ".to_string() + &pid.to_string() + ")"); }
         
         let mut size: usize = 0;
         let _ = (win_api.InitializeProcThreadAttributeList.unwrap())(std::ptr::null_mut(), 1, 0, &mut size);
@@ -140,7 +140,7 @@ pub fn restart_as_trusted_installer() -> Result<(), String> {
         }
 
         let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let cmd_line = to_wstring(&format!("\"{}\"", exe_path.to_string_lossy()));
+        let cmd_line = crate::utils::concat_wstrings(&[crate::w!("\""), &crate::utils::to_wstring(&exe_path.to_string_lossy()), crate::w!("\"")]);
         
         let mut si_ex: STARTUPINFOEXW = zeroed();
         si_ex.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;

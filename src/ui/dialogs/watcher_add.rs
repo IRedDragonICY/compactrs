@@ -140,8 +140,8 @@ impl WindowHandler for WatcherAddState {
                     };
                     cb.set_selected_index(algo_idx);
                     
-                    SetWindowTextW(h_hour, to_wstring(&format!("{:02}", task.time_hour)).as_ptr());
-                    SetWindowTextW(h_min, to_wstring(&format!("{:02}", task.time_minute)).as_ptr());
+                    SetWindowTextW(h_hour, crate::utils::fmt_u32_padded(task.time_hour as u32).as_ptr());
+                    SetWindowTextW(h_min, crate::utils::fmt_u32_padded(task.time_minute as u32).as_ptr());
                     
                     if (task.days_mask & 0x80) != 0 {
                         Button::new(GetDlgItem(hwnd, IDC_CHK_EVERYDAY as i32)).set_checked(true);

@@ -93,28 +93,28 @@ pub fn log_internal(level: LogLevel, msg: String) {
 
 #[macro_export]
 macro_rules! log_error {
-    ($($arg:tt)*) => {
-        $crate::logger::log_internal($crate::logger::LogLevel::Error, format!($($arg)*))
+    ($msg:expr) => {
+        $crate::logger::log_internal($crate::logger::LogLevel::Error, $msg.to_string())
     };
 }
 
 #[macro_export]
 macro_rules! log_warn {
-    ($($arg:tt)*) => {
-        $crate::logger::log_internal($crate::logger::LogLevel::Warning, format!($($arg)*))
+    ($msg:expr) => {
+        $crate::logger::log_internal($crate::logger::LogLevel::Warning, $msg.to_string())
     };
 }
 
 #[macro_export]
 macro_rules! log_info {
-    ($($arg:tt)*) => {
-        $crate::logger::log_internal($crate::logger::LogLevel::Info, format!($($arg)*))
+    ($msg:expr) => {
+        $crate::logger::log_internal($crate::logger::LogLevel::Info, $msg.to_string())
     };
 }
 
 #[macro_export]
 macro_rules! log_trace {
-    ($($arg:tt)*) => {
-        $crate::logger::log_internal($crate::logger::LogLevel::Trace, format!($($arg)*))
+    ($msg:expr) => {
+        $crate::logger::log_internal($crate::logger::LogLevel::Trace, $msg.to_string())
     };
 }

@@ -387,7 +387,15 @@ impl AppState {
                 } else {
                     let haystack = match search.filter_column {
                         crate::ui::state::FilterColumn::Path => item.path.to_lowercase(),
-                        crate::ui::state::FilterColumn::Status => format!("{:?}", item.status).to_lowercase(),
+                        crate::ui::state::FilterColumn::Status => {
+                            use crate::ui::state::BatchStatus;
+                            match item.status {
+                                BatchStatus::Pending => "pending".to_string(),
+                                BatchStatus::Processing => "processing".to_string(),
+                                BatchStatus::Complete => "complete".to_string(),
+                                BatchStatus::Error(_) => "error".to_string(),
+                            }
+                        },
                     };
                     
                     if use_custom_match {
@@ -395,7 +403,15 @@ impl AppState {
                         if search.case_sensitive {
                              let haystack_raw = match search.filter_column {
                                 crate::ui::state::FilterColumn::Path => item.path.clone(),
-                                crate::ui::state::FilterColumn::Status => format!("{:?}", item.status),
+                                crate::ui::state::FilterColumn::Status => {
+                                    use crate::ui::state::BatchStatus;
+                                    match &item.status {
+                                        BatchStatus::Pending => "Pending".to_string(),
+                                        BatchStatus::Processing => "Processing".to_string(),
+                                        BatchStatus::Complete => "Complete".to_string(),
+                                        BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
+                                    }
+                                },
                             };
                             crate::utils::matcher::is_match(pattern, &haystack_raw)
                         } else {
@@ -406,7 +422,15 @@ impl AppState {
                          // Re-read without lowercase if case sensitive
                          let haystack_raw = match search.filter_column {
                             crate::ui::state::FilterColumn::Path => item.path.clone(),
-                            crate::ui::state::FilterColumn::Status => format!("{:?}", item.status),
+                            crate::ui::state::FilterColumn::Status => {
+                                    use crate::ui::state::BatchStatus;
+                                    match &item.status {
+                                        BatchStatus::Pending => "Pending".to_string(),
+                                        BatchStatus::Processing => "Processing".to_string(),
+                                        BatchStatus::Complete => "Complete".to_string(),
+                                        BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
+                                    }
+                            },
                         };
                         haystack_raw.contains(&search.text)
                     } else {
@@ -454,19 +478,25 @@ impl AppState {
 
             let msg = if is_default_state {
                 if total_count == 0 {
-                    "Ready.".to_string()
+                    crate::utils::to_wstring("Ready.")
                 } else {
-                    format!("Ready. {} items loaded.", total_count)
+                    let prefix = crate::w!("Ready. ");
+                    let count_str = crate::utils::fmt_u32(total_count as u32);
+                    let suffix = crate::w!(" items loaded.");
+                    crate::utils::concat_wstrings(&[prefix, &count_str, suffix])
                 }
             } else {
                  if current_count == 0 {
-                     "No matching items found.".to_string()
+                     crate::utils::to_wstring("No matching items found.")
                  } else {
-                     format!("Found {} matching items.", current_count)
+                     let prefix = crate::w!("Found ");
+                     let count_str = crate::utils::fmt_u32(current_count as u32);
+                     let suffix = crate::w!(" matching items.");
+                     crate::utils::concat_wstrings(&[prefix, &count_str, suffix])
                  }
             };
             
-            crate::ui::wrappers::Label::new(ctrls.search_panel.results_hwnd()).set_text(&msg);
+            crate::ui::wrappers::Label::new(ctrls.search_panel.results_hwnd()).set_text_w(&msg);
         }
     }
 
@@ -704,16 +734,15 @@ impl AppState {
                          pb.set_pos(cur as i32);
                          
                          // Update Status Bar Text
-                         let cur_w = u64_to_wstring(cur);
-                         let tot_w = u64_to_wstring(total);
-                         let msg = concat_wstrings(&[&to_wstring("Processed "), &cur_w, &to_wstring("/"), &tot_w]);
-                         Label::new(ctrls.status_bar.label_hwnd()).set_text(&String::from_utf16_lossy(&msg));
+                         let progress_str = crate::utils::fmt_progress(cur, total);
+                         let prefix = crate::w!("Processed ");
+                         let msg = crate::utils::concat_wstrings(&[prefix, &progress_str]);
+                         SetWindowTextW(ctrls.status_bar.label_hwnd(), msg.as_ptr());
                      }
                      if let Some(tb) = &self.taskbar { tb.set_value(cur, total); }
                  },
-                 UiMessage::StatusText(text) => {
+                 UiMessage::StatusText(text_w) => {
                      if let Some(ctrls) = &self.controls {
-                         let text_w = to_wstring(&text);
                          SetWindowTextW(ctrls.status_bar.label_hwnd(), text_w.as_ptr());
                      }
                  },
@@ -753,8 +782,11 @@ impl AppState {
                          let queued_count = self.processing_queue.len();
                          if queued_count > 0 {
                              if let Some(ctrls) = &self.controls {
-                                 let q_msg = format!("Processing... ({} queued)", queued_count);
-                                 Label::new(ctrls.status_bar.label_hwnd()).set_text(&q_msg);
+                                 let prefix = crate::w!("Processing... (");
+                                 let q_str = crate::utils::fmt_u32(queued_count as u32);
+                                 let suffix = crate::w!(" queued)");
+                                 let q_msg = crate::utils::concat_wstrings(&[prefix, &q_str, suffix]);
+                                 Label::new(ctrls.status_bar.label_hwnd()).set_text_w(&q_msg);
                              }
                          }
                      } else {
@@ -804,8 +836,14 @@ impl AppState {
                              }
 
                              if let Some(item) = self.batch_items.get(pos) {
-                                 let sb_msg = format!("Scanning: {}... ({} files)", item.path, count);
-                                 Label::new(ctrls.status_bar.label_hwnd()).set_text(&sb_msg);
+                                 let prefix = crate::w!("Scanning: ");
+                                 let path_w = to_wstring(&item.path);
+                                 let mid = crate::w!("... (");
+                                 let count_w = crate::utils::fmt_u64(crate::w!("%I64u"), count);
+                                 let suffix = crate::w!(" files)");
+                                 
+                                 let sb_msg = crate::utils::concat_wstrings(&[prefix, &path_w, mid, &count_w, suffix]);
+                                 Label::new(ctrls.status_bar.label_hwnd()).set_text_w(&sb_msg);
                              }
                          }
                      }

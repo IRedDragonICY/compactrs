@@ -124,7 +124,7 @@ fn parse_url(url: &str) -> Result<(&str, &str), &'static str> {
 fn http_get(url: &str) -> Result<Request, String> {
     let ses = Handle::new(unsafe {
         WinHttpOpen(w!("compactrs").as_ptr(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, ptr::null(), ptr::null(), 0)
-    }).ok_or_else(|| format!("WinHttpOpen: {}", unsafe { GetLastError() }))?;
+    }).ok_or_else(|| "WinHttpOpen: ".to_string() + &unsafe { GetLastError() }.to_string())?;
 
     let mut url = url.to_string();
     for _ in 0..5 {
@@ -133,16 +133,16 @@ fn http_get(url: &str) -> Result<Request, String> {
         let path_w = to_wstring(path);
 
         let con = Handle::new(unsafe { WinHttpConnect(ses.0, host_w.as_ptr(), 443, 0) })
-            .ok_or_else(|| format!("Connect: {}", unsafe { GetLastError() }))?;
+            .ok_or_else(|| "Connect: ".to_string() + &unsafe { GetLastError() }.to_string())?;
         let req = Handle::new(unsafe {
             WinHttpOpenRequest(con.0, w!("GET").as_ptr(), path_w.as_ptr(), ptr::null(), ptr::null(), ptr::null(), WINHTTP_FLAG_SECURE)
-        }).ok_or_else(|| format!("OpenRequest: {}", unsafe { GetLastError() }))?;
+        }).ok_or_else(|| "OpenRequest: ".to_string() + &unsafe { GetLastError() }.to_string())?;
 
         if unsafe { WinHttpSendRequest(req.0, ptr::null(), 0, ptr::null(), 0, 0, 0) } == 0 {
-            return Err(format!("SendRequest: {}", unsafe { GetLastError() }));
+            return Err("SendRequest: ".to_string() + &unsafe { GetLastError() }.to_string());
         }
         if unsafe { WinHttpReceiveResponse(req.0, ptr::null_mut()) } == 0 {
-            return Err(format!("ReceiveResponse: {}", unsafe { GetLastError() }));
+            return Err("ReceiveResponse: ".to_string() + &unsafe { GetLastError() }.to_string());
         }
 
         let mut code: u32 = 0;
@@ -162,7 +162,7 @@ fn http_get(url: &str) -> Result<Request, String> {
                 let loc: Vec<u16> = buf.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
                 url = String::from_utf16_lossy(&loc).trim_matches('\0').to_string();
             }
-            _ => return Err(format!("HTTP {}", code)),
+            _ => return Err("HTTP ".to_string() + &code.to_string()),
         }
     }
     Err("Too many redirects".into())
@@ -174,7 +174,7 @@ fn read_body<F: FnMut(&[u8]) -> Result<(), String>>(req: &Handle, mut f: F) -> R
     loop {
         let mut n = 0u32;
         if unsafe { WinHttpReadData(req.0, buf.as_mut_ptr() as _, buf.len() as u32, &mut n) } == 0 {
-            return Err(format!("ReadData: {}", unsafe { GetLastError() }));
+            return Err("ReadData: ".to_string() + &unsafe { GetLastError() }.to_string());
         }
         if n == 0 { break; }
         f(&buf[..n as usize])?;
@@ -228,11 +228,11 @@ pub fn download_and_start_update(url: &str) -> Result<(), String> {
     unsafe {
         let _ = DeleteFileW(old_w.as_ptr());
         if MoveFileExW(cur_w.as_ptr(), old_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
-            return Err(format!("Move current: {}", GetLastError()));
+            return Err("Move current: ".to_string() + &GetLastError().to_string());
         }
         if MoveFileExW(tmp_w.as_ptr(), cur_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
             let _ = MoveFileExW(old_w.as_ptr(), cur_w.as_ptr(), MOVEFILE_REPLACE_EXISTING);
-            return Err(format!("Replace exe: {}", GetLastError()));
+            return Err("Replace exe: ".to_string() + &GetLastError().to_string());
         }
     }
     Ok(())

@@ -321,7 +321,12 @@ impl WatcherState {
             
             // Schedule String
             let schedule = if (task.days_mask & 0x80) != 0 {
-                format!("Every Day at {:02}:{:02}", task.time_hour, task.time_minute)
+                crate::utils::concat_wstrings(&[
+                     crate::w!("Every Day at "),
+                     &crate::utils::fmt_u32_padded(task.time_hour as u32),
+                     crate::w!(":"),
+                     &crate::utils::fmt_u32_padded(task.time_minute as u32)
+                ])
             } else {
                  let mut days = Vec::new();
                  if task.days_mask & 1 != 0 { days.push("Mon"); }
@@ -331,9 +336,16 @@ impl WatcherState {
                  if task.days_mask & 16 != 0 { days.push("Fri"); }
                  if task.days_mask & 32 != 0 { days.push("Sat"); }
                  if task.days_mask & 64 != 0 { days.push("Sun"); }
-                 format!("{} at {:02}:{:02}", days.join(", "), task.time_hour, task.time_minute)
+                 let days_str = days.join(", ");
+                 crate::utils::concat_wstrings(&[
+                      &crate::utils::to_wstring(&days_str),
+                      crate::w!(" at "),
+                      &crate::utils::fmt_u32_padded(task.time_hour as u32),
+                      crate::w!(":"),
+                      &crate::utils::fmt_u32_padded(task.time_minute as u32)
+                 ])
             };
-            lv.set_item_text(i as i32, 3, &schedule);
+            lv.set_item_text_w(i as i32, 3, &schedule);
             
             // Algo
             let algo = match task.algorithm {
@@ -346,7 +358,7 @@ impl WatcherState {
 
             // Last Run
             let last_run = if task.last_run_timestamp == 0 {
-                "Never".to_string()
+                crate::utils::to_wstring("Never")
             } else {
                 // Convert Unix timestamp to Windows FILETIME then to SYSTEMTIME
                 // Unix epoch (1970) to Windows epoch (1601) = 11644473600 seconds
@@ -363,12 +375,22 @@ impl WatcherState {
                 
                 if unsafe { FileTimeToLocalFileTime(&ft, &mut local_ft) } != 0
                     && unsafe { FileTimeToSystemTime(&local_ft, &mut st) } != 0 {
-                    format!("{:04}-{:02}-{:02} {:02}:{:02}", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute)
+                    crate::utils::concat_wstrings(&[
+                        &crate::utils::fmt_u32(st.wYear as u32),
+                        crate::w!("-"),
+                        &crate::utils::fmt_u32_padded(st.wMonth as u32),
+                        crate::w!("-"),
+                        &crate::utils::fmt_u32_padded(st.wDay as u32),
+                        crate::w!(" "),
+                        &crate::utils::fmt_u32_padded(st.wHour as u32),
+                        crate::w!(":"),
+                        &crate::utils::fmt_u32_padded(st.wMinute as u32)
+                    ])
                 } else {
-                    "Error".to_string()
+                    crate::utils::to_wstring("Error")
                 }
             };
-            lv.set_item_text(i as i32, 5, &last_run);
+            lv.set_item_text_w(i as i32, 5, &last_run);
             
             // Action
             lv.set_item_text(i as i32, 6, "▶ Run");
