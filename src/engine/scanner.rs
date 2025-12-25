@@ -180,7 +180,12 @@ pub fn scan_path_metrics(path: &str) -> PathMetrics {
             metrics.logical_size += size;
             metrics.disk_size += get_real_file_size(full_path);
             
-            if algo_scanned < 50 {
+            // Heuristic: Check first 200 files always.
+            // If we haven't found any compressed files yet, keep checking up to 2000 files.
+            // This prevents false negatives in folders with many small uncompressed files at the start.
+            let should_check = algo_scanned < 200 || (seen_algos.is_empty() && algo_scanned < 2000);
+
+            if should_check {
                 if let Some(algo) = get_wof_algorithm(full_path) {
                     seen_algos.insert(algo as u32);
                 }
@@ -222,7 +227,9 @@ pub fn scan_path_streaming(
             metrics.logical_size += size;
             metrics.disk_size += get_real_file_size(full_path);
 
-            if algo_scanned < 50 {
+            let should_check = algo_scanned < 200 || (seen_algos.is_empty() && algo_scanned < 2000);
+
+            if should_check {
                 if let Some(algo) = get_wof_algorithm(full_path) {
                     seen_algos.insert(algo as u32);
                 }

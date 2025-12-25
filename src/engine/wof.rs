@@ -61,11 +61,12 @@ pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
         let handle = (win_api.CreateFileW.unwrap())(
             wide.as_ptr(),
             0x80000000, // GENERIC_READ
-            FILE_SHARE_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             std::ptr::null(),
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS,
             std::ptr::null_mut(),
+
         );
 
         if handle == INVALID_HANDLE_VALUE {
@@ -135,26 +136,7 @@ pub fn get_wof_algorithm_from_handle(handle: HANDLE) -> Option<WofAlgorithm> {
 }
 
 // WOF Definitions
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct WOF_EXTERNAL_INFO {
-    pub version: u32,
-    pub provider: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug)]
-pub struct FILE_PROVIDER_EXTERNAL_INFO_V1 {
-    pub version: u32,
-    pub algorithm: u32,
-    pub flags: u32,
-}
-
-pub const WOF_CURRENT_VERSION: u32 = 1;
-pub const WOF_PROVIDER_FILE: u32 = 2;
-
-pub const FILE_PROVIDER_CURRENT_VERSION: u32 = 1;
+// Imported from crate::types::*;
 
 // Compression Algorithms
 pub const FILE_PROVIDER_COMPRESSION_XPRESS4K: u32 = 0;

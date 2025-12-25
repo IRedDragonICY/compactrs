@@ -1,36 +1,6 @@
 use crate::types::*;
-use std::ffi::c_void;
 
-type BOOL = i32;
-
-// Manual definition of ITaskbarList3 since it's missing in windows-sys
-#[repr(C)]
-pub struct ITaskbarList3 {
-    pub lp_vtbl: *const ITaskbarList3Vtbl,
-}
-
-#[repr(C)]
-pub struct ITaskbarList3Vtbl {
-    pub query_interface: unsafe extern "system" fn(*mut ITaskbarList3, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub add_ref: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
-    pub release: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
-    pub hr_init: unsafe extern "system" fn(*mut ITaskbarList3) -> HRESULT,
-    pub add_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub delete_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub activate_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub set_active_alt: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
-    pub mark_fullscreen_window: unsafe extern "system" fn(*mut ITaskbarList3, HWND, BOOL) -> HRESULT,
-    pub set_progress_value: unsafe extern "system" fn(*mut ITaskbarList3, HWND, u64, u64) -> HRESULT,
-    pub set_progress_state: unsafe extern "system" fn(*mut ITaskbarList3, HWND, TBPFLAG) -> HRESULT,
-    // We don't need the rest of the methods for this app
-}
-
-const IID_ITASKBAR_LIST3: GUID = GUID {
-    data1: 0xea1afb91,
-    data2: 0x9e28,
-    data3: 0x4b86,
-    data4: [0x90, 0xe9, 0x9e, 0x9f, 0x8a, 0x5e, 0xef, 0xaf],
-};
+// Imported from crate::types::*;
 
 pub enum TaskbarState {
     NoProgress,

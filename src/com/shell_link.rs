@@ -5,29 +5,10 @@ use std::ffi::c_void;
 use crate::utils::to_wstring;
 
 // --- GUID Definitions ---
-const CLSID_SHELL_LINK: GUID = GUID { data1: 0x00021401, data2: 0x0000, data3: 0x0000, data4: [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46] };
-const IID_ISHELL_LINK_W: GUID = GUID { data1: 0x000214F9, data2: 0x0000, data3: 0x0000, data4: [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46] };
-const IID_IPERSIST_FILE: GUID = GUID { data1: 0x0000010b, data2: 0x0000, data3: 0x0000, data4: [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46] };
+// Imported from crate::types::*;
 
 // --- VTable Definitions ---
-
-#[repr(C)]
-struct IShellLinkWVtbl {
-    pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub GetPath: unsafe extern "system" fn(*mut c_void, LPCWSTR, i32, *mut c_void, u32) -> HRESULT,
-}
-
-#[repr(C)]
-struct IPersistFileVtbl {
-    pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub GetClassID: unsafe extern "system" fn(*mut c_void, *mut GUID) -> HRESULT, // IPersist
-    pub IsDirty: unsafe extern "system" fn(*mut c_void) -> HRESULT,
-    pub Load: unsafe extern "system" fn(*mut c_void, LPCWSTR, u32) -> HRESULT,
-}
+// Imported from crate::types::*;
 
 /// Resolves a shortcut (.lnk) file to its target path.
 /// Returns None if resolution fails or if the path is not a shortcut.

@@ -4,18 +4,7 @@ use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use crate::types::*;
 
-#[repr(C)]
-struct SERVICE_STATUS_PROCESS {
-    dwServiceType: u32,
-    dwCurrentState: u32,
-    dwControlsAccepted: u32,
-    dwWin32ExitCode: u32,
-    dwServiceSpecificExitCode: u32,
-    dwCheckPoint: u32,
-    dwWaitHint: u32,
-    dwProcessId: u32,
-    dwServiceFlags: u32,
-}
+// Imported from crate::types::*;
 
 const SE_PRIVILEGE_ENABLED: u32 = 0x00000002;
 const TOKEN_ADJUST_PRIVILEGES: u32 = 0x0020;

@@ -6,73 +6,8 @@ use crate::types::*;
 use std::ffi::c_void;
 
 // --- COM Interface Definitions (VTables) ---
-// Kept minimal and private to this module to reduce global namespace pollution.
+// Imported from crate::types::*;
 
-#[repr(C)]
-struct IFileOpenDialogVtbl {
-    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub show: unsafe extern "system" fn(*mut c_void, isize) -> HRESULT, // HWND is isize
-    pub set_file_types: unsafe extern "system" fn(*mut c_void, u32, *const c_void) -> HRESULT,
-    pub set_file_type_index: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
-    pub get_file_type_index: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
-    pub advise: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut u32) -> HRESULT,
-    pub unadvise: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
-    pub set_options: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
-    pub get_options: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
-    pub set_default_folder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
-    pub set_folder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
-    pub get_folder: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    pub get_current_selection: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    pub set_file_name: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub get_file_name: unsafe extern "system" fn(*mut c_void, *mut PCWSTR) -> HRESULT,
-    pub set_title: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub set_ok_button_label: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub set_file_name_label: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub get_result: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT, 
-    pub add_place: unsafe extern "system" fn(*mut c_void, *mut c_void, u32) -> HRESULT,
-    pub set_default_extension: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    pub close: unsafe extern "system" fn(*mut c_void, HRESULT) -> HRESULT,
-    pub set_client_guid: unsafe extern "system" fn(*mut c_void, *const GUID) -> HRESULT,
-    pub clear_client_data: unsafe extern "system" fn(*mut c_void) -> HRESULT,
-    pub set_filter: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
-    pub get_results: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    pub get_selected_items: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-}
-
-#[repr(C)]
-struct IShellItemVtbl {
-    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub bind_to_handler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub get_parent: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-    pub get_display_name: unsafe extern "system" fn(*mut c_void, u32, *mut PCWSTR) -> HRESULT,
-    pub get_attributes: unsafe extern "system" fn(*mut c_void, u32, *mut u32) -> HRESULT,
-    pub compare: unsafe extern "system" fn(*mut c_void, *mut c_void, u32, *mut i32) -> HRESULT,
-}
-
-#[repr(C)]
-struct IShellItemArrayVtbl {
-    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
-    pub bind_to_handler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub get_property_store: unsafe extern "system" fn(*mut c_void, u32, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub get_property_description_list: unsafe extern "system" fn(*mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
-    pub get_attributes: unsafe extern "system" fn(*mut c_void, u32, u32, *mut c_void) -> HRESULT,
-    pub get_count: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
-    pub get_item_at: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT,
-    pub enum_items: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
-}
-
-const CLSID_FILE_OPEN_DIALOG: GUID = GUID { data1: 0xDC1C5A9C, data2: 0xE88A, data3: 0x4DDE, data4: [0xA5, 0xA1, 0x60, 0xF8, 0x2A, 0x20, 0xAE, 0xF7] };
-const IID_IFILE_OPEN_DIALOG: GUID = GUID { data1: 0xd57c7288, data2: 0xd4ad, data3: 0x4768, data4: [0xbe, 0x02, 0x9d, 0x96, 0x95, 0x32, 0xd9, 0x60] };
-const FOS_PICKFOLDERS: u32 = 0x20;
-const FOS_FORCEFILESYSTEM: u32 = 0x40;
-const FOS_ALLOWMULTISELECT: u32 = 0x200;
-const SIGDN_FILESYSPATH: u32 = 0x80058000;
 
 unsafe fn run_dialog_internal(options_flags: u32) -> Result<Vec<String>, HRESULT> { unsafe {
     let mut p_dialog: *mut c_void = std::ptr::null_mut();

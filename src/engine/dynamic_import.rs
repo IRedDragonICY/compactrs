@@ -2,155 +2,10 @@
 use core::ffi::c_void;
 use core::arch::asm;
 use core::ptr::null_mut;
+use crate::types::*;
 
 // --- 1. Structures needed for PEB and Loader walking ---
-
-#[repr(C)]
-pub struct UNICODE_STRING {
-    pub Length: u16,
-    pub MaximumLength: u16,
-    pub Buffer: *mut u16,
-}
-
-#[repr(C)]
-pub struct LIST_ENTRY {
-    pub Flink: *mut LIST_ENTRY,
-    pub Blink: *mut LIST_ENTRY,
-}
-
-#[repr(C)]
-pub struct PEB_LDR_DATA {
-    pub Length: u32,
-    pub Initialized: u8,
-    pub SsHandle: *mut c_void,
-    pub InLoadOrderModuleList: LIST_ENTRY,
-    pub InMemoryOrderModuleList: LIST_ENTRY,
-    pub InInitializationOrderModuleList: LIST_ENTRY,
-    pub EntryInProgress: *mut c_void,
-    pub ShutdownInProgress: u8,
-    pub ShutdownThreadId: *mut c_void,
-}
-
-#[repr(C)]
-pub struct PEB {
-    pub InheritedAddressSpace: u8,
-    pub ReadImageFileExecOptions: u8,
-    pub BeingDebugged: u8,
-    pub BitField: u8,
-    pub Mutant: *mut c_void,
-    pub ImageBaseAddress: *mut c_void,
-    pub Ldr: *mut PEB_LDR_DATA,
-    // ... we don't need the rest for this task
-}
-
-#[repr(C)]
-pub struct LDR_DATA_TABLE_ENTRY {
-    pub InLoadOrderLinks: LIST_ENTRY,
-    pub InMemoryOrderLinks: LIST_ENTRY,
-    pub InInitializationOrderLinks: LIST_ENTRY,
-    pub DllBase: *mut c_void,
-    pub EntryPoint: *mut c_void,
-    pub SizeOfImage: u32,
-    pub FullDllName: UNICODE_STRING,
-    pub BaseDllName: UNICODE_STRING,
-    // ...
-}
-
-#[repr(C)]
-pub struct IMAGE_DOS_HEADER {
-    pub e_magic: u16,
-    pub e_cblp: u16,
-    pub e_cp: u16,
-    pub e_crlc: u16,
-    pub e_cparhdr: u16,
-    pub e_minalloc: u16,
-    pub e_maxalloc: u16,
-    pub e_ss: u16,
-    pub e_sp: u16,
-    pub e_csum: u16,
-    pub e_ip: u16,
-    pub e_cs: u16,
-    pub e_lfarlc: u16,
-    pub e_ovno: u16,
-    pub e_res: [u16; 4],
-    pub e_oemid: u16,
-    pub e_oeminfo: u16,
-    pub e_res2: [u16; 10],
-    pub e_lfanew: i32,
-}
-
-#[repr(C)]
-pub struct IMAGE_FILE_HEADER {
-    pub Machine: u16,
-    pub NumberOfSections: u16,
-    pub TimeDateStamp: u32,
-    pub PointerToSymbolTable: u32,
-    pub NumberOfSymbols: u32,
-    pub SizeOfOptionalHeader: u16,
-    pub Characteristics: u16,
-}
-
-#[repr(C)]
-pub struct IMAGE_DATA_DIRECTORY {
-    pub VirtualAddress: u32,
-    pub Size: u32,
-}
-
-#[repr(C)]
-pub struct IMAGE_OPTIONAL_HEADER64 {
-    pub Magic: u16,
-    pub MajorLinkerVersion: u8,
-    pub MinorLinkerVersion: u8,
-    pub SizeOfCode: u32,
-    pub SizeOfInitializedData: u32,
-    pub SizeOfUninitializedData: u32,
-    pub AddressOfEntryPoint: u32,
-    pub BaseOfCode: u32,
-    pub ImageBase: u64,
-    pub SectionAlignment: u32,
-    pub FileAlignment: u32,
-    pub MajorOperatingSystemVersion: u16,
-    pub MinorOperatingSystemVersion: u16,
-    pub MajorImageVersion: u16,
-    pub MinorImageVersion: u16,
-    pub MajorSubsystemVersion: u16,
-    pub MinorSubsystemVersion: u16,
-    pub Win32VersionValue: u32,
-    pub SizeOfImage: u32,
-    pub SizeOfHeaders: u32,
-    pub CheckSum: u32,
-    pub Subsystem: u16,
-    pub DllCharacteristics: u16,
-    pub SizeOfStackReserve: u64,
-    pub SizeOfStackCommit: u64,
-    pub SizeOfHeapReserve: u64,
-    pub SizeOfHeapCommit: u64,
-    pub LoaderFlags: u32,
-    pub NumberOfRvaAndSizes: u32,
-    pub DataDirectory: [IMAGE_DATA_DIRECTORY; 16],
-}
-
-#[repr(C)]
-pub struct IMAGE_NT_HEADERS64 {
-    pub Signature: u32,
-    pub FileHeader: IMAGE_FILE_HEADER,
-    pub OptionalHeader: IMAGE_OPTIONAL_HEADER64,
-}
-
-#[repr(C)]
-pub struct IMAGE_EXPORT_DIRECTORY {
-    pub Characteristics: u32,
-    pub TimeDateStamp: u32,
-    pub MajorVersion: u16,
-    pub MinorVersion: u16,
-    pub Name: u32,
-    pub Base: u32,
-    pub NumberOfFunctions: u32,
-    pub NumberOfNames: u32,
-    pub AddressOfFunctions: u32,    // RVA from base of image
-    pub AddressOfNames: u32,        // RVA from base of image
-    pub AddressOfNameOrdinals: u32, // RVA from base of image
-}
+// (Moved to crate::types)
 
 // --- 2. Compile-Time Hashing (ROR13) ---
 
@@ -197,20 +52,9 @@ pub unsafe fn hash_name_a(ptr: *const u8) -> u32 {
 // --- 3. Retrieval of Kernel32 Base ---
 
 /// Retrieve address of KERNEL32.DLL base via PEB.
-/// 
-/// Hashes:
-/// "KERNEL32.DLL" -> 0x6DDB9555 (using our ROR13 imp, verify logic)
-/// Let's re-verify the hash logic:
-/// 'K' -> 0x4B
-/// ROR13(0) + 0x4B = 0x4B
-/// ...
-/// Easier to just use the `hash_str` function we defined if it's const.
 pub unsafe fn get_kernel32_base() -> *const u8 {
     // KERNEL32.DLL case-insensitive ROR13 hash:
-    // We will compute it match time or pre-calculate.
-    // hash_str("KERNEL32.DLL") -> ?
-    // Let's assume we invoke the hash function on "KERNEL32.DLL" at call site or here.
-    const KERNEL32_HASH: u32 = hash_str("KERNEL32.DLL"); // 0x6DDB9555 approx if standard
+    const KERNEL32_HASH: u32 = hash_str("KERNEL32.DLL"); 
 
     let peb: *mut PEB;
     asm!(
@@ -219,8 +63,6 @@ pub unsafe fn get_kernel32_base() -> *const u8 {
     );
 
     let ldr = (*peb).Ldr;
-    // InMemoryOrderModuleList is at offset 0x20 in PEB_LDR_DATA
-    // But we defined struct, so use that.
     let head = &mut (*ldr).InMemoryOrderModuleList as *mut LIST_ENTRY;
     let mut current = (*head).Flink;
 
@@ -230,12 +72,6 @@ pub unsafe fn get_kernel32_base() -> *const u8 {
         // Field 1: InLoadOrderLinks (size 2 ptrs = 16 bytes)
         // So start of entry is current - 16 bytes (or offsetof(LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks))
         let entry = (current as *const u8).sub(16) as *const LDR_DATA_TABLE_ENTRY;
-        
-        // BaseDllName
-        let _name_slice = core::slice::from_raw_parts(
-            (*entry).BaseDllName.Buffer,
-            ((*entry).BaseDllName.Length / 2) as usize
-        );
         
         let hash = hash_name_w((*entry).BaseDllName.Buffer, ((*entry).BaseDllName.Length / 2) as usize);
 
@@ -294,14 +130,8 @@ pub unsafe fn get_proc_address(base: *const u8, func_hash: u32) -> *const c_void
 
 // --- 5. Global Loader and Signatures ---
 
-// Common types
-type HANDLE = *mut c_void;
-type HMODULE = *mut c_void;
-type LPCWSTR = *const u16;
-type LPCSTR = *const u8;
-type BOOL = i32;
-type HWND = *mut c_void;
-type HINSTANCE = *mut c_void;
+// Common types are imported from crate::types::*;
+
 
 // Function Signatures
 type FnLoadLibraryA = unsafe extern "system" fn(lpLibFileName: LPCSTR) -> HMODULE;

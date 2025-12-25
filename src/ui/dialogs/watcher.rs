@@ -10,18 +10,7 @@ use crate::utils::format_size;
 use crate::ui::framework::WindowHandler;
 use crate::types::*;
 
-#[repr(C)]
-struct SYSTEMTIME {
-    wYear: u16,
-    wMonth: u16,
-    wDayOfWeek: u16,
-    wDay: u16,
-    wHour: u16,
-    wMinute: u16,
-    wSecond: u16,
-    wMilliseconds: u16,
-}
-
+// Imported from crate::types::*;
 
 
 #[link(name = "kernel32")]

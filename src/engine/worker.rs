@@ -293,7 +293,7 @@ fn process_file_core(
     guard_enabled: bool,
     enable_skip: bool,
     skip_ext_list: &str,
-    set_compressed_attr: bool,
+    _set_compressed_attr: bool,
 ) -> (ProcessResult, u64) {
     match action {
         BatchAction::Compress => {
@@ -319,9 +319,6 @@ fn process_file_core(
             // Attempt Compression
             match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
                 Ok(true) => {
-                    if set_compressed_attr {
-                         crate::engine::wof::set_compressed_attribute(path, true);
-                    }
                     crate::log_trace!(&["Compressed: ", path].concat());
                     (ProcessResult::Success, get_real_file_size(path))
                 },

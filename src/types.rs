@@ -741,6 +741,304 @@ pub struct COPYDATASTRUCT {
     pub lpData: *mut c_void,
 }
 
+// --- PE / Loader Definitions ---
+
+#[repr(C)]
+pub struct UNICODE_STRING {
+    pub Length: u16,
+    pub MaximumLength: u16,
+    pub Buffer: *mut u16,
+}
+
+#[repr(C)]
+pub struct LIST_ENTRY {
+    pub Flink: *mut LIST_ENTRY,
+    pub Blink: *mut LIST_ENTRY,
+}
+
+#[repr(C)]
+pub struct PEB_LDR_DATA {
+    pub Length: u32,
+    pub Initialized: u8,
+    pub SsHandle: *mut c_void,
+    pub InLoadOrderModuleList: LIST_ENTRY,
+    pub InMemoryOrderModuleList: LIST_ENTRY,
+    pub InInitializationOrderModuleList: LIST_ENTRY,
+    pub EntryInProgress: *mut c_void,
+    pub ShutdownInProgress: u8,
+    pub ShutdownThreadId: *mut c_void,
+}
+
+#[repr(C)]
+pub struct PEB {
+    pub InheritedAddressSpace: u8,
+    pub ReadImageFileExecOptions: u8,
+    pub BeingDebugged: u8,
+    pub BitField: u8,
+    pub Mutant: *mut c_void,
+    pub ImageBaseAddress: *mut c_void,
+    pub Ldr: *mut PEB_LDR_DATA,
+}
+
+#[repr(C)]
+pub struct LDR_DATA_TABLE_ENTRY {
+    pub InLoadOrderLinks: LIST_ENTRY,
+    pub InMemoryOrderLinks: LIST_ENTRY,
+    pub InInitializationOrderLinks: LIST_ENTRY,
+    pub DllBase: *mut c_void,
+    pub EntryPoint: *mut c_void,
+    pub SizeOfImage: u32,
+    pub FullDllName: UNICODE_STRING,
+    pub BaseDllName: UNICODE_STRING,
+}
+
+#[repr(C)]
+pub struct IMAGE_DOS_HEADER {
+    pub e_magic: u16,
+    pub e_cblp: u16,
+    pub e_cp: u16,
+    pub e_crlc: u16,
+    pub e_cparhdr: u16,
+    pub e_minalloc: u16,
+    pub e_maxalloc: u16,
+    pub e_ss: u16,
+    pub e_sp: u16,
+    pub e_csum: u16,
+    pub e_ip: u16,
+    pub e_cs: u16,
+    pub e_lfarlc: u16,
+    pub e_ovno: u16,
+    pub e_res: [u16; 4],
+    pub e_oemid: u16,
+    pub e_oeminfo: u16,
+    pub e_res2: [u16; 10],
+    pub e_lfanew: i32,
+}
+
+#[repr(C)]
+pub struct IMAGE_FILE_HEADER {
+    pub Machine: u16,
+    pub NumberOfSections: u16,
+    pub TimeDateStamp: u32,
+    pub PointerToSymbolTable: u32,
+    pub NumberOfSymbols: u32,
+    pub SizeOfOptionalHeader: u16,
+    pub Characteristics: u16,
+}
+
+#[repr(C)]
+pub struct IMAGE_DATA_DIRECTORY {
+    pub VirtualAddress: u32,
+    pub Size: u32,
+}
+
+#[repr(C)]
+pub struct IMAGE_OPTIONAL_HEADER64 {
+    pub Magic: u16,
+    pub MajorLinkerVersion: u8,
+    pub MinorLinkerVersion: u8,
+    pub SizeOfCode: u32,
+    pub SizeOfInitializedData: u32,
+    pub SizeOfUninitializedData: u32,
+    pub AddressOfEntryPoint: u32,
+    pub BaseOfCode: u32,
+    pub ImageBase: u64,
+    pub SectionAlignment: u32,
+    pub FileAlignment: u32,
+    pub MajorOperatingSystemVersion: u16,
+    pub MinorOperatingSystemVersion: u16,
+    pub MajorImageVersion: u16,
+    pub MinorImageVersion: u16,
+    pub MajorSubsystemVersion: u16,
+    pub MinorSubsystemVersion: u16,
+    pub Win32VersionValue: u32,
+    pub SizeOfImage: u32,
+    pub SizeOfHeaders: u32,
+    pub CheckSum: u32,
+    pub Subsystem: u16,
+    pub DllCharacteristics: u16,
+    pub SizeOfStackReserve: u64,
+    pub SizeOfStackCommit: u64,
+    pub SizeOfHeapReserve: u64,
+    pub SizeOfHeapCommit: u64,
+    pub LoaderFlags: u32,
+    pub NumberOfRvaAndSizes: u32,
+    pub DataDirectory: [IMAGE_DATA_DIRECTORY; 16],
+}
+
+#[repr(C)]
+pub struct IMAGE_NT_HEADERS64 {
+    pub Signature: u32,
+    pub FileHeader: IMAGE_FILE_HEADER,
+    pub OptionalHeader: IMAGE_OPTIONAL_HEADER64,
+}
+
+#[repr(C)]
+pub struct IMAGE_EXPORT_DIRECTORY {
+    pub Characteristics: u32,
+    pub TimeDateStamp: u32,
+    pub MajorVersion: u16,
+    pub MinorVersion: u16,
+    pub Name: u32,
+    pub Base: u32,
+    pub NumberOfFunctions: u32,
+    pub NumberOfNames: u32,
+    pub AddressOfFunctions: u32,
+    pub AddressOfNames: u32,
+    pub AddressOfNameOrdinals: u32,
+}
+
+// --- COM VTable Definitions ---
+
+#[repr(C)]
+pub struct IFileOpenDialogVtbl {
+    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub show: unsafe extern "system" fn(*mut c_void, isize) -> HRESULT,
+    pub set_file_types: unsafe extern "system" fn(*mut c_void, u32, *const c_void) -> HRESULT,
+    pub set_file_type_index: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
+    pub get_file_type_index: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    pub advise: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut u32) -> HRESULT,
+    pub unadvise: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
+    pub set_options: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT,
+    pub get_options: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    pub set_default_folder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    pub set_folder: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    pub get_folder: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub get_current_selection: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub set_file_name: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub get_file_name: unsafe extern "system" fn(*mut c_void, *mut PCWSTR) -> HRESULT,
+    pub set_title: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub set_ok_button_label: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub set_file_name_label: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub get_result: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT, 
+    pub add_place: unsafe extern "system" fn(*mut c_void, *mut c_void, u32) -> HRESULT,
+    pub set_default_extension: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
+    pub close: unsafe extern "system" fn(*mut c_void, HRESULT) -> HRESULT,
+    pub set_client_guid: unsafe extern "system" fn(*mut c_void, *const GUID) -> HRESULT,
+    pub clear_client_data: unsafe extern "system" fn(*mut c_void) -> HRESULT,
+    pub set_filter: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT,
+    pub get_results: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub get_selected_items: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+}
+
+#[repr(C)]
+pub struct IShellItemVtbl {
+    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub bind_to_handler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_parent: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+    pub get_display_name: unsafe extern "system" fn(*mut c_void, u32, *mut PCWSTR) -> HRESULT,
+    pub get_attributes: unsafe extern "system" fn(*mut c_void, u32, *mut u32) -> HRESULT,
+    pub compare: unsafe extern "system" fn(*mut c_void, *mut c_void, u32, *mut i32) -> HRESULT,
+}
+
+#[repr(C)]
+pub struct IShellItemArrayVtbl {
+    pub query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub bind_to_handler: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_property_store: unsafe extern "system" fn(*mut c_void, u32, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_property_description_list: unsafe extern "system" fn(*mut c_void, *const GUID, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub get_attributes: unsafe extern "system" fn(*mut c_void, u32, u32, *mut c_void) -> HRESULT,
+    pub get_count: unsafe extern "system" fn(*mut c_void, *mut u32) -> HRESULT,
+    pub get_item_at: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT,
+    pub enum_items: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
+}
+
+#[repr(C)]
+pub struct ITaskbarList3 {
+    pub lp_vtbl: *const ITaskbarList3Vtbl,
+}
+
+#[repr(C)]
+pub struct ITaskbarList3Vtbl {
+    pub query_interface: unsafe extern "system" fn(*mut ITaskbarList3, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
+    pub release: unsafe extern "system" fn(*mut ITaskbarList3) -> u32,
+    pub hr_init: unsafe extern "system" fn(*mut ITaskbarList3) -> HRESULT,
+    pub add_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub delete_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub activate_tab: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub set_active_alt: unsafe extern "system" fn(*mut ITaskbarList3, HWND) -> HRESULT,
+    pub mark_fullscreen_window: unsafe extern "system" fn(*mut ITaskbarList3, HWND, BOOL) -> HRESULT,
+    pub set_progress_value: unsafe extern "system" fn(*mut ITaskbarList3, HWND, u64, u64) -> HRESULT,
+    pub set_progress_state: unsafe extern "system" fn(*mut ITaskbarList3, HWND, TBPFLAG) -> HRESULT,
+}
+
+#[repr(C)]
+pub struct IShellLinkWVtbl {
+    pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub GetPath: unsafe extern "system" fn(*mut c_void, LPCWSTR, i32, *mut c_void, u32) -> HRESULT,
+}
+
+#[repr(C)]
+pub struct IPersistFileVtbl {
+    pub QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub Release: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub GetClassID: unsafe extern "system" fn(*mut c_void, *mut GUID) -> HRESULT,
+    pub IsDirty: unsafe extern "system" fn(*mut c_void) -> HRESULT,
+    pub Load: unsafe extern "system" fn(*mut c_void, LPCWSTR, u32) -> HRESULT,
+}
+
+// --- System & Service Definitions ---
+
+#[repr(C)]
+pub struct SERVICE_STATUS_PROCESS {
+    pub dwServiceType: u32,
+    pub dwCurrentState: u32,
+    pub dwControlsAccepted: u32,
+    pub dwWin32ExitCode: u32,
+    pub dwServiceSpecificExitCode: u32,
+    pub dwCheckPoint: u32,
+    pub dwWaitHint: u32,
+    pub dwProcessId: u32,
+    pub dwServiceFlags: u32,
+}
+
+
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct WOF_EXTERNAL_INFO {
+    pub version: u32,
+    pub provider: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FILE_PROVIDER_EXTERNAL_INFO_V1 {
+    pub version: u32,
+    pub algorithm: u32,
+    pub flags: u32,
+}
+
+
+
+// --- Constants & GUIDs for COM ---
+pub const CLSID_FILE_OPEN_DIALOG: GUID = GUID { data1: 0xDC1C5A9C, data2: 0xE88A, data3: 0x4DDE, data4: [0xA5, 0xA1, 0x60, 0xF8, 0x2A, 0x20, 0xAE, 0xF7] };
+pub const IID_IFILE_OPEN_DIALOG: GUID = GUID { data1: 0xd57c7288, data2: 0xd4ad, data3: 0x4768, data4: [0xbe, 0x02, 0x9d, 0x96, 0x95, 0x32, 0xd9, 0x60] };
+pub const CLSID_SHELL_LINK: GUID = GUID { data1: 0x00021401, data2: 0x0000, data3: 0x0000, data4: [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46] };
+pub const IID_ISHELL_LINK_W: GUID = GUID { data1: 0x000214F9, data2: 0x0000, data3: 0x0000, data4: [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46] };
+pub const IID_IPERSIST_FILE: GUID = GUID { data1: 0x0000010b, data2: 0x0000, data3: 0x0000, data4: [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46] };
+pub const IID_ITASKBAR_LIST3: GUID = GUID { data1: 0xea1afb91, data2: 0x9e28, data3: 0x4b86, data4: [0x90, 0xe9, 0x9e, 0x9f, 0x8a, 0x5e, 0xef, 0xaf] };
+
+
+pub const FOS_PICKFOLDERS: u32 = 0x20;
+pub const FOS_FORCEFILESYSTEM: u32 = 0x40;
+pub const FOS_ALLOWMULTISELECT: u32 = 0x200;
+pub const SIGDN_FILESYSPATH: u32 = 0x80058000;
+
+
+
+
+
 // External Functions
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -1127,3 +1425,9 @@ unsafe extern "system" {
 
 pub const GENERIC_READ: u32 = 0x80000000;
 pub const GENERIC_WRITE: u32 = 0x40000000;
+
+// --- WOF Constants ---
+pub const WOF_CURRENT_VERSION: u32 = 1;
+pub const WOF_PROVIDER_FILE: u32 = 2;
+pub const FILE_PROVIDER_CURRENT_VERSION: u32 = 1;
+
