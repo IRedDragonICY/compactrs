@@ -21,18 +21,17 @@ use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings, format_size};
 use crate::w;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, load_app_icon};
 use crate::config::AppConfig;
-use crate::engine::dynamic_import;
+// use crate::engine::dynamic_import; // Removed
 
 const WINDOW_CLASS_NAME: &str = "CompactRS_Class";
 const WINDOW_TITLE: &str = "CompactRS";
 
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
     unsafe {
-        // Initialize Dynamic Imports
-        if !dynamic_import::init() {
-            return Err("Failed to initialize dynamic imports".to_string());
-        }
-        let win_api = dynamic_import::WinApi::get();
+        // Initialize Dynamic Imports removed
+        // Dynamic Import init removed
+
+
 
         // Enable dark mode for the application
         theme::set_preferred_app_mode(true);
@@ -42,7 +41,7 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
             dwICC: ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES,
         };
-        (win_api.InitCommonControlsEx.unwrap())(&iccex as *const _ as *const _);
+        crate::types::InitCommonControlsEx(&iccex as *const _ as *const _);
 
         // Check dark mode
         let is_dark = theme::is_system_dark_mode();
@@ -96,21 +95,22 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
             .build(std::ptr::null_mut())?;
 
         // Hostile Takeover: Force window to foreground (Bypass ASLR/Focus restrictions)
-        let foreground_hwnd = (win_api.GetForegroundWindow.unwrap())();
+        // Hostile Takeover: Force window to foreground (Bypass ASLR/Focus restrictions)
+        let foreground_hwnd = crate::types::GetForegroundWindow();
         if !foreground_hwnd.is_null() {
-            let foreground_thread = (win_api.GetWindowThreadProcessId.unwrap())(foreground_hwnd, std::ptr::null_mut());
-            let current_thread = (win_api.GetCurrentThreadId.unwrap())();
+            let foreground_thread = crate::types::GetWindowThreadProcessId(foreground_hwnd, std::ptr::null_mut());
+            let current_thread = crate::types::GetCurrentThreadId();
             
             if foreground_thread != current_thread {
-                (win_api.AttachThreadInput.unwrap())(foreground_thread, current_thread, TRUE);
-                (win_api.BringWindowToTop.unwrap())(hwnd);
-                (win_api.SetForegroundWindow.unwrap())(hwnd);
-                (win_api.AttachThreadInput.unwrap())(foreground_thread, current_thread, FALSE);
+                crate::types::AttachThreadInput(foreground_thread, current_thread, TRUE);
+                crate::types::BringWindowToTop(hwnd);
+                crate::types::SetForegroundWindow(hwnd);
+                crate::types::AttachThreadInput(foreground_thread, current_thread, FALSE);
             } else {
-                (win_api.SetForegroundWindow.unwrap())(hwnd);
+                crate::types::SetForegroundWindow(hwnd);
             }
         } else {
-            (win_api.SetForegroundWindow.unwrap())(hwnd);
+            crate::types::SetForegroundWindow(hwnd);
         }
 
         Ok(hwnd)
@@ -125,10 +125,7 @@ unsafe fn flash_window(hwnd: HWND) {
         uCount: 0, // Flash until window comes to foreground
         dwTimeout: 0,
     };
-    let win_api = crate::engine::dynamic_import::WinApi::get();
-    if let Some(flash) = win_api.FlashWindowEx {
-        flash(&mut fwi as *mut _ as *const _);
-    }
+    crate::types::FlashWindowEx(&mut fwi as *mut _ as *const _);
 }
 
 impl WindowHandler for AppState {
@@ -803,8 +800,8 @@ impl AppState {
                          handlers::update_process_button_state(self);
 
                          // Re-acquire WinAPI
-                         let win_api = crate::engine::dynamic_import::WinApi::get();
-                         if (win_api.GetForegroundWindow.unwrap())() != hwnd {
+                         // Re-acquire WinAPI
+                         if crate::types::GetForegroundWindow() != hwnd {
                              flash_window(hwnd); // we need to update flash_window too
                          }
                      }

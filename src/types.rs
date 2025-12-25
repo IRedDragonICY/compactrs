@@ -674,6 +674,7 @@ unsafe extern "system" {
     pub fn SetWindowSubclass(hWnd: HWND, pfnSubclass: SUBCLASSPROC, uIdSubclass: usize, dwRefData: usize) -> BOOL;
     pub fn DefSubclassProc(hWnd: HWND, uMsg: u32, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
     pub fn RemoveWindowSubclass(hWnd: HWND, pfnSubclass: SUBCLASSPROC, uIdSubclass: usize) -> BOOL;
+    pub fn InitCommonControlsEx(picce: *const INITCOMMONCONTROLSEX) -> BOOL;
 }
 
 #[repr(C)]
@@ -1071,6 +1072,7 @@ unsafe extern "system" {
     pub fn GetWindowRect(hWnd: HWND, lpRect: *mut RECT) -> BOOL;
     pub fn AdjustWindowRect(lpRect: *mut RECT, dwStyle: u32, bMenu: BOOL) -> BOOL;
     pub fn SetForegroundWindow(hWnd: HWND) -> BOOL;
+    pub fn GetForegroundWindow() -> HWND;
     pub fn BringWindowToTop(hWnd: HWND) -> BOOL;
     pub fn MoveWindow(hWnd: HWND, X: i32, Y: i32, nWidth: i32, nHeight: i32, bRepaint: BOOL) -> BOOL;
     pub fn ChangeWindowMessageFilter(message: u32, dwFlag: u32) -> BOOL;
@@ -1129,6 +1131,10 @@ unsafe extern "system" {
     // Misc
     pub fn GetCursorPos(lpPoint: *mut POINT) -> BOOL;
     pub fn ScreenToClient(hWnd: HWND, lpPoint: *mut POINT) -> BOOL;
+    
+    pub fn GetWindowThreadProcessId(hWnd: HWND, lpdwProcessId: *mut u32) -> u32;
+    pub fn AttachThreadInput(idAttach: u32, idAttachTo: u32, fAttach: BOOL) -> BOOL;
+    pub fn FlashWindowEx(pfwi: *const FLASHWINFO) -> BOOL;
 }
 
 #[link(name = "shlwapi")]
@@ -1280,6 +1286,12 @@ unsafe extern "system" {
     pub fn AdjustTokenPrivileges(TokenHandle: HANDLE, DisableAllPrivileges: BOOL, NewState: *const TOKEN_PRIVILEGES, BufferLength: u32, PreviousState: *mut TOKEN_PRIVILEGES, ReturnLength: *mut u32) -> BOOL;
     
     pub fn CloseServiceHandle(hSCObject: HANDLE) -> BOOL;
+    
+    pub fn OpenSCManagerW(lpMachineName: LPCWSTR, lpDatabaseName: LPCWSTR, dwDesiredAccess: u32) -> HANDLE;
+    pub fn OpenServiceW(hSCManager: HANDLE, lpServiceName: LPCWSTR, dwDesiredAccess: u32) -> HANDLE;
+    pub fn StartServiceW(hService: HANDLE, dwNumServiceArgs: u32, lpServiceArgVectors: *const *const u16) -> BOOL;
+    pub fn QueryServiceStatusEx(hService: HANDLE, InfoLevel: u32, lpBuffer: *mut u8, cbBufSize: u32, pcbBytesNeeded: *mut u32) -> BOOL;
+    pub fn GetUserNameW(lpBuffer: *mut u16, pcbBuffer: *mut u32) -> BOOL;
 }
 
 // Power Management
@@ -1421,6 +1433,16 @@ unsafe extern "system" {
         lpBytesReturned: *mut u32,
         lpOverlapped: *mut c_void
     ) -> BOOL;
+
+    pub fn GetCompressedFileSizeW(lpFileName: LPCWSTR, lpFileSizeHigh: *mut u32) -> u32;
+    pub fn GetFileAttributesW(lpFileName: LPCWSTR) -> u32;
+    pub fn SetFileAttributesW(lpFileName: LPCWSTR, dwFileAttributes: u32) -> BOOL;
+    pub fn GetCurrentThreadId() -> u32;
+    
+    pub fn InitializeProcThreadAttributeList(lpAttributeList: *mut c_void, dwAttributeCount: u32, dwFlags: u32, lpSize: *mut usize) -> BOOL;
+    pub fn UpdateProcThreadAttribute(lpAttributeList: *mut c_void, dwFlags: u32, Attribute: usize, lpValue: *const c_void, cbSize: usize, lpPreviousValue: *mut c_void, lpReturnSize: *mut usize) -> BOOL;
+    pub fn DeleteProcThreadAttributeList(lpAttributeList: *mut c_void);
+    pub fn CreateProcessW(lpApplicationName: LPCWSTR, lpCommandLine: LPWSTR, lpProcessAttributes: *const c_void, lpThreadAttributes: *const c_void, bInheritHandles: BOOL, dwCreationFlags: u32, lpEnvironment: *const c_void, lpCurrentDirectory: LPCWSTR, lpStartupInfo: *mut c_void, lpProcessInformation: *mut c_void) -> BOOL;
 }
 
 pub const GENERIC_READ: u32 = 0x80000000;
