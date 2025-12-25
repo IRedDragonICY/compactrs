@@ -29,6 +29,7 @@ pub struct AppConfig {
     // New in v6
     pub enable_skip_heuristics: bool,
     pub skip_extensions_buf: [u16; 512], // Comma separated list
+    pub set_compressed_attr: bool, // New in v7
 }
 
 
@@ -47,7 +48,7 @@ impl Default for AppConfig {
 
         Self {
             magic: 0x43505253,
-            version: 6,
+            version: 7,
             theme: AppTheme::System,
             default_algo: WofAlgorithm::Xpress8K, // Default to XPRESS8K
             force_compress: false,
@@ -65,6 +66,7 @@ impl Default for AppConfig {
             log_level_mask: 7,
             enable_skip_heuristics: true,
             skip_extensions_buf: buf,
+            set_compressed_attr: false,
         }
     }
 }
@@ -89,7 +91,7 @@ impl AppConfig {
                     // We verify Magic and Version to ensure it's not random garbage.
                     unsafe {
                         let config = std::ptr::read_unaligned(buffer.as_ptr() as *const AppConfig);
-                        if config.magic == 0x43505253 && config.version == 6 {
+                        if config.magic == 0x43505253 && config.version == 7 {
                             return config;
                         }
                     }

@@ -362,6 +362,51 @@ fn force_remove_readonly(path: &str) {
     }
 }
 
+/// Set or unset the compressed file attribute (visual indicator only)
+/// Set or unset the compressed file attribute (via FSCTL_SET_COMPRESSION)
+pub fn set_compressed_attribute(path: &str, enable: bool) {
+    unsafe {
+        let wide = crate::utils::PathBuffer::from(path);
+        
+        // Open handle
+        let handle = crate::types::CreateFileW(
+            wide.as_ptr(),
+            crate::types::GENERIC_READ | crate::types::GENERIC_WRITE,
+            crate::types::FILE_SHARE_READ | crate::types::FILE_SHARE_WRITE,
+            std::ptr::null_mut(),
+            crate::types::OPEN_EXISTING,
+            crate::types::FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        );
+        
+        if handle != crate::types::INVALID_HANDLE_VALUE {
+            let format: u16 = if enable { 1 } else { 0 }; // 1 = DEFAULT, 0 = NONE
+            let mut bytes_ret = 0u32;
+            let res = crate::types::DeviceIoControl(
+                handle,
+                0x9C040, // FSCTL_SET_COMPRESSION
+                &format as *const _ as *mut _,
+                std::mem::size_of::<u16>() as u32,
+                std::ptr::null_mut(),
+                0,
+                &mut bytes_ret,
+                std::ptr::null_mut(),
+            );
+            
+            if res == 0 {
+                 let err = crate::types::GetLastError();
+                 crate::log_warn!(&["FSCTL failed on: ", path, " Err: ", &err.to_string()].concat());
+            } else {
+                 // crate::log_trace!(&["Set Compressed Attr: ", path, " = ", &enable.to_string()].concat());
+            }
+            crate::types::CloseHandle(handle);
+        } else {
+            let err = crate::types::GetLastError();
+            crate::log_warn!(&["Failed to open handle for FSCTL: ", path, " Err: ", &err.to_string()].concat());
+        }
+    }
+}
+
 /// Enable backup and restore privileges for the current process.
 /// Call this once per thread for optimal performance (reduces syscalls).
 pub fn enable_backup_privileges() {

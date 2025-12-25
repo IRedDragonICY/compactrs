@@ -8,7 +8,7 @@ use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, smar
 
 // Correctly import form scanner
 use crate::engine::scanner::{
-    scan_directory_for_processing, is_critical_path, should_skip_extension, 
+    is_critical_path, should_skip_extension, 
     detect_path_algorithm
 };
 
@@ -79,6 +79,7 @@ pub fn batch_process_worker(
     global_total: Arc<AtomicU64>,
     enable_skip: bool,
     skip_extensions: String,
+    set_compressed_attr: bool,
 ) {
     let _sleep_guard = ExecutionStateGuard::new();
     let _ = tx.send(UiMessage::StatusText(to_wstring("Discovering files...")));
@@ -115,11 +116,7 @@ pub fn batch_process_worker(
     
     crate::log_info!(&["Processing ", &total_files.to_string(), " files with ", &num_threads.to_string(), " CPU Threads..."].concat());
     
-    if total_files == 0 {
-        let _ = tx.send(UiMessage::StatusText(to_wstring("No files found.")));
-        let _ = tx.send(UiMessage::Finished);
-        return;
-    }
+
 
     // 2. Execution Phase
     let (file_tx, file_rx) = sync_channel::<FileTask>(1024);
@@ -142,15 +139,36 @@ pub fn batch_process_worker(
         for (path, action, row, algo) in items_producer {
             if check_stop_signal(&state_producer) { break; }
             
+            // Determine directory attribute logic
+            let enable_attr = set_compressed_attr && action == BatchAction::Compress;
+            let disable_attr = action == BatchAction::Decompress;
+
             if std::path::Path::new(&path).is_file() {
                 let _ = file_tx.send(FileTask { path, action, row_idx: row, algorithm: algo });
             } else {
-                // Collect files for processing
-                let stats = scan_directory_for_processing(&path, Some(&state_producer));
-                for file_path in stats.file_paths {
-                    if check_stop_signal(&state_producer) { break; }
-                    let _ = file_tx.send(FileTask { path: file_path, action, row_idx: row, algorithm: algo });
+                // IT IS A DIRECTORY
+                crate::log_info!(&["Processing dir: ", &path, " AttrEnable: ", &enable_attr.to_string()].concat());
+                
+                // It is a directory: Apply to root first
+                if enable_attr {
+                    crate::engine::wof::set_compressed_attribute(&path, true);
+                } else if disable_attr {
+                    crate::engine::wof::set_compressed_attribute(&path, false);
                 }
+
+                // Stream files and apply recursive attributes
+                crate::engine::scanner::walk_directory(&path, Some(&state_producer), &mut |full_path, is_dir, _| {
+                    if is_dir {
+                        if enable_attr {
+                            crate::engine::wof::set_compressed_attribute(full_path, true);
+                        } else if disable_attr {
+                            crate::engine::wof::set_compressed_attribute(full_path, false);
+                        }
+                    } else {
+                        // File found: send to worker
+                        let _ = file_tx.send(FileTask { path: full_path.to_string(), action, row_idx: row, algorithm: algo });
+                    }
+                });
             }
         }
         // Channel closes on drop
@@ -175,6 +193,7 @@ pub fn batch_process_worker(
             let guard = guard_enabled;
             let skip_en = enable_skip;
             let skip_ext = skip_extensions.clone();
+            let set_attr = set_compressed_attr;
 
             s.spawn(move || {
                 crate::engine::wof::enable_backup_privileges();
@@ -185,7 +204,7 @@ pub fn batch_process_worker(
                     if st.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 { break; }
 
                     let (res, size) = process_file_core(
-                        &task.path, task.algorithm, task.action, force, hwnd, guard, skip_en, &skip_ext
+                        &task.path, task.algorithm, task.action, force, hwnd, guard, skip_en, &skip_ext, set_attr
                     );
 
                     match res {
@@ -237,6 +256,18 @@ pub fn batch_process_worker(
 
     let _ = producer_handle.join();
 
+    // Explicitly finish empty rows (consumers never ran for them)
+    for (row, count) in row_totals.iter() {
+        if *count == 0 {
+             let algo_st = if let Some(p) = row_paths.get(row) {
+                  detect_path_algorithm(p)
+             } else {
+                  crate::engine::wof::CompressionState::None
+             };
+             let _ = tx.send(UiMessage::RowFinished(*row as i32, 0, 0, algo_st));
+        }
+    }
+
     if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
         let _ = tx.send(UiMessage::StatusText(to_wstring("Cancelled.")));
         let _ = tx.send(UiMessage::Finished);
@@ -262,6 +293,7 @@ fn process_file_core(
     guard_enabled: bool,
     enable_skip: bool,
     skip_ext_list: &str,
+    set_compressed_attr: bool,
 ) -> (ProcessResult, u64) {
     match action {
         BatchAction::Compress => {
@@ -287,6 +319,9 @@ fn process_file_core(
             // Attempt Compression
             match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
                 Ok(true) => {
+                    if set_compressed_attr {
+                         crate::engine::wof::set_compressed_attribute(path, true);
+                    }
                     crate::log_trace!(&["Compressed: ", path].concat());
                     (ProcessResult::Success, get_real_file_size(path))
                 },

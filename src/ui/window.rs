@@ -294,8 +294,6 @@ impl WindowHandler for AppState {
                     let enabled = wparam != 0;
                     let mask = lparam as u8;
                     // Update state config (best effort, though handlers.rs does it usually on close)
-                    // But handlers.rs does it when modal returns.
-                    // This message allows immediate update if we wanted.
                     // For now, let's just update the global atomic so it takes effect instantly.
                     if enabled {
                         crate::logger::set_log_level(mask);
@@ -305,6 +303,12 @@ impl WindowHandler for AppState {
                     Some(0)
                 },
                 
+                // Custom Message: Set Compressed Attr (0x8009)
+                0x8009 => {
+                    self.config.set_compressed_attr = wparam != 0;
+                    Some(0)
+                },
+
                 WM_COMMAND => Some(self.dispatch_command(hwnd, wparam, lparam)),
                 WM_TIMER => Some(self.handle_timer(hwnd, wparam)),
                 // FIX: handle_resize -> handle_size

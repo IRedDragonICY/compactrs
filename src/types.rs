@@ -862,6 +862,7 @@ pub const FIND_FIRST_EX_LARGE_FETCH: u32 = 2;
 pub const FILE_ATTRIBUTE_DIRECTORY: u32 = 16;
 pub const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 1024;
 pub const FILE_ATTRIBUTE_READONLY: u32 = 1;
+pub const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x800; // Added for visual toggle
 pub const FILE_ATTRIBUTE_NORMAL: u32 = 128;
 pub const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
 pub const FILE_SHARE_READ: u32 = 1;
@@ -1098,3 +1099,31 @@ pub struct SYSTEM_INFO {
 impl Default for SYSTEM_INFO {
     fn default() -> Self { unsafe { std::mem::zeroed() } }
 }
+
+// Additional Kernel32 Functions
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    pub fn CreateFileW(
+        lpFileName: LPCWSTR,
+        dwDesiredAccess: u32,
+        dwShareMode: u32,
+        lpSecurityAttributes: *mut c_void,
+        dwCreationDisposition: u32,
+        dwFlagsAndAttributes: u32,
+        hTemplateFile: HANDLE
+    ) -> HANDLE;
+    
+    pub fn DeviceIoControl(
+        hDevice: HANDLE,
+        dwIoControlCode: u32,
+        lpInBuffer: *mut c_void,
+        nInBufferSize: u32,
+        lpOutBuffer: *mut c_void,
+        nOutBufferSize: u32,
+        lpBytesReturned: *mut u32,
+        lpOverlapped: *mut c_void
+    ) -> BOOL;
+}
+
+pub const GENERIC_READ: u32 = 0x80000000;
+pub const GENERIC_WRITE: u32 = 0x40000000;

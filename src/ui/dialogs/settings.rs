@@ -34,6 +34,8 @@ const IDC_EDIT_CONCURRENT: u16 = 2031;
 const IDC_CHK_SKIP_EXT: u16 = 2041;
 const IDC_EDIT_EXTENSIONS: u16 = 2042;
 const IDC_BTN_RESET_EXT: u16 = 2043;
+const IDC_CHK_SET_ATTR: u16 = 2044;
+
 
 // Labels for Titles/Subtitles (Dynamic IDs or just static 0xffff if no interaction needed? 
 // We generally don't need to interact with labels unless updating text. 
@@ -55,6 +57,8 @@ struct SettingsState {
     log_level_mask: u8,
     enable_skip_heuristics: bool,
     skip_extensions: String,
+    set_compressed_attr: bool,
+
     update_status: UpdateStatus,
     h_font_bold: HFONT, // Store bold font handle
 }
@@ -89,8 +93,9 @@ pub unsafe fn show_settings_modal(
     log_enabled: bool, 
     log_level_mask: u8,
     enable_skip_heuristics: bool,
-    skip_extensions_buf: [u16; 512]
-) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512]) {
+    skip_extensions_buf: [u16; 512],
+    set_compressed_attr: bool
+) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512], bool) {
     // Convert buf to String for state
     let skip_string = String::from_utf16_lossy(&skip_extensions_buf)
         .trim_matches(char::from(0))
@@ -111,6 +116,7 @@ pub unsafe fn show_settings_modal(
         log_level_mask,
         enable_skip_heuristics,
         skip_extensions: skip_string,
+        set_compressed_attr,
         update_status: UpdateStatus::Idle,
         h_font_bold: std::ptr::null_mut(),
     };
@@ -134,10 +140,10 @@ pub unsafe fn show_settings_modal(
                 i += 1;
             }
         }
-        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf)
+        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf, state.set_compressed_attr)
     } else {
          // Return original values if cancelled/prevented
-         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf)
+         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf, set_compressed_attr)
     }
 }
 
@@ -260,6 +266,22 @@ impl WindowHandler for SettingsState {
                 h_combo
             });
             
+            // Compressed Attribute - MDL2 glyph E8C9 = Tag? or E7B3 = GroupList?
+            // E8FB = Accept
+            // E73E = CheckList
+            // E8C9 = Tag. 
+            // "Show Compressed Color" - "Mark folders/files with Compressed attribute (Blue Text/Icon)"
+            current_y = create_row(current_y, "\u{F012}", crate::w!("Show Compressed Color"), crate::w!("Mark compressed items with blue system attribute"), IDC_CHK_SET_ATTR, &|x, y| {
+                ControlBuilder::new(hwnd, IDC_CHK_SET_ATTR)
+                    .checkbox()
+                    .text("")
+                    .pos(x + 120, y + 5)
+                    .size(20, 20)
+                    .dark_mode(is_dark_mode)
+                    .checked(self.set_compressed_attr)
+                    .build()
+            });
+
             // current_y += 5; // Extra spacing removed
 
             // 2. Behavior Section
@@ -915,6 +937,24 @@ impl WindowHandler for SettingsState {
                                   }
                               }
                           },
+                          IDC_CHK_SET_ATTR => {
+                               if (code as u32) == BN_CLICKED {
+                                   let mut checked = false;
+                                   let h_ctl = GetDlgItem(hwnd, IDC_CHK_SET_ATTR as i32);
+                                   if h_ctl != std::ptr::null_mut() {
+                                       checked = Button::new(h_ctl).is_checked();
+                                       self.set_compressed_attr = checked;
+                                   }
+                                   
+                                   // Notify Parent immediately (WM_APP + 9) - New message for this
+                                   use GetParent;
+                                   let parent = GetParent(hwnd);
+                                   if parent != std::ptr::null_mut() {
+                                       let val = if checked { 1 } else { 0 };
+                                       SendMessageW(parent, 0x8000 + 9, val as WPARAM, 0);
+                                   }
+                              }
+                          },
                           IDC_CHK_LOG_ENABLED | IDC_CHK_LOG_ERRORS | IDC_CHK_LOG_WARNS | IDC_CHK_LOG_INFO | IDC_CHK_LOG_TRACE => {
                               if (code as u32) == BN_CLICKED {
                                    let h_ctl = GetDlgItem(hwnd, id as i32);
@@ -999,6 +1039,8 @@ impl WindowHandler for SettingsState {
                                     set_chk(IDC_CHK_CONTEXT_MENU, false);
                                     set_chk(IDC_CHK_SYSTEM_GUARD, true);
                                     set_chk(IDC_CHK_LOW_POWER, false);
+                                    set_chk(IDC_CHK_SET_ATTR, false);
+                                    self.set_compressed_attr = false;
                                     
                                     // Performance
                                     let h_slider = GetDlgItem(hwnd, IDC_SLIDER_THREADS as i32);
