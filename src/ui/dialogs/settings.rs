@@ -233,7 +233,7 @@ impl WindowHandler for SettingsState {
                     .build();
                 
                 // Control (Right Aligned)
-                ctl_fn(350, y);
+                ctl_fn(420, y);
                 
                 y + row_height_base
             };
@@ -248,7 +248,7 @@ impl WindowHandler for SettingsState {
                 let h_combo = ControlBuilder::new(hwnd, IDC_COMBO_THEME)
                     .combobox()
                     .pos(x, y + 5) // Center vertically roughly
-                    .size(150, 100)
+                    .size(140, 100)
                     .dark_mode(is_dark_mode)
                     .build();
                 
@@ -527,7 +527,7 @@ impl WindowHandler for SettingsState {
                 .dark_mode(is_dark_mode)
                 .build();
             
-            current_y += 35;
+            current_y += 50;
 
             // Restart TI Row - MDL2 glyph E7EF = Admin
             current_y = create_row(current_y, "\u{E7EF}", crate::w!("Advanced Startup"), crate::w!("Restart with TrustedInstaller privileges"), IDC_BTN_RESTART_TI, &|_x_pos, y_pos| {
