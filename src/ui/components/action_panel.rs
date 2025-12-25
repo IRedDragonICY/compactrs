@@ -11,7 +11,7 @@ use super::base::Component;
 use crate::ui::builder::ControlBuilder;
 // Duplicate import removed here
 use crate::ui::controls::{apply_button_theme, apply_combobox_theme, apply_accent_button_theme};
-use crate::ui::layout::{layout_horizontal, LayoutItem, SizePolicy};
+use crate::ui::layout::{LayoutNode, SizePolicy};
 
 const ICON_FILES: &[u16] = &[0xD83D, 0xDCC4, 0]; // 📄
 const ICON_FOLDER: &[u16] = &[0xD83D, 0xDCC1, 0]; // 📂
@@ -40,6 +40,7 @@ pub struct ActionPanelIds {
 }
 
 pub struct ActionPanel {
+    hwnd_panel: HWND,
     hwnd_files: HWND,
     hwnd_folder: HWND,
     hwnd_remove: HWND,
@@ -60,13 +61,13 @@ pub struct ActionPanel {
     hwnd_pause: HWND,
     
     // Layout
-    
     ids: ActionPanelIds,
 }
 
 impl ActionPanel {
     pub fn new(ids: ActionPanelIds) -> Self {
         Self {
+            hwnd_panel: std::ptr::null_mut(),
             hwnd_files: std::ptr::null_mut(),
             hwnd_folder: std::ptr::null_mut(),
             hwnd_remove: std::ptr::null_mut(),
@@ -90,6 +91,7 @@ impl ActionPanel {
     }
 
     // Accessors
+    pub fn hwnd(&self) -> HWND { self.hwnd_panel }
     pub fn files_hwnd(&self) -> HWND { self.hwnd_files }
     pub fn folder_hwnd(&self) -> HWND { self.hwnd_folder }
     pub fn remove_hwnd(&self) -> HWND { self.hwnd_remove }
@@ -109,12 +111,40 @@ impl ActionPanel {
 
 impl Component for ActionPanel {
     unsafe fn create(&mut self, parent: HWND) -> Result<(), String> { unsafe {
+        let instance = GetModuleHandleW(std::ptr::null());
+        
+        // Register Class with custom procedure
+        let class_name = crate::w!("CompactRsActionPanel");
+        let mut wc: WNDCLASSW = std::mem::zeroed();
+        wc.lpfnWndProc = Some(action_panel_proc);
+        wc.hInstance = instance;
+        wc.lpszClassName = class_name.as_ptr();
+        wc.style = CS_HREDRAW | CS_VREDRAW;
+        wc.hbrBackground = std::ptr::null_mut(); 
+        
+        RegisterClassW(&wc);
+        
+        self.hwnd_panel = CreateWindowExW(
+            0,
+            class_name.as_ptr(),
+            std::ptr::null(),
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 
+            0, 0, 100, 60,
+            parent,
+            std::ptr::null_mut(),
+            instance,
+            std::ptr::null_mut(),
+        );
+
         let is_dark = crate::ui::theme::is_system_dark_mode();
         let font = crate::ui::theme::get_app_font();
+        let parent_hwnd = self.hwnd_panel;
 
+        // Wait! We need to ensure we call the helper function to build controls with correct parent
+        
         // Helper for consistent control creation
         let create_btn = |id: u16, text: &'static [u16], w: i32| -> HWND {
-            ControlBuilder::new(parent, id)
+            ControlBuilder::new(parent_hwnd, id)
                 .button()
                 .text_w(text)
                 .size(w, 32)
@@ -124,7 +154,7 @@ impl Component for ActionPanel {
         };
 
         let create_lbl = |id: u16, text: &'static str| -> HWND {
-            ControlBuilder::new(parent, id)
+            ControlBuilder::new(parent_hwnd, id)
                 .label(false)
                 .text(text)
                 .size(100, 16)
@@ -144,7 +174,7 @@ impl Component for ActionPanel {
 
         // Action Mode Group
         self.hwnd_lbl_action_mode = create_lbl(self.ids.lbl_action_mode, "Action");
-        self.hwnd_action_mode = ControlBuilder::new(parent, self.ids.combo_action_mode)
+        self.hwnd_action_mode = ControlBuilder::new(parent_hwnd, self.ids.combo_action_mode)
             .combobox()
             .size(100, 200)
             .dark_mode(is_dark)
@@ -153,7 +183,7 @@ impl Component for ActionPanel {
 
         // Algorithm Group
         self.hwnd_lbl_algo = create_lbl(self.ids.lbl_algo, "Algorithm");
-        self.hwnd_combo_algo = ControlBuilder::new(parent, self.ids.combo_algo)
+        self.hwnd_combo_algo = ControlBuilder::new(parent_hwnd, self.ids.combo_algo)
             .combobox()
             .size(100, 200)
             .dark_mode(is_dark)
@@ -161,8 +191,8 @@ impl Component for ActionPanel {
             .build();
         
         // Force Checkbox
-        self.hwnd_force = ControlBuilder::new(parent, self.ids.chk_force)
-            .checkbox()
+        self.hwnd_force = ControlBuilder::new(parent_hwnd, self.ids.chk_force)
+            .checkbox() // Use checkbox builder
             .text("Force")
             .size(60, 32)
             .dark_mode(is_dark)
@@ -181,87 +211,21 @@ impl Component for ActionPanel {
     }}
 
     fn hwnd(&self) -> Option<HWND> {
-        Some(self.hwnd_process)
+        Some(self.hwnd_panel)
     }
 
     unsafe fn on_resize(&mut self, parent_rect: &RECT) {
-        unsafe {
-             // Access width if needed, though layout engine handles it
-            
-            // Layout Configuration
-            let top_padding = 4;
-            let bar_padding = 10;
-            let gap = 5;
-            let btn_height = 30;
-            let lbl_height = 16;
-            
-            // Labels Row (Top)
-            let lbl_rect = RECT {
-                left: parent_rect.left,
-                top: parent_rect.top + top_padding,
-                right: parent_rect.right,
-                bottom: parent_rect.top + top_padding + lbl_height,
-            };
-            
-            // Buttons Row (Bottom)
-            let btn_y = lbl_rect.bottom + 4;
-            // StackLayout contracts height by 2*padding, so we must expand the rect.
-            // We also want the content to start at `btn_y`, so we offset top by -padding.
-            let btn_rect = RECT {
-                left: parent_rect.left,
-                top: btn_y - bar_padding, 
-                right: parent_rect.right,
-                bottom: btn_y + btn_height + bar_padding,
-            };
-
-            // 1. Labels Layout
-            // "Input" label spans Files, Folder, Remove, Clear (32*4 + 5*3 = 143)
-            let labels = [
-                LayoutItem { hwnd: self.hwnd_lbl_input, policy: SizePolicy::Fixed(143) },
-                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Fixed(20) }, // Spacer alignment
-                LayoutItem { hwnd: self.hwnd_lbl_action_mode, policy: SizePolicy::Fixed(100) },
-                LayoutItem { hwnd: self.hwnd_lbl_algo, policy: SizePolicy::Fixed(100) },
-            ];
-            
-            layout_horizontal(&lbl_rect, &labels, bar_padding, gap);
-
-            // 2. Buttons Layout
-            // Left to Right flow with a Flex spacer to push execution controls to the end
-            let buttons = [
-                // Input Group
-                LayoutItem { hwnd: self.hwnd_files, policy: SizePolicy::Fixed(32) },
-                LayoutItem { hwnd: self.hwnd_folder, policy: SizePolicy::Fixed(32) },
-                LayoutItem { hwnd: self.hwnd_remove, policy: SizePolicy::Fixed(32) },
-                LayoutItem { hwnd: self.hwnd_clear, policy: SizePolicy::Fixed(32) },
-                
-                // Spacer
-                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Fixed(20) },
-                
-                // Config Group
-                LayoutItem { hwnd: self.hwnd_action_mode, policy: SizePolicy::Fixed(100) },
-                LayoutItem { hwnd: self.hwnd_combo_algo, policy: SizePolicy::Fixed(100) },
-                LayoutItem { hwnd: self.hwnd_force, policy: SizePolicy::Fixed(65) },
-                
-                // Flexible Spacer (pushes remaining items to right)
-                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Flex(1.0) },
-                
-                // Execution Controls (Right Aligned)
-                // Order: Pause, Process, Cancel (Visual L->R)
-                LayoutItem { hwnd: self.hwnd_pause, policy: SizePolicy::Fixed(32) },
-                 // Note: Original code used gap=10 for right side, layout_horizontal uses constant gap=5.
-                 // This small visual difference is acceptable for code consistency.
-                LayoutItem { hwnd: self.hwnd_process, policy: SizePolicy::Fixed(32) },
-                LayoutItem { hwnd: self.hwnd_cancel, policy: SizePolicy::Fixed(32) },
-            ];
-            
-            layout_horizontal(&btn_rect, &buttons, bar_padding, gap);
-        }
+        // Resize container to fill expected area
+        let w = parent_rect.right - parent_rect.left;
+        let h = parent_rect.bottom - parent_rect.top;
+        
+        SetWindowPos(self.hwnd_panel, std::ptr::null_mut(), parent_rect.left, parent_rect.top, w, h, SWP_NOZORDER);
+        self.refresh_layout();
     }
-
-
+    
     unsafe fn on_theme_change(&mut self, is_dark: bool) {
         unsafe {
-            // Apply theme to all buttons
+            // Apply theme to controls
             apply_button_theme(self.hwnd_files, is_dark);
             apply_button_theme(self.hwnd_folder, is_dark);
             apply_button_theme(self.hwnd_remove, is_dark);
@@ -269,14 +233,125 @@ impl Component for ActionPanel {
             apply_accent_button_theme(self.hwnd_process, is_dark);
             apply_button_theme(self.hwnd_cancel, is_dark);
             apply_button_theme(self.hwnd_pause, is_dark);
-            apply_button_theme(self.hwnd_force, is_dark); 
+            
+            // Fix: Use correct checkbox theme for Force button
+            crate::ui::controls::apply_checkbox_theme(self.hwnd_force, is_dark);
 
             apply_combobox_theme(self.hwnd_action_mode, is_dark);
             apply_combobox_theme(self.hwnd_combo_algo, is_dark);
 
-            crate::ui::theme::apply_theme(self.hwnd_lbl_input, crate::ui::theme::ControlType::GroupBox, is_dark);
-            crate::ui::theme::apply_theme(self.hwnd_lbl_action_mode, crate::ui::theme::ControlType::GroupBox, is_dark);
-            crate::ui::theme::apply_theme(self.hwnd_lbl_algo, crate::ui::theme::ControlType::GroupBox, is_dark);
+            // Fix: Do NOT use GroupBox theme for labels (they are Static controls)
+            // Just let the parent WndProc (this panel) handle WM_CTLCOLORSTATIC for them.
+            // If we really need theming (e.g. for rounded corners?), apply Window theme.
+            // But for now, removing the explicit GroupBox theme call solves the white background
+            // if the parent paints dark.
+            crate::ui::theme::apply_theme(self.hwnd_lbl_input, crate::ui::theme::ControlType::Window, is_dark);
+            crate::ui::theme::apply_theme(self.hwnd_lbl_action_mode, crate::ui::theme::ControlType::Window, is_dark);
+            crate::ui::theme::apply_theme(self.hwnd_lbl_algo, crate::ui::theme::ControlType::Window, is_dark);
+            
+            // Store theme prop for WndProc
+            let prop_val = if is_dark { 2 } else { 1 };
+            SetPropW(self.hwnd_panel, crate::w!("CompactRs_Theme").as_ptr(), prop_val as isize as _);
+
+            InvalidateRect(self.hwnd_panel, std::ptr::null(), 1);
         }
+    }
+}
+
+// Window Procedure for ActionPanel
+unsafe extern "system" fn action_panel_proc(hwnd: HWND, umsg: u32, wparam: usize, lparam: isize) -> isize {
+    match umsg {
+        WM_COMMAND | WM_DRAWITEM | WM_NOTIFY => {
+             // Forward notifications to parent
+             let parent = GetParent(hwnd);
+             if parent != std::ptr::null_mut() {
+                 SendMessageW(parent, umsg, wparam, lparam);
+             }
+             if umsg == WM_DRAWITEM {
+                 return 1; // Handled
+             }
+             return 0;
+        },
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => {
+            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
+            let is_dark = if prop_val != 0 { prop_val == 2 } else { crate::ui::theme::is_system_dark_mode() };
+
+            if let Some(res) = crate::ui::theme::handle_standard_colors(hwnd, umsg, wparam, is_dark) {
+                return res as isize;
+            }
+        },
+        WM_ERASEBKGND => {
+            let hdc = wparam as HDC;
+            let mut rect: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rect);
+            
+            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
+            let is_dark = if prop_val != 0 { prop_val == 2 } else { crate::ui::theme::is_system_dark_mode() };
+
+            let brush = if is_dark {
+                crate::ui::theme::get_dark_brush()
+            } else {
+                 (COLOR_WINDOW + 1) as HBRUSH
+            };
+            
+            unsafe { FillRect(hdc, &rect, brush); }
+            return 1;
+        },
+        WM_DESTROY => {
+            RemovePropW(hwnd, crate::w!("CompactRs_Theme").as_ptr());
+        },
+        _ => {}
+    }
+    
+    DefWindowProcW(hwnd, umsg, wparam, lparam)
+}
+
+impl ActionPanel {
+    pub unsafe fn refresh_layout(&self) {
+        use SizePolicy::Fixed;
+        
+        let mut rect: RECT = std::mem::zeroed();
+        GetClientRect(self.hwnd_panel, &mut rect);
+        let w = rect.right - rect.left;
+        
+        let lbl_rect = RECT {
+            left: 0,
+            top: 4,
+            right: w,
+            bottom: 20,
+        };
+        
+        let btn_rect = RECT {
+            left: 0,
+            top: 14,
+            right: w,
+            bottom: 64,
+        };
+
+        // Labels Row
+        // Height 16px. Padding must be 0 or small.
+        LayoutNode::row(0, 5)
+            .with(self.hwnd_lbl_input, Fixed(143))
+            .spacer(20)
+            .with(self.hwnd_lbl_action_mode, Fixed(100))
+            .with(self.hwnd_lbl_algo, Fixed(100))
+            .apply_layout(lbl_rect);
+
+        // Buttons Row
+        // Rect height 50. Padding 9 gives 32px inner height.
+        LayoutNode::row(9, 5)
+            .with(self.hwnd_files, Fixed(32))
+            .with(self.hwnd_folder, Fixed(32))
+            .with(self.hwnd_remove, Fixed(32))
+            .with(self.hwnd_clear, Fixed(32))
+            .spacer(20)
+            .with(self.hwnd_action_mode, Fixed(100))
+            .with(self.hwnd_combo_algo, Fixed(100))
+            .with(self.hwnd_force, Fixed(65))
+            .flex_spacer()
+            .with(self.hwnd_pause, Fixed(32))
+            .with(self.hwnd_process, Fixed(32))
+            .with(self.hwnd_cancel, Fixed(32))
+            .apply_layout(btn_rect);
     }
 }

@@ -34,174 +34,75 @@ impl WindowHandler for AboutState {
 
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
-            // Apply DWM title bar color using centralized helper
+            use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed}};
             crate::ui::theme::set_window_frame_theme(hwnd, self.is_dark);
             
-            let mut rc = std::mem::zeroed();
-            GetClientRect(hwnd, &mut rc);
-            let client_width = rc.right - rc.left;
-            
-            // Cleanup Link Control Logic (removed)
+            let client_rect = crate::utils::get_client_rect(hwnd);
 
-            // Create modern fonts for visual hierarchy
+            
+            // Fonts
             let segoe_ui_var = w!("Segoe UI Variable Display");
             let segoe_ui = w!("Segoe UI");
-
-            let title_font = CreateFontW(
-                -28, 0, 0, 0, FW_BOLD as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
+            
+            let make_font = |h: i32, w: i32, i: u32, face: *const u16| CreateFontW(
+                -h, 0, 0, 0, w, i, 0, 0, DEFAULT_CHARSET as u32,
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr()) as HFONT;
+                (DEFAULT_PITCH | FF_DONTCARE) as u32, face);
+
+            let f_title = make_font(28, FW_BOLD as i32, 0, segoe_ui_var.as_ptr());
+            let f_ver = make_font(14, FW_LIGHT as i32, 0, segoe_ui_var.as_ptr());
+            let f_body = make_font(13, FW_NORMAL as i32, 0, segoe_ui.as_ptr());
+            let f_creator = make_font(12, FW_NORMAL as i32, 1, segoe_ui.as_ptr());
+            let f_icon = crate::ui::theme::get_icon_font();
+
+            // Helpers
+            let builder = |id| ControlBuilder::new(hwnd, id).dark_mode(self.is_dark);
+            let lbl = |text, font, _h| builder(0).label(true).text(text).font(font).build();
+            let btn = |text, id| builder(id).button().text_w(text).font(f_icon).build();
             
-            let version_font = CreateFontW(
-                -14, 0, 0, 0, FW_LIGHT as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
-                OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui_var.as_ptr()) as HFONT;
+            // 1. Icon (Centered manually because it's static/fixed pos often easier, but we can LayoutNode it)
+            // Icon specific loading...
+            let hicon = LoadImageW(GetModuleHandleW(std::ptr::null()), 1 as *const u16, IMAGE_ICON, 128, 128, LR_DEFAULTCOLOR);
+            let h_icon_static = builder(0).icon_display().size(128, 128).build();
+            SendMessageW(h_icon_static, STM_SETICON, hicon as WPARAM, 0);
+
+            // 2. Texts
+            let h_title = lbl("CompactRS", f_title, 40);
             
-            let body_font = CreateFontW(
-                -13, 0, 0, 0, FW_NORMAL as i32, 0, 0, 0, DEFAULT_CHARSET as u32,
-                OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr()) as HFONT;
+            let ver_s = crate::utils::concat_wstrings(&[w!("Version "), &to_wstring(env!("APP_VERSION"))]);
+            let h_ver = builder(0).label(true).text_w(&ver_s).font(f_ver).build();
             
-            let creator_font = CreateFontW(
-                -12, 0, 0, 0, FW_NORMAL as i32, 1, 0, 0, DEFAULT_CHARSET as u32, // Italic
-                OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
-                (DEFAULT_PITCH | FF_DONTCARE) as u32, segoe_ui.as_ptr()) as HFONT;
-
-            // Icon - Centered at top (Large Hero Icon)
-            let instance = GetModuleHandleW(std::ptr::null());
-            let icon_size = 128;
-            let icon_x = (client_width - icon_size) / 2;
+            let desc_txt = "Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary.";
+            let h_desc = lbl(desc_txt, f_body, 130);
             
-            // Load large icon for about dialog
-            let hicon = LoadImageW(
-                instance,
-                1 as *const u16, // Win32 MAKEINTRESOURCE(1)
-                IMAGE_ICON,
-                icon_size, icon_size,
-                LR_DEFAULTCOLOR
-            );
+            let h_creator = lbl("Created by IRedDragonICY\n(Mohammad Farid Hendianto)", f_creator, 40);
 
-            // Icon display using ControlBuilder
-            let icon_static = ControlBuilder::new(hwnd, 0)
-                .icon_display()
-                .pos(icon_x, 20)
-                .size(icon_size, icon_size)
-                .dark_mode(self.is_dark)
-                .build();
+            // 3. Action Buttons (GitHub, License)
+            let h_btn_gh = btn(&[0xE943, 0], 1001);
+            let h_btn_lic = btn(&[0xE929, 0], 1002);
             
-            // Set the icon image
-            SendMessageW(icon_static, STM_SETICON, hicon as WPARAM, 0);
+            let h_lbl_gh = lbl("GitHub", f_creator, 20);
+            let h_lbl_lic = lbl("License", f_creator, 20);
 
-            // Use simple local variables for text content layout
-            // Start below icon (20 + 128 = 148). Let's start at 160.
-            let content_width = 410; // Wider content area
-            let x_start = (client_width - content_width) / 2; // Auto-center content column
-            let mut current_y = 160;
-
-            // App Name - Large bold title using ControlBuilder
-            let h_title = 40;
-            let _app_name = ControlBuilder::new(hwnd, 0)
-                .label(true) // center-aligned
-                .text_w(w!("CompactRS"))
-                .pos(x_start, current_y)
-                .size(content_width, h_title)
-                .font(title_font)
-                .dark_mode(self.is_dark)
-                .build();
-            current_y += h_title + 20; // Extra spacing after title
-
-            // Version - Lighter font using ControlBuilder
-            let h_ver = 20;
-            let ver_string = crate::utils::concat_wstrings(&[
-                crate::w!("Version "),
-                &crate::utils::to_wstring(env!("APP_VERSION"))
-            ]);
-            let _version = ControlBuilder::new(hwnd, 0)
-                .label(true)
-                .text_w(&ver_string)
-                .pos(x_start, current_y)
-                .size(content_width, h_ver)
-                .font(version_font)
-                .dark_mode(self.is_dark)
-                .build();
-            current_y += h_ver + 10; // Space
-
-            // Description - Regular body text using ControlBuilder
-            let h_desc = 130;
-            let _desc = ControlBuilder::new(hwnd, 0)
-                .label(true)
-                .text_w(w!("Ultra-lightweight, native Windows transparent file compressor built in Rust. Leverages the Windows Overlay Filter (WOF) to save disk space without performance loss.\n\nFeatures a modern, bloat-free Win32 GUI, batch processing, and multithreaded compression (XPRESS/LZX). Zero dependencies, <1MB binary."))
-                .pos(x_start, current_y)
-                .size(content_width, h_desc)
-                .font(body_font)
-                .dark_mode(self.is_dark)
-                .build();
-            current_y += h_desc + 10;
-
-            // Created by - Italic style using ControlBuilder
-            let h_creator = 40;
-            let _creator = ControlBuilder::new(hwnd, 0)
-                .label(true)
-                .text_w(w!("Created by IRedDragonICY\n(Mohammad Farid Hendianto)"))
-                .pos(x_start, current_y)
-                .size(content_width, h_creator)
-                .font(creator_font)
-                .dark_mode(self.is_dark)
-                .build();
-            current_y += h_creator + 20;
-
-            // Modern Action Buttons (Centered Row)
-            
-            // Allocate row for buttons (Height 40)
-            let y_btn = current_y;
-            
-            // Calculate center position for two button groups
-            // Group width = 60 (Button) + 10 (Space) + 60 (Button) = 130
-            // Start X = (client_width - 130) / 2
-            let start_x = (client_width - 130) / 2;
-            
-            let icon_font = crate::ui::theme::get_icon_font();
-            
-            // GitHub Button
-            // Icon: Code (\u{E943})
-            let _btn_github = ControlBuilder::new(hwnd, 1001)
-                .button()
-                .text_w(&[0xE943, 0]) 
-                .pos(start_x, y_btn) 
-                .size(60, 40)
-                .font(icon_font)
-                .dark_mode(self.is_dark)
-                .build();
-                
-            // License Button
-            // Icon: Certificate (\u{E929})
-            let _btn_license = ControlBuilder::new(hwnd, 1002)
-                .button()
-                .text_w(&[0xE929, 0])
-                .pos(start_x + 70, y_btn)
-                .size(60, 40)
-                .font(icon_font)
-                .dark_mode(self.is_dark)
-                .build();
-
-            // Labels for buttons
-            let _lbl_github = ControlBuilder::new(hwnd, 0)
-                .label(true) // Center
-                .text("GitHub")
-                .pos(start_x, y_btn + 45)
-                .size(60, 20)
-                .font(creator_font) // Reusing small font
-                .dark_mode(self.is_dark)
-                .build();
-
-            let _lbl_license = ControlBuilder::new(hwnd, 0)
-                .label(true)
-                .text("License")
-                .pos(start_x + 70, y_btn + 45)
-                .size(60, 20)
-                .font(creator_font)
-                .dark_mode(self.is_dark)
-                .build();
+            // Layout
+            LayoutNode::col(0, 0)
+                .spacer(20) // Top Margin
+                .with_child(LayoutNode::row(0, 0).flex_spacer().with(h_icon_static, Fixed(128)).flex_spacer())
+                .spacer(12)
+                .with(h_title, Fixed(40))
+                .spacer(20)
+                .with(h_ver, Fixed(20))
+                .spacer(10)
+                .with_child(LayoutNode::row(0, 0).flex_spacer().with(h_desc, Fixed(410)).flex_spacer())
+                .spacer(20)
+                .with(h_creator, Fixed(40))
+                .spacer(30)
+                .with_child(LayoutNode::row(0, 10).flex_spacer()
+                    .with_child(LayoutNode::col(0, 5).with(h_btn_gh, Fixed(45)).with(h_lbl_gh, Fixed(20)))
+                    .with_child(LayoutNode::col(0, 5).with(h_btn_lic, Fixed(45)).with(h_lbl_lic, Fixed(20)))
+                    .flex_spacer()
+                )
+                .apply_layout(client_rect);
         }
         0
     }

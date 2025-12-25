@@ -230,6 +230,15 @@ pub fn calculate_ratio_string(logical: u64, disk: u64) -> Vec<u16> {
     buffer[..=len].to_vec()
 }
 
+/// Helper to get client rect (safe wrapper)
+pub fn get_client_rect(hwnd: HWND) -> RECT {
+    let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe {
+        crate::types::GetClientRect(hwnd, &mut rc);
+    }
+    rc
+}
+
 // ===== PATH BUFFER OPTIMIZATION =====
 
 /// A specialized buffer for building null-terminated UTF-16 paths efficiently.

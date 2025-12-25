@@ -70,63 +70,95 @@ impl WindowHandler for WatcherAddState {
 
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
+            use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}};
             crate::ui::theme::set_window_frame_theme(hwnd, self.is_dark);
             
-            // Enable Drag and Drop (Allow messages from lower integrity levels)
+            // Enable Drag and Drop
             ChangeWindowMessageFilter(WM_DROPFILES, MSGFLT_ADD);
             ChangeWindowMessageFilter(WM_COPYGLOBALDATA, MSGFLT_ADD);
             DragAcceptFiles(hwnd, true as i32);
             
             let padding = 10;
-            let mut y = padding;
             
-            // Path
-            ControlBuilder::new(hwnd, 0).label(false).text("Path:").pos(padding, y+3).size(50, 20).dark_mode(self.is_dark).build();
-            let h_path = ControlBuilder::new(hwnd, IDC_EDIT_PATH).edit().pos(padding + 50, y).size(350, 25).dark_mode(self.is_dark).build();
-            ControlBuilder::new(hwnd, IDC_BTN_BROWSE).button().text_w(w!("Folder")).pos(padding + 410, y).size(70, 25).dark_mode(self.is_dark).build();
-            ControlBuilder::new(hwnd, IDC_BTN_BROWSE_FILE).button().text_w(w!("File")).pos(padding + 490, y).size(70, 25).dark_mode(self.is_dark).build();
+            // Helper for control creation
+            let builder = |id| ControlBuilder::new(hwnd, id).dark_mode(self.is_dark);
+            let lbl = |text| builder(0).label(false).text(text).build();
+            let btn = |text, id| builder(id).button().text_w(&crate::utils::to_wstring(text)).build();
             
-            y += 35;
+            // 1. Path Controls
+            let h_lbl_path = lbl("Path:");
+            let h_path = builder(IDC_EDIT_PATH).edit().build();
+            let h_btn_browse = btn("Folder", IDC_BTN_BROWSE);
+            let h_btn_file = btn("File", IDC_BTN_BROWSE_FILE);
             
-            // Algorithm & Time
-            ControlBuilder::new(hwnd, 0).label(false).text("Algorithm:").pos(padding, y+3).size(70, 20).dark_mode(self.is_dark).build();
-            let h_combo = ControlBuilder::new(hwnd, IDC_COMBO_ALGO).combobox().pos(padding + 80, y).size(100, 100).dark_mode(self.is_dark).build();
+            // 2. Algo
+            let h_lbl_algo = lbl("Algorithm:");
+            let h_combo = builder(IDC_COMBO_ALGO).combobox().build();
             let cb = ComboBox::new(h_combo);
             cb.add_string("XPRESS 4K");
             cb.add_string("XPRESS 8K");
             cb.add_string("XPRESS 16K");
             cb.add_string("LZX");
-            cb.set_selected_index(1); // Default 8K
-
-            ControlBuilder::new(hwnd, 0).label(false).text("Time (HH:MM):").pos(padding + 200, y+3).size(90, 20).dark_mode(self.is_dark).build();
-            let h_hour = ControlBuilder::new(hwnd, IDC_EDIT_HOUR).edit().pos(padding + 290, y).size(30, 25).style(ES_NUMBER).dark_mode(self.is_dark).build();
-            ControlBuilder::new(hwnd, 0).label(false).text(":").pos(padding + 325, y+3).size(10, 20).dark_mode(self.is_dark).build();
-            let h_min = ControlBuilder::new(hwnd, IDC_EDIT_MIN).edit().pos(padding + 335, y).size(30, 25).style(ES_NUMBER).dark_mode(self.is_dark).build();
+            cb.set_selected_index(1);
             
-            y += 35;
+            // 3. Time
+            let h_lbl_time = lbl("Time (HH:MM):");
+            let h_hour = builder(IDC_EDIT_HOUR).edit().style(ES_NUMBER).build();
+            let h_sep = lbl(":");
+            let h_min = builder(IDC_EDIT_MIN).edit().style(ES_NUMBER).build();
             
-            // Days
-            ControlBuilder::new(hwnd, 0).label(false).text("Days:").pos(padding, y+3).size(40, 20).dark_mode(self.is_dark).build();
-            
+            // 4. Days
+            let h_lbl_days = lbl("Days:");
             let days = [
                 (IDC_CHK_MON, "Mon"), (IDC_CHK_TUE, "Tue"), (IDC_CHK_WED, "Wed"),
                 (IDC_CHK_THU, "Thu"), (IDC_CHK_FRI, "Fri"), (IDC_CHK_SAT, "Sat"),
                 (IDC_CHK_SUN, "Sun"), (IDC_CHK_EVERYDAY, "Every Day")
             ];
             
-            let mut x_off = padding + 50;
+            let mut days_node = LayoutNode::row(0, 5);
             for (id, txt) in days {
-                ControlBuilder::new(hwnd, id).checkbox().text(txt).pos(x_off, y).size(if id == IDC_CHK_EVERYDAY { 90 } else { 55 }, 20).dark_mode(self.is_dark).checked(id == IDC_CHK_EVERYDAY).build();
-                x_off += if id == IDC_CHK_EVERYDAY { 100 } else { 60 };
+                 let h = builder(id).checkbox().text(txt).checked(id == IDC_CHK_EVERYDAY).build();
+                 days_node = days_node.with(h, Fixed(if id == IDC_CHK_EVERYDAY { 90 } else { 55 }));
             }
             
-            y += 35;
+            // 5. Buttons
+            let h_btn_save = btn("Save", IDC_BTN_SAVE);
+            let h_btn_cancel = btn("Cancel", IDC_BTN_CANCEL);
             
-            // Buttons
-            ControlBuilder::new(hwnd, IDC_BTN_SAVE).button().text_w(w!("Save")).pos(padding, y).size(80, 30).dark_mode(self.is_dark).build();
-            ControlBuilder::new(hwnd, IDC_BTN_CANCEL).button().text_w(w!("Cancel")).pos(490, y).size(80, 30).dark_mode(self.is_dark).build();
+            // Build Layout
+            let client_rect = crate::utils::get_client_rect(hwnd);
+            
+            LayoutNode::col(padding, 15)
+                .with_child(LayoutNode::row(0, 5)
+                    .with(h_lbl_path, Fixed(50))
+                    .with(h_path, Flex(1.0))
+                    .with(h_btn_browse, Fixed(70))
+                    .with(h_btn_file, Fixed(70))
+                )
+                .with_child(LayoutNode::row(0, 5)
+                    .with(h_lbl_algo, Fixed(70))
+                    .with(h_combo, Fixed(100))
+                    .spacer(30)
+                    .with(h_lbl_time, Fixed(90))
+                    .with(h_hour, Fixed(30))
+                    .with(h_sep, Fixed(10))
+                    .with(h_min, Fixed(30))
+                    .flex_spacer()
+                )
+                .with_child(LayoutNode::row(0, 5)
+                     .with(h_lbl_days, Fixed(40))
+                     .with_child(days_node)
+                )
+                .spacer(10)
+                .with_child(LayoutNode::row(0, 0)
+                     .with(h_btn_save, Fixed(80))
+                     .flex_spacer() // Push buttons to edges or center? Standard is Left/Right or Right
+                     // Original was: Save at padding (Left), Cancel at 490 (Rightish)
+                     .with(h_btn_cancel, Fixed(80))
+                )
+                .apply_layout(client_rect);
 
-            // Populate if Edit
+            // Populate if Edit (Same logic, slightly adapted)
             if let Some(idx) = self.edit_index {
                 let tasks = self.tasks.lock().unwrap();
                 if let Some(task) = tasks.get(idx) {
@@ -143,6 +175,11 @@ impl WindowHandler for WatcherAddState {
                     SetWindowTextW(h_hour, crate::utils::fmt_u32_padded(task.time_hour as u32).as_ptr());
                     SetWindowTextW(h_min, crate::utils::fmt_u32_padded(task.time_minute as u32).as_ptr());
                     
+                    // Reset checks first
+                    for (id, _) in days {
+                         Button::new(GetDlgItem(hwnd, id as i32)).set_checked(false);
+                    }
+
                     if (task.days_mask & 0x80) != 0 {
                         Button::new(GetDlgItem(hwnd, IDC_CHK_EVERYDAY as i32)).set_checked(true);
                     } else {

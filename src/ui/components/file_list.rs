@@ -666,6 +666,44 @@ impl FileListView {
         }
     }
 
+    /// Updates column widths based on current window size.
+    pub fn update_columns(&self) {
+        unsafe {
+             // 1. Calculate occupied width of fixed columns
+             let mut occupied_width = 0;
+             // We can assume column count or query it
+             let col_count = COLUMN_DEFS.len();
+             
+             for i in 1..col_count {
+                 let w = SendMessageW(self.hwnd, LVM_GETCOLUMNWIDTH, i, 0) as i32;
+                 if w > 0 {
+                     occupied_width += w;
+                 }
+             }
+
+             // 2. Get client width
+             let mut client_rect: RECT = std::mem::zeroed();
+             GetClientRect(self.hwnd, &mut client_rect);
+             let list_inner_width = client_rect.right - client_rect.left;
+
+             // 3. Calculate Path width
+             let margin = 2; // Prevent scrollbar flicker
+             let mut new_path_width = list_inner_width - occupied_width - margin;
+
+             if new_path_width < 100 {
+                 new_path_width = 100;
+             }
+             
+             // 4. Set Path width
+             SendMessageW(
+                 self.hwnd,
+                 LVM_SETCOLUMNWIDTH,
+                 0, 
+                 new_path_width as isize,
+             );
+        }
+    }
+
     /// Removes all items from the ListView.
     pub fn clear_all(&self) {
         unsafe {
@@ -702,20 +740,30 @@ impl Component for FileListView {
             );
 
             // --- Flex Layout Logic ---
-            // Calculate total width of fixed columns (indices 1..end)
-            // Skip the first column (Path)
-            let mut fixed_width = 0;
-            for i in 1..COLUMN_DEFS.len() {
-                fixed_width += COLUMN_DEFS[i].1;
+            // Calculate total width of current FIXED columns (indices 1..end)
+            // We use the ACTUAL widths, not defaults, so we respect user resizing.
+            let mut occupied_width = 0;
+            let col_count = COLUMN_DEFS.len(); // Or get via LVM_GETHEADER -> HDM_GETITEMCOUNT
+            
+            for i in 1..col_count {
+                 let w = SendMessageW(self.hwnd, LVM_GETCOLUMNWIDTH, i, 0) as i32;
+                 if w > 0 {
+                     occupied_width += w;
+                 }
             }
 
-            // Get exact client width (excludes scrollbar/borders if present)
+            // Get exact client width
             let mut client_rect: RECT = std::mem::zeroed();
             GetClientRect(self.hwnd, &mut client_rect);
             let list_inner_width = client_rect.right - client_rect.left;
+            
+            // Reserve space for scrollbar explicitly? 
+            // GetClientRect handles Vertical scrollbar exclusion usually.
+            // But let's leave a tiny margin to prevent horizontal scrollbar flickering.
+            let margin = 2; 
 
             // Calculate new width for Path column (Column 0)
-            let mut new_path_width = list_inner_width - fixed_width;
+            let mut new_path_width = list_inner_width - occupied_width - margin;
 
             // Enforce minimum width
             if new_path_width < 100 {

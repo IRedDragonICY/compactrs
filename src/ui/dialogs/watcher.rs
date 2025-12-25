@@ -88,60 +88,50 @@ impl WindowHandler for WatcherState {
 
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
+
             crate::ui::theme::set_window_frame_theme(hwnd, self.is_dark);
             
-            // --- Layout ---
-            let padding = 10;
-            let mut y = padding;
+            // Helper
+            let builder = |id| ControlBuilder::new(hwnd, id).dark_mode(self.is_dark);
+            let btn = |text, id| builder(id).button().text_w(&crate::utils::to_wstring(text)).build();
             
-            // 1. List View (Top half)
-            let h_list = ControlBuilder::new(hwnd, IDC_LIST_WATCHERS)
+            // 1. List View
+            let h_list = builder(IDC_LIST_WATCHERS)
                 .listview()
-                .pos(padding, y)
-                .size(660, 200)
                 .style(WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS)
-                .dark_mode(self.is_dark)
                 .build();
             
             let lv = ListView::new(h_list);
-            // Match FileListView styles for correct theming behavior
             lv.set_extended_style(LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
             lv.fix_header_dark_mode(hwnd);
             
-            // Clear any existing columns first
             lv.clear_columns();
-            
             lv.add_column(0, "Path", 180);
             lv.add_column(1, "Size", 55);
             lv.add_column(2, "On Disk", 55);
             lv.add_column(3, "Schedule", 120);
             lv.add_column(4, "Algorithm", 65);
-            lv.add_column(5, "Last Run", 115); // YYYY-MM-DD HH:MM format
-            lv.add_column(6, "Action", 55); // Run button column
-            
-            // Make last column fill remaining space to eliminate empty column appearance
-            lv.set_column_width(6, -2); // LVSCW_AUTOSIZE_USEHEADER
-            
+            lv.add_column(5, "Last Run", 115);
+            lv.add_column(6, "Action", 55);
+            lv.set_column_width(6, -2);
             lv.apply_theme(self.is_dark);
             
             self.refresh_list(h_list);
             
-            y += 210;
-            
-            // Buttons
-            ControlBuilder::new(hwnd, IDC_BTN_ADD).button().text_w(w!("Add...")).pos(padding, y).size(80, 30).dark_mode(self.is_dark).build();
-            ControlBuilder::new(hwnd, IDC_BTN_REMOVE).button().text_w(w!("Remove")).pos(padding + 90, y).size(80, 30).dark_mode(self.is_dark).build();
-            ControlBuilder::new(hwnd, IDC_BTN_REFRESH).button().text_w(w!("Refresh")).pos(padding + 180, y).size(80, 30).dark_mode(self.is_dark).build();
-            
-            // Close (Far right)
-            ControlBuilder::new(hwnd, IDC_BTN_CLOSE).button().text_w(w!("Close")).pos(580, y).size(100, 30).dark_mode(self.is_dark).build();
+            // 2. Buttons
+            let h_btn_add = btn("Add...", IDC_BTN_ADD);
+            let h_btn_remove = btn("Remove", IDC_BTN_REMOVE);
+            let h_btn_refresh = btn("Refresh", IDC_BTN_REFRESH);
+            let h_btn_close = btn("Close", IDC_BTN_CLOSE);
 
             crate::ui::theme::apply_theme_recursive(hwnd, self.is_dark);
+            
+            // Initial Layout
+            let client_rect = crate::utils::get_client_rect(hwnd);
+            self.do_layout(hwnd, client_rect, h_list, h_btn_add, h_btn_remove, h_btn_refresh, h_btn_close);
         }
         0
     }
-
-
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
@@ -186,7 +176,6 @@ impl WindowHandler for WatcherState {
                         IDC_BTN_REMOVE => {
                              if code == BN_CLICKED as u16 {
                                  let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
-                                 // let lv = ListView::new(h_list); // Unused
                                  let count = SendMessageW(h_list, LVM_GETITEMCOUNT, 0, 0) as i32;
                                  let mut selected_idx = -1;
                                  for i in 0..count {
@@ -224,7 +213,15 @@ impl WindowHandler for WatcherState {
                 WM_SIZE => {
                     let w = (lparam & 0xFFFF) as i32;
                     let h = ((lparam >> 16) & 0xFFFF) as i32;
-                    self.on_resize(hwnd, w, h);
+                    let rect = RECT { left: 0, top: 0, right: w, bottom: h };
+                    
+                    let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
+                    let h_btn_add = GetDlgItem(hwnd, IDC_BTN_ADD as i32);
+                    let h_btn_remove = GetDlgItem(hwnd, IDC_BTN_REMOVE as i32);
+                    let h_btn_refresh = GetDlgItem(hwnd, IDC_BTN_REFRESH as i32);
+                    let h_btn_close = GetDlgItem(hwnd, IDC_BTN_CLOSE as i32);
+                    
+                    self.do_layout(hwnd, rect, h_list, h_btn_add, h_btn_remove, h_btn_refresh, h_btn_close);
                 },
                 WM_GETMINMAXINFO => {
                     let mmi = lparam as *mut MINMAXINFO;
@@ -237,47 +234,38 @@ impl WindowHandler for WatcherState {
         }
         Some(0)
     }
-
-
 }
 
 impl WatcherState {
-    fn on_resize(&mut self, hwnd: HWND, _width: i32, _height: i32) {
-        unsafe {
-            use RECT;
-            let mut rc = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-            GetClientRect(hwnd, &mut rc);
-            let w = rc.right - rc.left;
-            let h = rc.bottom - rc.top;
-            
-            let padding = 10;
-            let btn_height = 30;
-            let btn_y = h - btn_height - padding;
-            
-            // Resize List View: Fill top area up to buttons
-            let list_h = if btn_y > padding { btn_y - padding - 10 } else { 100 };
-            let h_list = GetDlgItem(hwnd, IDC_LIST_WATCHERS as i32);
-            if h_list != std::ptr::null_mut() {
-                MoveWindow(h_list, padding, padding, w - (padding * 2), list_h, 1);
-            }
-            
-            // Move Buttons
-            // Left aligned: Add, Remove, Refresh
-            let h_btn_add = GetDlgItem(hwnd, IDC_BTN_ADD as i32);
-            let h_btn_rem = GetDlgItem(hwnd, IDC_BTN_REMOVE as i32);
-            let h_btn_ref = GetDlgItem(hwnd, IDC_BTN_REFRESH as i32);
-            
-            if h_btn_add != std::ptr::null_mut() { MoveWindow(h_btn_add, padding, btn_y, 80, btn_height, 1); }
-            if h_btn_rem != std::ptr::null_mut() { MoveWindow(h_btn_rem, padding + 90, btn_y, 80, btn_height, 1); }
-            if h_btn_ref != std::ptr::null_mut() { MoveWindow(h_btn_ref, padding + 180, btn_y, 80, btn_height, 1); }
-            
-            // Right aligned: Close
-            let h_btn_close = GetDlgItem(hwnd, IDC_BTN_CLOSE as i32);
-            if h_btn_close != std::ptr::null_mut() {
-                MoveWindow(h_btn_close, w - 100 - padding, btn_y, 100, btn_height, 1);
-            }
-        }
+    unsafe fn do_layout(&mut self, _hwnd: HWND, rect: RECT, h_list: HWND, h_add: HWND, h_rem: HWND, h_ref: HWND, h_close: HWND) {
+         use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}};
+         
+         LayoutNode::col(10, 10)
+             .with(h_list, Flex(1.0))
+             .with_child(LayoutNode::row(0, 5)
+                 .with_policy(Fixed(28)) // Fix row height to 28px
+                 .with(h_add, Fixed(80))
+                 .with(h_rem, Fixed(80))
+                 .with(h_ref, Fixed(80))
+                 .flex_spacer()
+                 .with(h_close, Fixed(100))
+             )
+             .apply_layout(rect);
+
+         // Dynamic Column Resizing
+         let list_w = (rect.right - rect.left) - 20; // -20 for padding
+         let fixed_w = 55 + 55 + 120 + 65 + 115 + 60; // Sum of other columns
+         let scroll_pad = 25; // Space for scrollbar
+         let path_w = list_w - fixed_w - scroll_pad;
+         
+         if path_w > 100 {
+             let lv = ListView::new(h_list);
+             lv.set_column_width(0, path_w);
+             lv.set_column_width(6, 60); // Fix Action column
+         }
     }
+    
+    // on_resize removed (replaced by do_layout called from WM_SIZE)
 
     fn on_min_max_info(&mut self, _hwnd: HWND, mmi: *mut MINMAXINFO) {
         unsafe {

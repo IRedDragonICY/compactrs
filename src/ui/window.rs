@@ -362,6 +362,16 @@ impl WindowHandler for AppState {
                     None
                 },
                 
+                WM_ERASEBKGND => {
+                    let hdc = wparam as HDC;
+                    let mut rect: RECT = std::mem::zeroed();
+                    GetClientRect(hwnd, &mut rect);
+                    let is_dark = theme::resolve_mode(self.theme);
+                    let brush = theme::get_background_brush(is_dark);
+                    FillRect(hdc, &rect, brush);
+                    Some(1)
+                },
+                
                 _ => None,
             }
         }
@@ -1026,80 +1036,65 @@ impl AppState {
             let mut client_rect: RECT = std::mem::zeroed();
             if GetClientRect(hwnd, &mut client_rect) != 0 {
                 if let Some(ctrls) = &mut self.controls {
-                     let _width = client_rect.right - client_rect.left;
-                     let height = client_rect.bottom - client_rect.top;
+                     use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}};
                      
-                     // Layout Constants
-                     let header_h = 50;
-                     // Reduced height for 2-row layout (Search/Results + Filters)
-                     let search_h = 85; 
-                     
-                     // Dynamic Action Panel Height calculation
-                     // Top Padding (4) + Label (16) + Gap (4) + Button (30) + Bottom Padding (6) = 60
-                     let action_h = 60;  
-                     
-                     let status_h = 22;  // Reduced to 22 (tight fit for 20px bar)
-                     let padding = 10;
-                     
-                     // 1. Header Rect (Top Strip)
-                     let header_rect = RECT { 
-                        left: client_rect.left, 
-                        top: client_rect.top, 
-                        right: client_rect.right, 
-                        bottom: client_rect.top + header_h 
-                     };
-                     
-                     // 2. Search Rect (Below Header)
-                     let search_rect = RECT {
-                        left: client_rect.left,
-                        top: header_rect.bottom,
-                        right: client_rect.right,
-                        bottom: header_rect.bottom + search_h
-                     };
-                     
-                     // 3. Action Rect (Bottom Strip)
-                     // Calculate tops from bottom up
-                     // Status is now ABOVE Action, below List.
-                     
-                     let action_top = height - action_h;
-                     let action_rect = RECT {
-                        left: client_rect.left,
-                        top: client_rect.top + action_top, // Absolute Y
-                        right: client_rect.right,
-                        bottom: client_rect.top + height
-                     };
+                     // Declarative Main Window Layout
+                     // [ Header Area (Status Text + Buttons) ]
+                     // [ Search Panel ]
+                     // [ File List ]
+                     // [ Progress Bar ]
+                     // [ Action Panel ]
 
-                     // 4. Status Rect (Above Action)
-                     // StatusBar draws label at top, progress at bottom.
-                     // We want progress bar here.
-                     let status_top = action_top - status_h;
-                     let status_rect = RECT {
-                         left: client_rect.left,
-                         top: client_rect.top + status_top,
-                         right: client_rect.right,
-                         bottom: client_rect.top + action_top
-                     };
+                     LayoutNode::col(0, 0)
+                        // 1. Header Area: Status Label (Left) + Header Buttons (Right)
+                        .with_child(LayoutNode::row(10, 10)
+                            .with(ctrls.status_bar.label_hwnd(), Flex(1.0))
+                            .with(ctrls.header_panel.hwnd(), Fixed(220)) // Accommodate buttons
+                            .with_policy(Fixed(50)) // Fixed height for header row
+                        )
+                        // 2. Search Panel
+                        .with(ctrls.search_panel.panel_hwnd(), Fixed(85))
+                        // 3. File List (Expands)
+                        .with_child(LayoutNode::col(10, 0) // Padding around list
+                             .with(ctrls.file_list.hwnd(), Flex(1.0))
+                             .with_policy(Flex(1.0))
+                        )
+                        // 4. Progress Bar (Status Bar Part 2)
+                        .with_child(LayoutNode::col(10, 5) // Padding around progress
+                             .with(ctrls.status_bar.progress_hwnd(), Fixed(22))
+                             .with_policy(Fixed(32)) // Wrapper height
+                        )
+                        // 5. Action Panel
+                        .with(ctrls.action_panel.hwnd(), Fixed(60))
+                        .apply_layout(client_rect);
+                        
+                     // Trigger content layout updates for container panels
+                     ctrls.header_panel.refresh_layout();
+                     ctrls.search_panel.refresh_layout();
+                     ctrls.action_panel.refresh_layout();
                      
-                     // 5. List Rect (Middle Fill)
-                     // Fills space between Search and Status
-                     let list_top = search_rect.bottom;
-                     let list_bottom = status_rect.top; // Space before status
+                     // Force FileList to update columns
+                     let mut fl_rect: RECT = std::mem::zeroed();
+                     GetWindowRect(ctrls.file_list.hwnd(), &mut fl_rect);
+                     // Map to parent? No, on_resize logic I wrote uses GetClientRect internally now, 
+                     // so the argument is mostly ignored or just used for outer bounds.
+                     // Let's pass the window rect for consistency or just a dummy one if internal logic ignores it.
+                     // The logic I wrote uses the passed rect for SetWindowPos, BUT applied_layout ALREADY did SetWindowPos.
+                     // I should modify on_resize to NOT do SetWindowPos if called from here, OR just basic resize.
+                     // But wait, the previous on_resize performed SetWindowPos AND column resize.
+                     // If I call it now, it might try to SetWindowPos again?
+                     // If I pass the rect from GetWindowRect (screen coords), that's wrong for SetWindowPos (parent coords).
+                     // However, the new logic in file_list.rs reads:
+                     // let width = rect.right - rect.left; ... SetWindowPos(...)
+                     // If I pass a rect that matches current size, SetWindowPos is a no-op (or harmless).
+                     // But I don't have the parent-relative coordinates easily without MapWindowPoints.
                      
-                     let list_rect = RECT {
-                        left: client_rect.left + padding,
-                        top: list_top,
-                        right: client_rect.right - padding,
-                        bottom: std::cmp::max(list_top + 10, list_bottom) // Ensure min height
-                     };
-
-                     // Apply Layouts
-                     ctrls.header_panel.on_resize(&header_rect);
-                     ctrls.search_panel.on_resize(&search_rect);
-                     
-                     // Note: Layout order depends on intended Z-order if overlapping, usually doesn't matter for distinct rects.
-                     ctrls.file_list.on_resize(&list_rect);
-                     ctrls.status_bar.on_resize(&status_rect); // Progress bar now in middle-ish
-                     ctrls.action_panel.on_resize(&action_rect); // Controls at bottom
+                     // Better Fix:
+                     // Update FileListView::on_resize to separate "Geometry Update" (SetWindowPos) from "Column Update".
+                     // OR, simpler:
+                     // Just call a new method `update_columns()` on FileListView.
+                     ctrls.file_list.update_columns(); 
+                     // I need to add this method to FileListView first.
                 }
             }
             0

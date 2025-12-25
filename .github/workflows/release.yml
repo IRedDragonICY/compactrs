@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -78,6 +79,15 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Determined Version: $version"
         shell: pwsh
+
+      - name: Update Cargo.toml version
+        run: |
+          $ver = "${{ steps.version.outputs.VERSION }}" -replace '^v',''
+          (Get-Content Cargo.toml) -replace '^version = ".*"', "version = `"$ver`"" | Set-Content Cargo.toml
+        shell: pwsh
+
+      - name: Authenticate with crates.io
+        uses: rust-lang/crates-io-auth-action@v2
 
       # Build configuration is in .cargo/config.toml
       # See config.toml for all optimization flags and documentation
@@ -223,6 +233,10 @@ jobs:
             target/release/${{ env.BINARY_NAME }}.exe
             target/release/${{ env.BINARY_NAME }}-normal.exe
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to crates.io
+        run: cargo publish --allow-dirty
+        shell: pwsh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

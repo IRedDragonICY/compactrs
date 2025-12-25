@@ -13,7 +13,7 @@ const CONSOLE_TITLE: &str = "Debug Console";
 const IDC_EDIT_CONSOLE: i32 = 1001;
 const IDC_BTN_COPY: i32 = 1002;
 const IDC_BTN_CLEAR: i32 = 1003;
-const BUTTON_HEIGHT: i32 = 30;
+
 const TIMER_ID: usize = 1;
 const UPDATE_INTERVAL_MS: u32 = 150;
 const MAX_HISTORY: usize = 1000;
@@ -171,6 +171,26 @@ impl ConsoleState {
             }
         }
     }
+
+    unsafe fn do_layout(&mut self, _hwnd: HWND, rc: RECT) {
+        if let (Some(edit), Some(copy), Some(clear)) = (self.edit_hwnd, self.btn_copy_hwnd, self.btn_clear_hwnd) {
+             use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}};
+             
+             // Layout:
+             // [ Edit Control (Flex) ]
+             // [ Copy ] [ Clear ] (Fixed bottom row)
+             
+             LayoutNode::col(0, 5) // Wrapper
+                 .with(edit, Flex(1.0))
+                 .with_child(LayoutNode::row(5, 5) // Bottom row
+                      .with_policy(Fixed(40)) // Fix height to 40px (30btn + 5pad + 5pad)
+                      .with(copy, Fixed(80))
+                      .with(clear, Fixed(80))
+                      .flex_spacer()
+                 )
+                 .apply_layout(rc);
+        }
+    }
 }
 
 unsafe fn format_log_entry(entry: &LogEntry) -> Vec<u16> {
@@ -207,6 +227,7 @@ impl WindowHandler for ConsoleState {
              let edit_cls = to_wstring("EDIT");
              
              // Create Edit Control
+             // Note: We set position to 0 since LayoutNode will handle it
              let edit = CreateWindowExW(
                  0,
                  edit_cls.as_ptr(),
@@ -221,22 +242,22 @@ impl WindowHandler for ConsoleState {
              );
              
              SendMessageW(edit, EM_SETLIMITTEXT, EDIT_LIMIT, 0);
-             
              self.edit_hwnd = Some(edit);
              
-             // Create Buttons
-             let btn_copy = ControlBuilder::new(hwnd, IDC_BTN_COPY as u16)
-                 .text_w(w!("Copy")).pos(0, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
-             self.btn_copy_hwnd = Some(btn_copy);
+             // Create Buttons using ControlBuilder
+             let builder = |id| ControlBuilder::new(hwnd, id).dark_mode(self.is_dark);
+             let btn = |text, id| builder(id).button().text_w(&crate::utils::to_wstring(text)).build();
              
-             let btn_clear = ControlBuilder::new(hwnd, IDC_BTN_CLEAR as u16)
-                 .text_w(w!("Clear")).pos(90, 0).size(80, BUTTON_HEIGHT).dark_mode(self.is_dark).build();
-             self.btn_clear_hwnd = Some(btn_clear);
+             self.btn_copy_hwnd = Some(btn("Copy", IDC_BTN_COPY as u16));
+             self.btn_clear_hwnd = Some(btn("Clear", IDC_BTN_CLEAR as u16));
              
              self.update_theme(hwnd);
              
-             // Initial render of history
+             // Initial render & Layout
              self.refresh_text();
+             
+             let rc = crate::utils::get_client_rect(hwnd);
+             self.do_layout(hwnd, rc);
              
              // Start timer
              SetTimer(hwnd, TIMER_ID, UPDATE_INTERVAL_MS, None);
@@ -254,20 +275,10 @@ impl WindowHandler for ConsoleState {
                     Some(0)
                 },
                 WM_SIZE => {
-                    let width = (lparam & 0xFFFF) as i32;
-                    let height = ((lparam >> 16) & 0xFFFF) as i32;
-                    
-                    if let Some(edit) = self.edit_hwnd {
-                        SetWindowPos(edit, std::ptr::null_mut(), 0, 0, width, height - BUTTON_HEIGHT - 5, SWP_NOZORDER);
-                    }
-                    
-                    let btn_y = height - BUTTON_HEIGHT;
-                    if let Some(btn) = self.btn_copy_hwnd {
-                        SetWindowPos(btn, std::ptr::null_mut(), 5, btn_y, 80, BUTTON_HEIGHT - 5, SWP_NOZORDER);
-                    }
-                    if let Some(btn) = self.btn_clear_hwnd {
-                        SetWindowPos(btn, std::ptr::null_mut(), 90, btn_y, 80, BUTTON_HEIGHT - 5, SWP_NOZORDER);
-                    }
+                    let w = (lparam & 0xFFFF) as i32;
+                    let h = ((lparam >> 16) & 0xFFFF) as i32;
+                    let rc = RECT { left: 0, top: 0, right: w, bottom: h };
+                    self.do_layout(hwnd, rc);
                     Some(0)
                 },
                 WM_COMMAND => {

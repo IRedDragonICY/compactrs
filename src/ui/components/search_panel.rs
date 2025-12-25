@@ -4,8 +4,9 @@ use crate::types::*;
 
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
-use crate::ui::controls::{apply_combobox_theme, apply_checkbox_theme, apply_edit_theme};
-use crate::ui::layout::{layout_horizontal, LayoutItem, SizePolicy};
+// use crate::ui::controls::{apply_combobox_theme, apply_checkbox_theme, apply_edit_theme};
+use crate::ui::controls::*;
+use crate::ui::layout::{LayoutNode, SizePolicy};
 use crate::w;
 
 /// Configuration for SearchPanel control IDs.
@@ -222,61 +223,9 @@ impl Component for SearchPanel {
     
     // Layout Logic
     unsafe fn on_resize(&mut self, parent_rect: &RECT) {
-        unsafe {
-            let width = parent_rect.right - parent_rect.left;
-            let height = parent_rect.bottom - parent_rect.top;
-            
-            // Set Panel Size and Pos (handled by parent usually, but here we assume parent handles pos, we handle internal layout)
-            SetWindowPos(self.hwnd_panel, std::ptr::null_mut(), parent_rect.left, parent_rect.top, width, height, SWP_NOZORDER);
-
-            let padding = 10;
-            let row_h = 30;
-            
-            // Row 1: Search Bar + Results Label
-            // "Found X Items" takes ~150px on the right.
-            let label_w = 200; // ample space for text
-            let gap = 10;
-            
-            let row1_rect = RECT {
-                left: 0, 
-                top: 0, // layout starts at top+padding, so 0+10 = 10 (Correct)
-                right: width,
-                bottom: 28 + (padding * 2), // 28 content + 20 padding = 48
-            };
-            
-            let row1_items = [
-                LayoutItem { hwnd: self.hwnd_search, policy: SizePolicy::Flex(1.0) },
-                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Fixed(gap) },
-                LayoutItem { hwnd: self.hwnd_lbl_results, policy: SizePolicy::Fixed(label_w) },
-            ];
-            
-            layout_horizontal(&row1_rect, &row1_items, padding, 0);
-
-
-            // Row 2: Filter Controls
-            let row2_y = padding + row_h + 5; 
-            
-            // Row 2 Rect
-            // We want content at row2_y.
-            // layout starts at top + padding.
-            // so top = row2_y - padding.
-            let r2_top = row2_y - padding;
-            let r2_height = 24 + (padding * 2); // 24 height + padding
-            let r2_rect = RECT { left: 0, top: r2_top, right: width, bottom: r2_top + r2_height };
-            
-            let row2_items = [
-                 LayoutItem { hwnd: self.hwnd_lbl_filter_by, policy: SizePolicy::Fixed(60) },
-                 LayoutItem { hwnd: self.hwnd_combo_filter_col, policy: SizePolicy::Fixed(100) },
-                 LayoutItem { hwnd: self.hwnd_lbl_algo, policy: SizePolicy::Fixed(65) },
-                 LayoutItem { hwnd: self.hwnd_combo_algo, policy: SizePolicy::Fixed(90) },
-                 LayoutItem { hwnd: self.hwnd_lbl_size, policy: SizePolicy::Fixed(35) },
-                 LayoutItem { hwnd: self.hwnd_combo_size, policy: SizePolicy::Fixed(90) },
-                 LayoutItem { hwnd: self.hwnd_chk_case, policy: SizePolicy::Fixed(110) },
-                 LayoutItem { hwnd: self.hwnd_chk_regex, policy: SizePolicy::Fixed(70) },
-            ];
-            
-            layout_horizontal(&r2_rect, &row2_items, padding, 10);
-        }
+        let (w, h) = (parent_rect.right - parent_rect.left, parent_rect.bottom - parent_rect.top);
+        SetWindowPos(self.hwnd_panel, std::ptr::null_mut(), parent_rect.left, parent_rect.top, w, h, SWP_NOZORDER);
+        self.refresh_layout();
     }
 
     unsafe fn on_theme_change(&mut self, is_dark: bool) {
@@ -298,6 +247,33 @@ impl Component for SearchPanel {
 
         // Update: Custom class handles it now. Force repaint.
         InvalidateRect(self.hwnd_panel, std::ptr::null(), 1);
+    }
+}
+
+impl SearchPanel {
+    pub unsafe fn refresh_layout(&self) {
+        let mut rect: RECT = std::mem::zeroed();
+        GetClientRect(self.hwnd_panel, &mut rect);
+        let w = rect.right - rect.left;
+        
+        use SizePolicy::{Fixed, Flex};
+        
+        // Row 1: Search Bar + Results Label
+        LayoutNode::row(10, 0)
+            .with(self.hwnd_search, Flex(1.0)).spacer(10).with(self.hwnd_lbl_results, Fixed(200))
+            .apply_layout(RECT { left: 0, top: 0, right: w, bottom: 48 });
+
+        // Row 2: Filter Controls
+        LayoutNode::row(10, 10)
+            .with(self.hwnd_lbl_filter_by, Fixed(60))
+            .with(self.hwnd_combo_filter_col, Fixed(100))
+            .with(self.hwnd_lbl_algo, Fixed(65))
+            .with(self.hwnd_combo_algo, Fixed(90))
+            .with(self.hwnd_lbl_size, Fixed(35))
+            .with(self.hwnd_combo_size, Fixed(90))
+            .with(self.hwnd_chk_case, Fixed(110))
+            .with(self.hwnd_chk_regex, Fixed(70))
+            .apply_layout(RECT { left: 0, top: 35, right: w, bottom: 79 });
     }
 }
 

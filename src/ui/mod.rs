@@ -12,5 +12,7 @@ pub mod handlers;
 pub mod file_dialog;
 pub mod wrappers;
 pub mod layout;
+pub mod declarative;
+pub mod subclass;
 pub mod edit_subclass;
 

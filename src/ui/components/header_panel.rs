@@ -10,7 +10,7 @@ use crate::types::*;
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
 use crate::ui::controls::apply_button_theme;
-use crate::ui::layout::{layout_horizontal, LayoutItem, SizePolicy};
+use crate::ui::layout::{LayoutNode, SizePolicy};
 
 const ICON_SETTINGS: &[u16] = &[0xE713, 0]; // Settings
 const ICON_KEYBOARD: &[u16] = &[0xE765, 0]; // Keyboard
@@ -34,6 +34,7 @@ pub struct HeaderPanelIds {
 /// [>_] [?] [⚙]
 /// Console, About, Settings (right to left)
 pub struct HeaderPanel {
+    hwnd_panel: HWND,
     hwnd_settings: HWND,
     hwnd_about: HWND,
     hwnd_shortcuts: HWND,
@@ -48,6 +49,7 @@ impl HeaderPanel {
     /// Call `create()` to actually create the Win32 controls.
     pub fn new(ids: HeaderPanelIds) -> Self {
         Self {
+            hwnd_panel: std::ptr::null_mut(),
             hwnd_settings: std::ptr::null_mut(),
             hwnd_about: std::ptr::null_mut(),
             hwnd_shortcuts: std::ptr::null_mut(),
@@ -55,6 +57,12 @@ impl HeaderPanel {
             hwnd_watcher: std::ptr::null_mut(),
             ids,
         }
+    }
+
+    /// Returns the main container HWND.
+    #[inline]
+    pub fn hwnd(&self) -> HWND {
+        self.hwnd_panel
     }
 
     /// Returns the Settings button HWND.
@@ -103,38 +111,63 @@ impl HeaderPanel {
 impl Component for HeaderPanel {
     unsafe fn create(&mut self, parent: HWND) -> Result<(), String> {
         unsafe {
-            let _module = GetModuleHandleW(std::ptr::null());
+            let instance = GetModuleHandleW(std::ptr::null());
+            
+            // Register Class with custom procedure
+            let class_name = crate::w!("CompactRsHeaderPanel");
+            let mut wc: WNDCLASSW = std::mem::zeroed();
+            wc.lpfnWndProc = Some(header_panel_proc);
+            wc.hInstance = instance;
+            wc.lpszClassName = class_name.as_ptr();
+            wc.style = CS_HREDRAW | CS_VREDRAW;
+            wc.hbrBackground = std::ptr::null_mut(); 
+            
+            RegisterClassW(&wc);
+            
+            self.hwnd_panel = CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                std::ptr::null(),
+                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 
+                0, 0, 100, 30,
+                parent,
+                std::ptr::null_mut(),
+                instance,
+                std::ptr::null_mut(),
+            );
 
             let is_dark = crate::ui::theme::is_system_dark_mode();
             let icon_font = crate::ui::theme::get_icon_font();
 
+            // Create buttons as children of panel
+            let parent_hwnd = self.hwnd_panel;
+
             // Initial positions (will be updated in on_resize)
-            // These are just placeholders - real positions set in on_resize
-            self.hwnd_settings = ControlBuilder::new(parent, self.ids.btn_settings)
+            self.hwnd_settings = ControlBuilder::new(parent_hwnd, self.ids.btn_settings)
                 .text_w(ICON_SETTINGS)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_about = ControlBuilder::new(parent, self.ids.btn_about)
+            self.hwnd_about = ControlBuilder::new(parent_hwnd, self.ids.btn_about)
                 .text_w(ICON_ABOUT)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_shortcuts = ControlBuilder::new(parent, self.ids.btn_shortcuts)
+            self.hwnd_shortcuts = ControlBuilder::new(parent_hwnd, self.ids.btn_shortcuts)
                 .text_w(ICON_KEYBOARD)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_console = ControlBuilder::new(parent, self.ids.btn_console)
+            self.hwnd_console = ControlBuilder::new(parent_hwnd, self.ids.btn_console)
                 .text_w(ICON_CONSOLE)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
                 .build();
 
-            self.hwnd_watcher = ControlBuilder::new(parent, self.ids.btn_watcher)
+            self.hwnd_watcher = ControlBuilder::new(parent_hwnd, self.ids.btn_watcher)
                 .text_w(ICON_WATCHER)
                 .pos(0, 0).size(30, 25).dark_mode(is_dark)
                 .font(icon_font)
@@ -145,68 +178,16 @@ impl Component for HeaderPanel {
     }
 
     fn hwnd(&self) -> Option<HWND> {
-        // This component doesn't have a single "main" HWND
-        None
+        Some(self.hwnd_panel)
     }
 
     unsafe fn on_resize(&mut self, parent_rect: &RECT) {
-        unsafe {
-             // Parent rect provides everything needed.
-            
-            let padding = 10;
-            // Header height is 25? Based on button size (30x25).
-            // Let's rely on layout implementation.
-            
-            // Visual Order (Right -> Left): Settings, About, Shortcuts, Console, Watcher.
-            // layout_horizontal is Left -> Right.
-            // So: [Spacer] [Watcher] [Console] [Shortcuts] [About] [Settings]
-            
-            // Current manual code:
-            // Settings: right - pad - btn
-            // About: right - pad - btn - 35 (so 5px gap)
-            
-            // Layout Items:
-            // Spacer: Flex(1.0)
-            // Watcher: Fixed(30)
-            // Console: Fixed(30)
-            // Shortcuts: Fixed(30)
-            // About: Fixed(30)
-            // Settings: Fixed(30)
-            
-            // Gap should be 5.
-            
-            let items = [
-                LayoutItem { hwnd: std::ptr::null_mut(), policy: SizePolicy::Flex(1.0) },
-                LayoutItem { hwnd: self.hwnd_watcher, policy: SizePolicy::Fixed(30) },
-                LayoutItem { hwnd: self.hwnd_console, policy: SizePolicy::Fixed(30) },
-                LayoutItem { hwnd: self.hwnd_shortcuts, policy: SizePolicy::Fixed(30) },
-                LayoutItem { hwnd: self.hwnd_about, policy: SizePolicy::Fixed(30) },
-                LayoutItem { hwnd: self.hwnd_settings, policy: SizePolicy::Fixed(30) },
-            ];
-            
-            // The existing code uses a `header_height` of 25.
-            // layout_horizontal stretches items to fill height (height - padding*2).
-            // If parent_rect height is large (e.g. whole window?), we shouldn't pass entire parent_rect.
-            // HeaderPanel creates buttons with size(30, 25).
-            // Let's assume we want a fixed height strip at the top.
-            // Previous code used `header_height = 25` and `padding = 10`.
-            // So top y = padding = 10. height = 25.
-            
-            let rect_h = 25 + (padding * 2); 
-            let layout_rect = RECT {
-                left: parent_rect.left,
-                top: parent_rect.top, // Relative or Absolute? 
-                // parent_rect comes from window.rs
-                // In window.rs, HeaderPanel is created.
-                // window.rs calls `header_panel.on_resize(&client_rect)`.
-                // client_rect usually starts at (0,0).
-                
-                right: parent_rect.right,
-                bottom: parent_rect.top + rect_h,
-            };
-            
-            layout_horizontal(&layout_rect, &items, padding, 5);
-        }
+        let w = parent_rect.right - parent_rect.left;
+        let h = parent_rect.bottom - parent_rect.top;
+        
+        // Resize container
+        SetWindowPos(self.hwnd_panel, std::ptr::null_mut(), parent_rect.left, parent_rect.top, w, h, SWP_NOZORDER);
+        self.refresh_layout();
     }
 
     unsafe fn on_theme_change(&mut self, is_dark: bool) {
@@ -216,6 +197,87 @@ impl Component for HeaderPanel {
             apply_button_theme(self.hwnd_shortcuts, is_dark);
             apply_button_theme(self.hwnd_console, is_dark);
             apply_button_theme(self.hwnd_watcher, is_dark);
+            
+            // Store theme prop for WndProc
+            let prop_val = if is_dark { 2 } else { 1 };
+            SetPropW(self.hwnd_panel, crate::w!("CompactRs_Theme").as_ptr(), prop_val as isize as _);
+
+            // Invalidate container to repaint background if needed
+            InvalidateRect(self.hwnd_panel, std::ptr::null(), 1);
         }
+    }
+}
+
+// Window Procedure for HeaderPanel
+unsafe extern "system" fn header_panel_proc(hwnd: HWND, umsg: u32, wparam: usize, lparam: isize) -> isize {
+    match umsg {
+        WM_COMMAND => {
+             // Forward notifications to parent
+             let parent = GetParent(hwnd);
+             if parent != std::ptr::null_mut() {
+                 SendMessageW(parent, umsg, wparam, lparam);
+             }
+             return 0;
+        },
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
+            let is_dark = if prop_val != 0 { prop_val == 2 } else { crate::ui::theme::is_system_dark_mode() };
+
+            if let Some(res) = crate::ui::theme::handle_standard_colors(hwnd, umsg, wparam, is_dark) {
+                return res as isize;
+            }
+        },
+        WM_ERASEBKGND => {
+            let hdc = wparam as HDC;
+            let mut rect: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rect);
+            
+            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
+            let is_dark = if prop_val != 0 { prop_val == 2 } else { crate::ui::theme::is_system_dark_mode() };
+
+            let brush = if is_dark {
+                crate::ui::theme::get_dark_brush()
+            } else {
+                 (COLOR_WINDOW + 1) as HBRUSH
+            };
+            
+            unsafe { FillRect(hdc, &rect, brush); }
+            return 1;
+        },
+        WM_DESTROY => {
+            RemovePropW(hwnd, crate::w!("CompactRs_Theme").as_ptr());
+        },
+        _ => {}
+    }
+    
+    DefWindowProcW(hwnd, umsg, wparam, lparam)
+}
+
+impl HeaderPanel {
+    pub unsafe fn refresh_layout(&self) {
+        use SizePolicy::Fixed;
+        
+        let mut rect: RECT = std::mem::zeroed();
+        GetClientRect(self.hwnd_panel, &mut rect);
+        let w = rect.right - rect.left;
+        let h = rect.bottom - rect.top;
+        
+        // Layout buttons inside container relative to (0,0)
+        let layout_rect = RECT {
+            left: 0,
+            top: 0,
+            right: w,
+            bottom: h,
+        };
+
+        // Align right
+        LayoutNode::row(0, 5)
+            .flex_spacer()
+            .with(self.hwnd_watcher, Fixed(30))
+            .with(self.hwnd_console, Fixed(30))
+            .with(self.hwnd_shortcuts, Fixed(30))
+            .with(self.hwnd_about, Fixed(30))
+            .with(self.hwnd_settings, Fixed(30))
+            .apply_layout(layout_rect);
     }
 }
