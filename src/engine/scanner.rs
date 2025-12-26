@@ -5,7 +5,7 @@ use std::sync::mpsc::Sender;
 
 use crate::types::*;
 use crate::utils::PathBuffer;
-use crate::engine::wof::{get_real_file_size, get_wof_algorithm, WofAlgorithm, CompressionState};
+use crate::engine::wof::{get_real_file_size, get_wof_algorithm, WofAlgorithm, CompressionState, detect_compression_state};
 use crate::ui::state::{UiMessage, ProcessingState};
 
 // ===== STRUCTS =====
@@ -163,7 +163,7 @@ pub fn scan_path_metrics(path: &str) -> PathMetrics {
     if p.is_file() {
         let logical = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         let disk = get_real_file_size(path);
-        let state = get_wof_algorithm(path).map(CompressionState::Specific).unwrap_or(CompressionState::None);
+        let state = detect_compression_state(path);
         return PathMetrics { logical_size: logical, disk_size: disk, compression_state: state, file_count: 1 };
     }
     

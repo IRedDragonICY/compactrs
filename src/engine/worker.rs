@@ -4,7 +4,7 @@ use crate::types::*;
 
 use crate::utils::to_wstring;
 use crate::ui::state::{UiMessage, BatchAction, ProcessingState};
-use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, smart_compress};
+use crate::engine::wof::{uncompress_file, WofAlgorithm, get_real_file_size, smart_compress, detect_compression_state, CompressionState};
 
 // Correctly import form scanner
 use crate::engine::scanner::{
@@ -319,8 +319,30 @@ fn process_file_core(
             // Attempt Compression
             match try_compress_with_lock_handling(path, algo, force, main_hwnd) {
                 Ok(true) => {
-                    crate::log_trace!(&["Compressed: ", path].concat());
-                    (ProcessResult::Success, get_real_file_size(path))
+                    let disk_size = get_real_file_size(path);
+                    let logical_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                    
+                    // Check if space was actually saved
+                    if logical_size > 0 && disk_size < logical_size {
+                        crate::log_trace!(&["Compressed: ", path].concat());
+                        (ProcessResult::Success, disk_size)
+                    } else if force {
+                        // Force mode: Check if file is actually compressed (WOF or Legacy)
+                        let state = detect_compression_state(path);
+                        match state {
+                            CompressionState::Specific(_) | CompressionState::Legacy => {
+                                crate::log_trace!(&["Compressed (forced, no savings): ", path].concat());
+                                (ProcessResult::Success, disk_size)
+                            },
+                            _ => {
+                                crate::log_info!(&["Skipped (No savings): ", path].concat());
+                                (ProcessResult::Skipped(crate::utils::to_wstring("No savings")), disk_size)
+                            }
+                        }
+                    } else {
+                        crate::log_info!(&["Skipped (No savings): ", path].concat());
+                        (ProcessResult::Skipped(crate::utils::to_wstring("No savings")), disk_size)
+                    }
                 },
                 Ok(false) => {
                     crate::log_info!(&["Skipped (Not beneficial): ", path].concat());

@@ -198,6 +198,7 @@ impl FileListView {
                 WofAlgorithm::Xpress16K => w!("XPRESS16K"),
                 WofAlgorithm::Lzx => w!("LZX"),
             },
+            CompressionState::Legacy => w!("LZNT1"),
             CompressionState::Mixed => w!("Mixed"),
         };
 

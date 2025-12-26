@@ -76,6 +76,26 @@ pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
     }
 }
 
+/// Detect the compression state of a file (WOF or Legacy NTFS).
+/// Returns CompressionState::Specific for WOF, Legacy for NTFS, None for uncompressed.
+pub fn detect_compression_state(path: &str) -> CompressionState {
+    // First check WOF
+    if let Some(algo) = get_wof_algorithm(path) {
+        return CompressionState::Specific(algo);
+    }
+    
+    // Check NTFS compression attribute
+    unsafe {
+        let wide = PathBuffer::from(path);
+        let attrs = crate::types::GetFileAttributesW(wide.as_ptr());
+        if attrs != u32::MAX && (attrs & crate::types::FILE_ATTRIBUTE_COMPRESSED) != 0 {
+            return CompressionState::Legacy;
+        }
+    }
+    
+    CompressionState::None
+}
+
 /// Get the WOF compression algorithm from an already-opened file handle.
 /// Returns None if file is not WOF-compressed.
 /// 
@@ -165,8 +185,10 @@ impl WofAlgorithm {
 pub enum CompressionState {
     /// Not compressed (or not WOF compressed)
     None,
-    /// Compressed with a specific algorithm (all files if folder)
+    /// Compressed with a specific WOF algorithm (all files if folder)
     Specific(WofAlgorithm),
+    /// Compressed with legacy NTFS compression (LZNT1)
+    Legacy,
     /// Contains files with different compression algorithms (folder only)
     Mixed,
 }

@@ -939,6 +939,7 @@ impl AppState {
                                              WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
                                              WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
                                          },
+                                         CompressionState::Legacy => w!("LZNT1"),
                                          CompressionState::Mixed => w!("Mixed"),
                                      };
                                      ctrls.file_list.update_item_text(row, 1, state_str);
@@ -1002,6 +1003,7 @@ impl AppState {
                                     WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
                                     WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
                                 },
+                                CompressionState::Legacy => w!("LZNT1"),
                                 CompressionState::Mixed => w!("Mixed"),
                              };
                              ctrls.file_list.update_item_text(pos as i32, 1, state_str);
