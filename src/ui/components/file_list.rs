@@ -54,6 +54,8 @@ pub mod columns {
 /// The caller never needs to deal with `WPARAM`, `LPARAM`, or `SendMessageW` directly.
 pub struct FileListView {
     hwnd: HWND,
+    /// Handle to the "empty state" label overlay shown when no items are present.
+    hwnd_empty_label: HWND,
 }
 
 impl FileListView {
@@ -103,7 +105,28 @@ impl FileListView {
             (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as isize,
         );
 
-        let file_list = Self { hwnd };
+        // Create the "empty state" label overlay
+        let static_class = w!("Static");
+        let empty_label_text = w!("Drop files here or click 'Add Folder' to start");
+        let hwnd_empty_label = CreateWindowExW(
+            0,
+            static_class.as_ptr(),
+            empty_label_text.as_ptr(),
+            WS_CHILD | WS_VISIBLE | SS_CENTER,
+            0, 0, 300, 20, // Initial size/position, will be adjusted in on_resize
+            parent,
+            std::ptr::null_mut(),
+            instance,
+            std::ptr::null_mut(),
+        );
+
+        // Apply the app font to the label
+        if hwnd_empty_label != std::ptr::null_mut() {
+            let font = crate::ui::theme::get_app_font();
+            SendMessageW(hwnd_empty_label, WM_SETFONT, font as usize, 1);
+        }
+
+        let file_list = Self { hwnd, hwnd_empty_label };
 
         // Setup columns
         file_list.setup_columns();
@@ -320,6 +343,9 @@ impl FileListView {
             lvi.pszText = start_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
+            // Update empty state visibility
+            self.update_empty_state();
+
             row
         }
     }
@@ -418,6 +444,7 @@ impl FileListView {
         unsafe {
             SendMessageW(self.hwnd, LVM_DELETEITEM, index as usize, 0);
         }
+        self.update_empty_state();
     }
 
     /// Applies theme colors and styles to the ListView.
@@ -702,6 +729,47 @@ impl FileListView {
                  0, 
                  new_path_width as isize,
              );
+
+             // 5. Position the empty state label centered within the ListView
+             self.update_empty_label_position();
+        }
+    }
+
+    /// Repositions the empty state label to be centered within the ListView.
+    /// Called after layout changes.
+    fn update_empty_label_position(&self) {
+        unsafe {
+            // Get ListView's window rect (screen coords)
+            let mut list_rect: RECT = std::mem::zeroed();
+            GetWindowRect(self.hwnd, &mut list_rect);
+            
+            // Get the parent window
+            let parent = GetParent(self.hwnd);
+            if parent.is_null() { return; }
+            
+            // Convert ListView rect to parent client coords
+            let mut pt_top_left = POINT { x: list_rect.left, y: list_rect.top };
+            let mut pt_bottom_right = POINT { x: list_rect.right, y: list_rect.bottom };
+            ScreenToClient(parent, &mut pt_top_left);
+            ScreenToClient(parent, &mut pt_bottom_right);
+            
+            let list_width = pt_bottom_right.x - pt_top_left.x;
+            let list_height = pt_bottom_right.y - pt_top_left.y;
+            
+            const LABEL_WIDTH: i32 = 300;
+            const LABEL_HEIGHT: i32 = 20;
+            let label_x = pt_top_left.x + (list_width - LABEL_WIDTH) / 2;
+            let label_y = pt_top_left.y + (list_height - LABEL_HEIGHT) / 2;
+            
+            SetWindowPos(
+                self.hwnd_empty_label,
+                std::ptr::null_mut(),
+                label_x,
+                label_y,
+                LABEL_WIDTH,
+                LABEL_HEIGHT,
+                SWP_NOZORDER,
+            );
         }
     }
 
@@ -709,6 +777,23 @@ impl FileListView {
     pub fn clear_all(&self) {
         unsafe {
             SendMessageW(self.hwnd, LVM_DELETEALLITEMS, 0, 0);
+        }
+        self.update_empty_state();
+    }
+
+    /// Returns the handle to the empty state label.
+    #[inline]
+    pub fn empty_label_hwnd(&self) -> HWND {
+        self.hwnd_empty_label
+    }
+
+    /// Updates the visibility of the empty state label based on item count.
+    /// Shows the label when there are no items, hides it otherwise.
+    fn update_empty_state(&self) {
+        let count = self.get_item_count();
+        let cmd = if count == 0 { SW_SHOW } else { SW_HIDE };
+        unsafe {
+            ShowWindow(self.hwnd_empty_label, cmd);
         }
     }
 }
@@ -742,6 +827,21 @@ impl Component for FileListView {
 
             // Re-use shared column blocking/layout logic
             self.update_columns();
+
+            // Position the empty state label centered within the ListView
+            const LABEL_WIDTH: i32 = 300;
+            const LABEL_HEIGHT: i32 = 20;
+            let label_x = rect.left + (width - LABEL_WIDTH) / 2;
+            let label_y = rect.top + (height - LABEL_HEIGHT) / 2;
+            SetWindowPos(
+                self.hwnd_empty_label,
+                std::ptr::null_mut(),
+                label_x,
+                label_y,
+                LABEL_WIDTH,
+                LABEL_HEIGHT,
+                SWP_NOZORDER,
+            );
         }
     }
 

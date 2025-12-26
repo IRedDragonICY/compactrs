@@ -475,6 +475,9 @@ pub const DT_SINGLELINE: u32 = 0x00000020;
 pub const ODS_SELECTED: u32 = 0x0001;
 pub const ODS_DISABLED: u32 = 0x0004;
 
+// Static Control Styles
+pub const SS_CENTER: u32 = 0x00000001;
+
 // Edit Control Styles
 pub const ES_CENTER: u32 = 0x0001;
 pub const ES_MULTILINE: u32 = 0x0004;
