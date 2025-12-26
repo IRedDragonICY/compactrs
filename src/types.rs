@@ -516,9 +516,11 @@ pub const PBS_SMOOTH: u32 = 0x01;
 pub const PBM_SETBARCOLOR: u32 = 0x0409;
 pub const PBM_SETBKCOLOR: u32 = 0x2001;
 
-pub const HDN_FIRST: u32 = 0xFFFFFEC4;
-pub const HDN_BEGINTRACKW: u32 = HDN_FIRST - 26;
-pub const HDN_DIVIDERDBLCLICKW: u32 = HDN_FIRST - 25;
+pub const HDN_FIRST: u32 = (-300i32) as u32;
+pub const HDN_BEGINTRACKW: u32 = ((-300i32) - 26) as u32;
+pub const HDN_BEGINTRACKA: u32 = ((-300i32) - 6) as u32;
+pub const HDN_DIVIDERDBLCLICKW: u32 = ((-300i32) - 25) as u32;
+pub const HDN_DIVIDERDBLCLICKA: u32 = ((-300i32) - 5) as u32;
 
 // ListView & Header Constants
 pub const LVM_FIRST: u32 = 0x1000;

@@ -406,6 +406,15 @@ pub unsafe fn on_open_watcher_manager(st: &mut AppState, hwnd: HWND) {
 
 // --- Notification Handlers (ListView) ---
 
+/// Checks if the notification is a header resize event that should be blocked.
+pub unsafe fn should_block_header_resize(lparam: LPARAM) -> bool {
+    let nmhdr = &*(lparam as *const NMHDR);
+    let code = nmhdr.code;
+    // Block tracking (resizing) and divider double-clicks (auto-resize)
+    code == HDN_BEGINTRACKW || code == HDN_BEGINTRACKA 
+    || code == HDN_DIVIDERDBLCLICKW || code == HDN_DIVIDERDBLCLICKA
+}
+
 pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, code: u32) {
     if row < 0 {
         // Clicked on background/empty space -> Deselect All

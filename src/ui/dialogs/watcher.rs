@@ -32,7 +32,22 @@ const IDC_BTN_ADD: u16 = 3002;
 const IDC_BTN_REMOVE: u16 = 3003;
 const IDC_BTN_REFRESH: u16 = 3022;
 const IDC_BTN_CLOSE: u16 = 3021;
-// Removed other IDs as they are now in watcher_add
+
+struct ColumnDef {
+    id: i32,
+    title: &'static str,
+    width: i32,
+}
+
+const WATCHER_COLUMNS: [ColumnDef; 7] = [
+    ColumnDef { id: 0, title: "Path", width: 180 }, // Dynamic
+    ColumnDef { id: 1, title: "Size", width: 55 },
+    ColumnDef { id: 2, title: "On Disk", width: 55 },
+    ColumnDef { id: 3, title: "Schedule", width: 120 },
+    ColumnDef { id: 4, title: "Algorithm", width: 65 },
+    ColumnDef { id: 5, title: "Last Run", width: 115 },
+    ColumnDef { id: 6, title: "Action", width: 60 },
+];
 
 struct WatcherState {
     tasks: Arc<Mutex<Vec<WatcherTask>>>,
@@ -106,14 +121,9 @@ impl WindowHandler for WatcherState {
             lv.fix_header_dark_mode(hwnd);
             
             lv.clear_columns();
-            lv.add_column(0, "Path", 180);
-            lv.add_column(1, "Size", 55);
-            lv.add_column(2, "On Disk", 55);
-            lv.add_column(3, "Schedule", 120);
-            lv.add_column(4, "Algorithm", 65);
-            lv.add_column(5, "Last Run", 115);
-            lv.add_column(6, "Action", 55);
-            lv.set_column_width(6, -2);
+            for col in WATCHER_COLUMNS.iter() {
+                lv.add_column(col.id, col.title, col.width);
+            }
             lv.apply_theme(self.is_dark);
             
             self.refresh_list(h_list);
@@ -137,6 +147,11 @@ impl WindowHandler for WatcherState {
         unsafe {
             match msg {
                 WM_NOTIFY => {
+                    // Prevent resizing using shared logic
+                    if crate::ui::handlers::should_block_header_resize(lparam) {
+                         return Some(1); // TRUE prevents tracking/action
+                    }
+                    
                     let nmhdr = lparam as *const NMHDR;
                     if (*nmhdr).code == NM_DBLCLK {
                         let nmitem = lparam as *const NMITEMACTIVATE;
@@ -253,15 +268,23 @@ impl WatcherState {
              .apply_layout(rect);
 
          // Dynamic Column Resizing
-         let list_w = (rect.right - rect.left) - 20; // -20 for padding
-         let fixed_w = 55 + 55 + 120 + 65 + 115 + 60; // Sum of other columns
-         let scroll_pad = 25; // Space for scrollbar
-         let path_w = list_w - fixed_w - scroll_pad;
+         // We must use the ListView's *actual* client width to be accurate.
+         // rect is the parent window's rect, but h_list might have borders or be smaller.
+         let lv_rect = crate::utils::get_client_rect(h_list);
+         let list_w = lv_rect.right - lv_rect.left;
          
+         // Calculate fixed width from our constant definition
+         let fixed_w: i32 = WATCHER_COLUMNS.iter().skip(1).map(|c| c.width).sum();
+
+         // Precise calculation: Fill exactly the available width.
+         let path_w = list_w - fixed_w; 
+
          if path_w > 100 {
              let lv = ListView::new(h_list);
              lv.set_column_width(0, path_w);
-             lv.set_column_width(6, 60); // Fix Action column
+             // Other columns should already be set to their construct-time defaults or last set value
+             // But we should ensure Action is correct if we want to be safe, though constant is cleaner.
+             // lv.set_column_width(6, 60); 
          }
     }
     

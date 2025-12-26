@@ -1089,12 +1089,8 @@ impl AppState {
                      // If I pass a rect that matches current size, SetWindowPos is a no-op (or harmless).
                      // But I don't have the parent-relative coordinates easily without MapWindowPoints.
                      
-                     // Better Fix:
-                     // Update FileListView::on_resize to separate "Geometry Update" (SetWindowPos) from "Column Update".
-                     // OR, simpler:
-                     // Just call a new method `update_columns()` on FileListView.
-                     ctrls.file_list.update_columns(); 
-                     // I need to add this method to FileListView first.
+                     // Force FileList to update columns
+                     // handled by on_resize now
                 }
             }
             0
@@ -1256,6 +1252,11 @@ impl AppState {
     
     unsafe fn handle_notify(&mut self, hwnd: HWND, lparam: LPARAM) -> LRESULT {
         unsafe {
+            // Global Header Resize Prevention
+            if crate::ui::handlers::should_block_header_resize(lparam) {
+                 return 1; 
+            }
+            
             let nmhdr = &*(lparam as *const NMHDR);
             if nmhdr.idFrom == IDC_BATCH_LIST as usize {
                 if nmhdr.code == NM_CLICK || nmhdr.code == NM_DBLCLK {
