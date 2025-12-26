@@ -1090,7 +1090,7 @@ impl AppState {
                      // But I don't have the parent-relative coordinates easily without MapWindowPoints.
                      
                      // Force FileList to update columns
-                     // handled by on_resize now
+                     ctrls.file_list.update_columns();
                 }
             }
             0
