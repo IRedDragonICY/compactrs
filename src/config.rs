@@ -80,15 +80,13 @@ impl AppConfig {
 
     pub fn load() -> Self {
         let path = Self::get_path();
-        if let Ok(mut file) = File::open(path) {
+        if let Ok(mut file) = File::open(&path) {
             let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
             
             // Strict binary compatibility check: Size must match exactly.
             if file_len == std::mem::size_of::<AppConfig>() as u64 {
                 let mut buffer = [0u8; std::mem::size_of::<AppConfig>()];
                 if file.read_exact(&mut buffer).is_ok() {
-                    // Safe because AppConfig is #[repr(C)] and contains only POD-like types/primitives.
-                    // We verify Magic and Version to ensure it's not random garbage.
                     unsafe {
                         let config = std::ptr::read_unaligned(buffer.as_ptr() as *const AppConfig);
                         if config.magic == 0x43505253 && config.version == 7 {

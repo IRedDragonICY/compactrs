@@ -360,6 +360,7 @@ impl WindowHandler for SettingsState {
         }
         0
     }
+    
 
     fn on_message(&mut self, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
         unsafe {
@@ -367,7 +368,7 @@ impl WindowHandler for SettingsState {
                 WM_DESTROY => {
                     if self.h_font_bold != std::ptr::null_mut() { DeleteObject(self.h_font_bold); }
                     if self.h_font_icon != std::ptr::null_mut() { DeleteObject(self.h_font_icon); }
-                    Some(0)
+                    None
                 },
                 WM_HSCROLL => {
                      let h_ctl = lparam as HWND;
@@ -526,3 +527,5 @@ impl WindowHandler for SettingsState {
         }
     }
 }
+
+

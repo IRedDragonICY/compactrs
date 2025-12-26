@@ -393,6 +393,9 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     
     // Apply Process Eco Mode immediately
     crate::engine::power::set_process_eco_mode(st.low_power_mode);
+    
+    // SAVE CONFIG TO DISK
+    st.config.save();
 }
 
 pub unsafe fn on_open_watcher_manager(st: &mut AppState, hwnd: HWND) {
