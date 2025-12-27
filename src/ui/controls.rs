@@ -39,6 +39,7 @@ pub const IDC_LBL_RESULTS: u16 = 136;
 pub const IDC_LBL_FILTER_BY: u16 = 137;
 pub const IDC_LBL_FILTER_ALGO: u16 = 138;
 pub const IDC_LBL_SIZE: u16 = 139;
+pub const IDC_LBL_ACCURACY: u16 = 140;
 
 // Helper untuk update tema dinamis (digunakan saat switch theme)
 pub unsafe fn apply_button_theme(hwnd: HWND, is_dark: bool) {

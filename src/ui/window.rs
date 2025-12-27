@@ -181,6 +181,7 @@ impl WindowHandler for AppState {
                 lbl_algo: IDC_LBL_ALGO,
                 
                 chk_force: IDC_CHK_FORCE,
+                lbl_accuracy: crate::ui::controls::IDC_LBL_ACCURACY,
                 
                 btn_process: IDC_BTN_PROCESS_ALL,
                 btn_cancel: IDC_BTN_CANCEL,
@@ -1027,6 +1028,8 @@ impl AppState {
                              ctrls.file_list.update_item_text(pos as i32, 5, &est_str_local);
                          }
                      }
+                     // Update accuracy indicator
+                     self.update_accuracy_label();
                  },
                  _ => {}
             }
@@ -1096,6 +1099,36 @@ impl AppState {
                 }
             }
             0
+        }
+    }
+
+    /// Update the accuracy indicator label in the action panel.
+    /// Calculates: Accuracy = min(Est, OnDisk) / max(Est, OnDisk) for compressed items.
+    /// This shows how close the estimation is to actual compressed size.
+    unsafe fn update_accuracy_label(&self) {
+        if let Some(ctrls) = &self.controls {
+            let (mut sum_est, mut sum_disk) = (0u64, 0u64);
+            for item in &self.batch_items {
+                // Only count items with valid estimates AND disk sizes different from logical (compressed)
+                if item.estimated_size > 0 && item.disk_size > 0 && item.disk_size < item.logical_size {
+                    sum_est += item.estimated_size;
+                    sum_disk += item.disk_size;
+                }
+            }
+            
+            let text = if sum_disk > 0 && sum_est > 0 {
+                // Accuracy = min/max (how close they are, 100% = perfect)
+                let accuracy = if sum_est > sum_disk {
+                    (sum_disk as f64 / sum_est as f64) * 100.0
+                } else {
+                    (sum_est as f64 / sum_disk as f64) * 100.0
+                };
+                crate::utils::to_wstring(&format!("Acc: {:.0}%", accuracy))
+            } else {
+                crate::utils::to_wstring("Acc: --")
+            };
+            
+            crate::ui::wrappers::Label::new(ctrls.action_panel.accuracy_hwnd()).set_text_w(&text);
         }
     }
 

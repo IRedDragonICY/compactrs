@@ -34,6 +34,7 @@ pub struct ActionPanelIds {
     pub combo_algo: u16,
     pub lbl_algo: u16,
     pub chk_force: u16,
+    pub lbl_accuracy: u16,
     pub btn_process: u16,
     pub btn_cancel: u16,
     pub btn_pause: u16,
@@ -55,6 +56,7 @@ pub struct ActionPanel {
     hwnd_combo_algo: HWND,
     
     hwnd_force: HWND,
+    hwnd_lbl_accuracy: HWND,
     
     hwnd_process: HWND,
     hwnd_cancel: HWND,
@@ -81,6 +83,7 @@ impl ActionPanel {
             hwnd_combo_algo: std::ptr::null_mut(),
             
             hwnd_force: std::ptr::null_mut(),
+            hwnd_lbl_accuracy: std::ptr::null_mut(),
             
             hwnd_process: std::ptr::null_mut(),
             hwnd_cancel: std::ptr::null_mut(),
@@ -99,6 +102,7 @@ impl ActionPanel {
     pub fn action_mode_hwnd(&self) -> HWND { self.hwnd_action_mode }
     pub fn combo_hwnd(&self) -> HWND { self.hwnd_combo_algo }
     pub fn force_hwnd(&self) -> HWND { self.hwnd_force }
+    pub fn accuracy_hwnd(&self) -> HWND { self.hwnd_lbl_accuracy }
     pub fn process_hwnd(&self) -> HWND { self.hwnd_process }
     pub fn cancel_hwnd(&self) -> HWND { self.hwnd_cancel }
     pub fn pause_hwnd(&self) -> HWND { self.hwnd_pause }
@@ -198,6 +202,15 @@ impl Component for ActionPanel {
             .dark_mode(is_dark)
             .font(font)
             .build();
+        
+        // Accuracy Label (next to Force checkbox)
+        self.hwnd_lbl_accuracy = ControlBuilder::new(parent_hwnd, self.ids.lbl_accuracy)
+            .label(false)
+            .text("Acc: --")
+            .size(80, 32)
+            .dark_mode(is_dark)
+            .font(font)
+            .build();
 
         // Control Buttons
         self.hwnd_process = create_btn(self.ids.btn_process, ICON_PROCESS, 32);
@@ -236,6 +249,7 @@ impl Component for ActionPanel {
             
             // Fix: Use correct checkbox theme for Force button
             crate::ui::controls::apply_checkbox_theme(self.hwnd_force, is_dark);
+            crate::ui::theme::apply_theme(self.hwnd_lbl_accuracy, crate::ui::theme::ControlType::Window, is_dark);
 
             apply_combobox_theme(self.hwnd_action_mode, is_dark);
             apply_combobox_theme(self.hwnd_combo_algo, is_dark);
@@ -348,6 +362,7 @@ impl ActionPanel {
             .with(self.hwnd_action_mode, Fixed(100))
             .with(self.hwnd_combo_algo, Fixed(100))
             .with(self.hwnd_force, Fixed(65))
+            .with(self.hwnd_lbl_accuracy, Fixed(80))
             .flex_spacer()
             .with(self.hwnd_pause, Fixed(32))
             .with(self.hwnd_process, Fixed(32))
