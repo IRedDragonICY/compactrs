@@ -341,7 +341,11 @@ impl WindowHandler for SettingsState {
                 });
                 
                 icon_row(v, "\u{E7EF}", crate::w!("Advanced Startup"), crate::w!("Restart with TrustedInstaller privileges"), &|c: &mut ContainerBuilder| {
-                     c.button_w(IDC_BTN_RESTART_TI, crate::w!("Restart as TI"), SizePolicy::Fixed(24)); 
+                     if crate::engine::elevation::is_system_or_ti() {
+                         c.label_w(crate::w!("Running as TI"), SizePolicy::Fixed(24));
+                     } else {
+                         c.button_w(IDC_BTN_RESTART_TI, crate::w!("Restart as TI"), SizePolicy::Fixed(24));
+                     }
                 });
                 
                 // Reset App Button
@@ -574,7 +578,7 @@ impl WindowHandler for SettingsState {
                              }
                          },
                          IDC_BTN_RESTART_TI => {
-                              if (code as u32) == BN_CLICKED {
+                              if (code as u32) == BN_CLICKED && !crate::engine::elevation::is_system_or_ti() {
                                   let _ = crate::engine::elevation::restart_as_trusted_installer();
                               }
                          },
