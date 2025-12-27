@@ -1,181 +1,72 @@
-#![allow(unsafe_op_in_unsafe_fn, non_snake_case, non_camel_case_types, non_upper_case_globals)]
-use crate::utils::to_wstring;
-use std::mem::{size_of, zeroed};
-use std::ptr::{null, null_mut};
+#![allow(unsafe_op_in_unsafe_fn)]
 use crate::types::*;
+use std::{mem::{size_of as sz, zeroed}, ptr::{null, null_mut}};
 
-// Imported from crate::types::*;
+#[link(name = "kernel32")] unsafe extern "system" { fn Sleep(ms: u32); }
 
-const SE_PRIVILEGE_ENABLED: u32 = 0x00000002;
-const TOKEN_ADJUST_PRIVILEGES: u32 = 0x0020;
-const TOKEN_QUERY: u32 = 0x0008;
-
-const SC_MANAGER_CONNECT: u32 = 0x0001;
-const SERVICE_QUERY_STATUS: u32 = 0x0004;
-const SERVICE_START: u32 = 0x0010;
-const SC_STATUS_PROCESS_INFO: u32 = 0;
-const SERVICE_RUNNING: u32 = 0x00000004;
-
-const STARTF_USESHOWWINDOW: u32 = 0x00000001;
-const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x00080000;
-const PROCESS_CREATE_PROCESS: u32 = 0x0080;
-const PROC_THREAD_ATTRIBUTE_PARENT_PROCESS: usize = 0x00020000;
-
-const ERROR_NOT_ALL_ASSIGNED: u32 = 1300;
-
-unsafe fn enable_privilege(privilege_name: &str) -> bool {
-    // win_api imports removed
-
-
-    let mut token: HANDLE = std::ptr::null_mut();
-    
-    // Using -1 as pseudo handle for current process
-    let current_process = -1isize as HANDLE; 
-
-    if crate::types::OpenProcessToken(current_process, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut token) == 0 {
-        return false;
-    }
-    
-    let mut luid: LUID = zeroed();
-    let name = to_wstring(privilege_name);
-    // LookupPrivilegeValueW takes LPCWSTR
-    if crate::types::LookupPrivilegeValueW(null(), name.as_ptr(), &mut luid) == 0 {
-        crate::types::CloseHandle(token);
-        return false;
-    }
-    
-    let tp = TOKEN_PRIVILEGES {
-        PrivilegeCount: 1,
-        Privileges: [LUID_AND_ATTRIBUTES { Luid: luid, Attributes: SE_PRIVILEGE_ENABLED }],
-    };
-
-    let res = crate::types::AdjustTokenPrivileges(token, FALSE, &tp as *const _ as *const TOKEN_PRIVILEGES, size_of::<TOKEN_PRIVILEGES>() as u32, null_mut(), null_mut());
-    let err = crate::types::GetLastError();
-    crate::types::CloseHandle(token);
-    
-    if res == 0 || err == ERROR_NOT_ALL_ASSIGNED {
-        return false;
-    }
-    true
+unsafe fn priv_ok(n: LPCWSTR) -> bool {
+    let (mut t, mut l): (HANDLE, LUID) = (null_mut(), zeroed());
+    if OpenProcessToken(-1isize as _, 0x28, &mut t) == 0 { return false; }
+    if LookupPrivilegeValueW(null(), n, &mut l) == 0 { CloseHandle(t); return false; }
+    let p = TOKEN_PRIVILEGES { PrivilegeCount: 1, Privileges: [LUID_AND_ATTRIBUTES { Luid: l, Attributes: 2 }] };
+    let r = AdjustTokenPrivileges(t, 0, &p as *const _ as _, sz::<TOKEN_PRIVILEGES>() as u32, null_mut(), null_mut());
+    let e = GetLastError(); CloseHandle(t); r != 0 && e != 1300
 }
 
-pub unsafe fn enable_debug_privilege() -> bool {
-    enable_privilege("SeDebugPrivilege")
-}
-
-unsafe fn get_trusted_installer_pid() -> Option<u32> {
-    let scm = crate::types::OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT);
-    if scm.is_null() { return None; }
-    
-    let ti_name = to_wstring("TrustedInstaller");
-    let service = crate::types::OpenServiceW(scm, ti_name.as_ptr(), SERVICE_START | SERVICE_QUERY_STATUS);
-    
-    if service.is_null() { crate::types::CloseServiceHandle(scm); return None; }
-    
-    crate::types::StartServiceW(service, 0, null());
-    
-    let mut pid = None;
+unsafe fn ti_pid() -> Option<u32> {
+    let m = OpenSCManagerW(null(), null(), 1);
+    if m.is_null() { return None; }
+    let s = OpenServiceW(m, crate::w!("TrustedInstaller").as_ptr(), 0x14);
+    if s.is_null() { CloseServiceHandle(m); return None; }
+    StartServiceW(s, 0, null());
     for _ in 0..20 {
-        let mut bytes_needed = 0;
-        let mut ssp: SERVICE_STATUS_PROCESS = zeroed();
-        let res = crate::types::QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO, &mut ssp as *mut _ as *mut u8, size_of::<SERVICE_STATUS_PROCESS>() as u32, &mut bytes_needed);
-        if res != 0 && ssp.dwCurrentState == SERVICE_RUNNING && ssp.dwProcessId != 0 {
-            pid = Some(ssp.dwProcessId);
-            break;
+        let (mut p, mut n): (SERVICE_STATUS_PROCESS, u32) = (zeroed(), 0);
+        if QueryServiceStatusEx(s, 0, &mut p as *mut _ as _, sz::<SERVICE_STATUS_PROCESS>() as u32, &mut n) != 0 && p.dwCurrentState == 4 && p.dwProcessId != 0 {
+            CloseServiceHandle(s); CloseServiceHandle(m); return Some(p.dwProcessId);
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        Sleep(100);
     }
-    
-    crate::types::CloseServiceHandle(service);
-    crate::types::CloseServiceHandle(scm);
-    pid
+    CloseServiceHandle(s); CloseServiceHandle(m); None
 }
 
-pub fn restart_as_trusted_installer() -> Result<(), String> {
+pub fn restart_as_trusted_installer() -> Result<(), &'static str> {
     unsafe {
-        if !enable_debug_privilege() { 
-            return Err("Failed to enable SeDebugPrivilege".to_string());
-        }
+        if !priv_ok(crate::w!("SeDebugPrivilege").as_ptr()) { return Err("P"); }
+        let h = OpenProcess(0x80, 0, ti_pid().ok_or("T")?);
+        if h.is_null() { return Err("O"); }
         
-        let pid = get_trusted_installer_pid().ok_or("Failed to start TrustedInstaller service".to_string())?;
-        
-        let process = crate::types::OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pid);
-        if process.is_null() { return Err("Failed to open TrustedInstaller process (PID: ".to_string() + &pid.to_string() + ")"); }
-        
-        let mut size: usize = 0;
-        let _ = crate::types::InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut size);
-        
-        let mut buffer = vec![0u8; size];
-        let lp_attribute_list = buffer.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST;
-        
-        if crate::types::InitializeProcThreadAttributeList(lp_attribute_list, 1, 0, &mut size) == 0 {
-            crate::types::CloseHandle(process);
-            return Err("InitializeProcThreadAttributeList failed".to_string());
-        }
-        
-        let mut parent_handle = process;
-        if crate::types::UpdateProcThreadAttribute(
-                lp_attribute_list, 
-                0, 
-                PROC_THREAD_ATTRIBUTE_PARENT_PROCESS as usize, 
-                &mut parent_handle as *mut _ as *mut c_void, 
-                size_of::<HANDLE>(), 
-                null_mut(), 
-                null_mut()
-            ) == 0 {
-            crate::types::DeleteProcThreadAttributeList(lp_attribute_list);
-            crate::types::CloseHandle(process);
-            return Err("UpdateProcThreadAttribute failed".to_string());
-        }
+        let (mut b, mut z) = ([0u8; 64], 64usize);
+        let a = b.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST;
+        if InitializeProcThreadAttributeList(a, 1, 0, &mut z) == 0 { CloseHandle(h); return Err("I"); }
+        let mut p = h;
+        if UpdateProcThreadAttribute(a, 0, 0x20000, &mut p as *mut _ as _, sz::<HANDLE>(), null_mut(), null_mut()) == 0 { DeleteProcThreadAttributeList(a); CloseHandle(h); return Err("A"); }
 
-        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let cmd_string = crate::utils::concat_wstrings(&[crate::w!("\""), &crate::utils::to_wstring(&exe_path.to_string_lossy()), crate::w!("\"")]);
-        // CreateProcessW might modify the command line buffer, though usually not with this flag. 
-        // It's safer to have a mutable vector.
-        let mut cmd_line = cmd_string.to_vec(); // Ensure we have a mutable copy if needed, though we pass pointer
-        
-        let mut si_ex: STARTUPINFOEXW = zeroed();
-        si_ex.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
-        si_ex.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-        si_ex.StartupInfo.wShowWindow = SW_SHOW as u16;
-        si_ex.lpAttributeList = lp_attribute_list;
+        let mut c = [0u16; 310];
+        c[0] = 34; // "
+        let l = GetModuleFileNameW(null_mut(), c[1..].as_mut_ptr(), 300) as usize;
+        c[l + 1] = 34; // "
+
+        let mut si: STARTUPINFOEXW = zeroed();
+        si.StartupInfo.cb = sz::<STARTUPINFOEXW>() as u32;
+        si.StartupInfo.dwFlags = 1;
+        si.StartupInfo.wShowWindow = 5;
+        si.lpAttributeList = a;
 
         let mut pi: PROCESS_INFORMATION = zeroed();
-        
-        let create_res = crate::types::CreateProcessW(
-            null(), 
-            cmd_line.as_mut_ptr(), 
-            null(), 
-            null(), 
-            FALSE, 
-            EXTENDED_STARTUPINFO_PRESENT, 
-            null(), 
-            null(), 
-            &mut si_ex.StartupInfo as *mut _ as *mut c_void, 
-            &mut pi as *mut _ as *mut c_void
-        );
-        
-        crate::types::DeleteProcThreadAttributeList(lp_attribute_list);
-        crate::types::CloseHandle(process);
-        
-        if create_res == 0 {
-            let err = crate::types::GetLastError();
-            return Err(format!("CreateProcessW failed (Error: {})", err));
-        }
-        crate::types::CloseHandle(pi.hProcess);
-        crate::types::CloseHandle(pi.hThread);
+        let r = CreateProcessW(null(), c.as_mut_ptr(), null(), null(), 0, 0x80000, null(), null(), &mut si.StartupInfo as *mut _ as _, &mut pi as *mut _ as _);
+        DeleteProcThreadAttributeList(a); CloseHandle(h);
+        if r == 0 { return Err("C"); }
+        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
         std::process::exit(0);
     }
 }
 
 pub fn is_system_or_ti() -> bool {
     unsafe {
-        let mut buffer = [0u16; 256];
-        let mut size = 256;
-        if crate::types::GetUserNameW(buffer.as_mut_ptr(), &mut size) != 0 {
-            let name = String::from_utf16_lossy(&buffer[..size as usize - 1]);
-            return name.to_uppercase().contains("SYSTEM");
+        let (mut b, mut z) = ([0u16; 8], 8u32);
+        GetUserNameW(b.as_mut_ptr(), &mut z) != 0 && z >= 7 && {
+            let u = |c: u16| c & !32; // uppercase ASCII
+            u(b[0]) == 83 && u(b[1]) == 89 && u(b[2]) == 83 && u(b[3]) == 84 && u(b[4]) == 69 && u(b[5]) == 77
         }
     }
-    false
 }
