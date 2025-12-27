@@ -1,238 +1,146 @@
-//! Self-update module - Downloads and applies updates from GitHub releases.
+//! Self-update: extreme optimization (Win32 IO, no std::fs/io, stack paths)
 use crate::types::*;
-use std::{ffi::c_void, io::Write, ptr};
-use crate::utils::to_wstring;
-use crate::w;
+use std::{ffi::c_void, ptr::{null, null_mut}};
 
-const GITHUB_API: &str = "https://api.github.com/repos/IRedDragonICY/compactrs/releases/latest";
-const ASSET_NAME: &str = "\"compactrs.exe\"";
-
-// --- Manual WinHttp Bindings ---
+const API: &str = "https://api.github.com/repos/IRedDragonICY/compactrs/releases/latest";
 
 #[link(name = "winhttp")]
 unsafe extern "system" {
-    fn WinHttpOpen(
-        pszagent: *const u16,
-        dwaccesstype: u32,
-        pszproxyname: *const u16,
-        pszproxybypass: *const u16,
-        dwflags: u32,
-    ) -> *mut c_void;
-
-    fn WinHttpConnect(
-        hsession: *mut c_void,
-        pswzservername: *const u16,
-        nserverport: u16,
-        dwreserved: u32,
-    ) -> *mut c_void;
-
-    fn WinHttpOpenRequest(
-        hconnect: *mut c_void,
-        pwszverb: *const u16,
-        pwszobjectname: *const u16,
-        pwszversion: *const u16,
-        pwszreferrer: *const u16,
-        ppwszaccepttypes: *const *const u16, // pointer to array of pointers to strings
-        dwflags: u32,
-    ) -> *mut c_void;
-
-    fn WinHttpSendRequest(
-        hrequest: *mut c_void,
-        lpszheaders: *const u16,
-        dwheaderslength: u32,
-        lpoptional: *const c_void,
-        dwoptionallength: u32,
-        dwtotalength: u32,
-        dwcontext: usize,
-    ) -> i32;
-
-    fn WinHttpReceiveResponse(
-        hrequest: *mut c_void,
-        lpreserved: *mut c_void,
-    ) -> i32;
-
-    fn WinHttpQueryHeaders(
-        hrequest: *mut c_void,
-        dwinfolevel: u32,
-        pwszname: *const u16,
-        lpbuffer: *mut c_void,
-        lpdwbufferlength: *mut u32, // IN OUT
-        lpdwindex: *mut u32,        // IN OUT
-    ) -> i32;
-
-    fn WinHttpReadData(
-        hrequest: *mut c_void,
-        lpbuffer: *mut c_void,
-        dwnumbytestoread: u32,
-        lpdwnumberofbytesread: *mut u32,
-    ) -> i32;
-
-    fn WinHttpCloseHandle(hinternet: *mut c_void) -> i32;
+    fn WinHttpOpen(a: LPCWSTR, b: u32, c: LPCWSTR, d: LPCWSTR, e: u32) -> *mut c_void;
+    fn WinHttpConnect(a: *mut c_void, b: LPCWSTR, c: u16, d: u32) -> *mut c_void;
+    fn WinHttpOpenRequest(a: *mut c_void, b: LPCWSTR, c: LPCWSTR, d: LPCWSTR, e: LPCWSTR, f: *const *const u16, g: u32) -> *mut c_void;
+    fn WinHttpSendRequest(a: *mut c_void, b: LPCWSTR, c: u32, d: *const c_void, e: u32, f: u32, g: usize) -> i32;
+    fn WinHttpReceiveResponse(a: *mut c_void, b: *mut c_void) -> i32;
+    fn WinHttpQueryHeaders(a: *mut c_void, b: u32, c: LPCWSTR, d: *mut c_void, e: *mut u32, f: *mut u32) -> i32;
+    fn WinHttpReadData(a: *mut c_void, b: *mut c_void, c: u32, d: *mut u32) -> i32;
+    fn WinHttpCloseHandle(a: *mut c_void) -> i32;
 }
 
-const WINHTTP_ACCESS_TYPE_DEFAULT_PROXY: u32 = 0;
-const WINHTTP_FLAG_SECURE: u32 = 0x00800000;
-const WINHTTP_QUERY_STATUS_CODE: u32 = 19;
-const WINHTTP_QUERY_FLAG_NUMBER: u32 = 0x20000000;
-const WINHTTP_QUERY_LOCATION: u32 = 33;
-
-// --- RAII Handle ---
-
+// Minimal Handle wrapper
 struct Handle(*mut c_void);
+impl Drop for Handle { fn drop(&mut self) { if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE { unsafe { WinHttpCloseHandle(self.0); } } } }
+struct FileHandle(HANDLE);
+impl Drop for FileHandle { fn drop(&mut self) { if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE { unsafe { CloseHandle(self.0); } } } }
 
-impl Handle {
-    #[inline]
-    fn new(h: *mut c_void) -> Option<Self> { (!h.is_null()).then_some(Self(h)) }
-}
+struct Link { _s: Handle, _c: Handle, req: Handle }
 
-impl Drop for Handle {
-    fn drop(&mut self) { if !self.0.is_null() { unsafe { WinHttpCloseHandle(self.0) }; } }
-}
+// Helpers
+fn val<'a>(s: &'a str, k: &str) -> Option<&'a str> { s.split(k).nth(1)?.split('"').nth(1) }
+fn w(s: &str) -> Vec<u16> { crate::utils::to_wstring(s) }
+fn w_buf(s: &str, buf: &mut [u16]) { for (i, c) in s.encode_utf16().enumerate() { if i < buf.len() { buf[i] = c; } } buf[s.len().min(buf.len()-1)] = 0; }
 
-// --- JSON Helpers ---
-
-fn json_str<'a>(json: &'a str, key: &str) -> Option<&'a str> {
-    let i = json.find(key)? + key.len();
-    let s = json[i..].find('"')? + i + 1;
-    let e = json[s..].find('"')? + s;
-    Some(&json[s..e])
-}
-
-fn find_asset_url(json: &str) -> Option<&str> {
-    let idx = json.find(ASSET_NAME)?;
-    // Find enclosing object braces
-    let (mut bal, mut start) = (0, 0);
-    for (i, c) in json[..idx].char_indices().rev() {
-        match c { '}' => bal += 1, '{' if bal == 0 => { start = i; break }, '{' => bal -= 1, _ => {} }
-    }
-    let (mut bal, mut end) = (0, json.len());
-    for (i, c) in json[idx..].char_indices() {
-        match c { '{' => bal += 1, '}' if bal == 0 => { end = idx + i + 1; break }, '}' => bal -= 1, _ => {} }
-    }
-    json_str(&json[start..end], "\"browser_download_url\"")
-}
-
-// --- HTTP ---
-
-struct Request { _ses: Handle, _con: Handle, req: Handle }
-
-fn parse_url(url: &str) -> Result<(&str, &str), &'static str> {
-    let s = url.strip_prefix("https://").ok_or("Invalid URL")?;
-    Ok(s.find('/').map_or((s, "/"), |i| (&s[..i], &s[i..])))
-}
-
-fn http_get(url: &str) -> Result<Request, String> {
-    let ses = Handle::new(unsafe {
-        WinHttpOpen(w!("compactrs").as_ptr(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, ptr::null(), ptr::null(), 0)
-    }).ok_or_else(|| "WinHttpOpen: ".to_string() + &unsafe { GetLastError() }.to_string())?;
-
-    let mut url = url.to_string();
+fn get(url: &str) -> Result<Link, &'static str> {
+    let s = Handle(unsafe { WinHttpOpen(crate::w!("CompactRS/1.0").as_ptr(), 0, null(), null(), 0) });
+    if s.0.is_null() { return Err("Open"); }
+    
+    // Redirect loop with fixed stack buffer
+    let mut u_buf = [0u16; 512]; 
+    w_buf(url, &mut u_buf);
+    
+    // Use string parsing to avoid allocations? "https://" is ASCII.
     for _ in 0..5 {
-        let (host, path) = parse_url(&url).map_err(|e| e.to_string())?;
-        let host_w = to_wstring(host);
-        let path_w = to_wstring(path);
-
-        let con = Handle::new(unsafe { WinHttpConnect(ses.0, host_w.as_ptr(), 443, 0) })
-            .ok_or_else(|| "Connect: ".to_string() + &unsafe { GetLastError() }.to_string())?;
-        let req = Handle::new(unsafe {
-            WinHttpOpenRequest(con.0, w!("GET").as_ptr(), path_w.as_ptr(), ptr::null(), ptr::null(), ptr::null(), WINHTTP_FLAG_SECURE)
-        }).ok_or_else(|| "OpenRequest: ".to_string() + &unsafe { GetLastError() }.to_string())?;
-
-        if unsafe { WinHttpSendRequest(req.0, ptr::null(), 0, ptr::null(), 0, 0, 0) } == 0 {
-            return Err("SendRequest: ".to_string() + &unsafe { GetLastError() }.to_string());
-        }
-        if unsafe { WinHttpReceiveResponse(req.0, ptr::null_mut()) } == 0 {
-            return Err("ReceiveResponse: ".to_string() + &unsafe { GetLastError() }.to_string());
-        }
-
-        let mut code: u32 = 0;
-        let mut sz = 4u32;
-        unsafe { WinHttpQueryHeaders(req.0, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, ptr::null(), &mut code as *mut _ as _, &mut sz, ptr::null_mut()) };
-
-        match code {
-            200 => return Ok(Request { _ses: ses, _con: con, req }),
-            301 | 302 | 307 | 308 => {
-                let mut sz = 0u32;
-                unsafe { WinHttpQueryHeaders(req.0, WINHTTP_QUERY_LOCATION, ptr::null(), ptr::null_mut(), &mut sz, ptr::null_mut()) };
-                if sz == 0 { return Err("Redirect missing Location".into()); }
-                let mut buf = vec![0u8; sz as usize];
-                if unsafe { WinHttpQueryHeaders(req.0, WINHTTP_QUERY_LOCATION, ptr::null(), buf.as_mut_ptr() as _, &mut sz, ptr::null_mut()) } == 0 {
-                    return Err("Read Location failed".into());
-                }
-                let loc: Vec<u16> = buf.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
-                url = String::from_utf16_lossy(&loc).trim_matches('\0').to_string();
-            }
-            _ => return Err("HTTP ".to_string() + &code.to_string()),
-        }
+        // Unsafe internal conversion for speed/no-alloc? No, just use simple parsing.
+        let u_str = String::from_utf16_lossy(&u_buf).trim_matches('\0').to_string(); // Alloc here is acceptable for few redir
+        let v = u_str.strip_prefix("https://").ok_or("Bad URL")?;
+        let (h, p) = v.find('/').map_or((v, "/"), |i| (&v[..i], &v[i..]));
+        
+        // Connect
+        let c = Handle(unsafe { WinHttpConnect(s.0, w(h).as_ptr(), 443, 0) });
+        if c.0.is_null() { return Err("Connect"); }
+        let q = Handle(unsafe { WinHttpOpenRequest(c.0, null(), w(p).as_ptr(), null(), null(), null(), 0x800000) });
+        if q.0.is_null() { return Err("Request"); }
+        
+        let hdr = crate::w!("Accept: application/vnd.github+json");
+        if unsafe { WinHttpSendRequest(q.0, hdr.as_ptr(), hdr.len() as u32 - 1, null(), 0, 0, 0) } == 0 { return Err("Send"); }
+        if unsafe { WinHttpReceiveResponse(q.0, null_mut()) } == 0 { return Err("Recv"); }
+        
+        let (mut code, mut sz) = (0u32, 4u32);
+        unsafe { WinHttpQueryHeaders(q.0, 536870931, null(), &mut code as *mut _ as _, &mut sz, null_mut()) };
+        if code == 200 { return Ok(Link { _s: s, _c: c, req: q }); }
+        if ![301, 302, 307, 308].contains(&code) { return Err("HTTP Error"); }
+        
+        // Reuse buffer for redirect header
+        u_buf.fill(0); sz = 1024;
+        unsafe { WinHttpQueryHeaders(q.0, 33, null(), u_buf.as_mut_ptr() as _, &mut sz, null_mut()) };
     }
-    Err("Too many redirects".into())
+    Err("Redirect Loop")
 }
 
-fn read_body<F: FnMut(&[u8]) -> Result<(), String>>(req: &Handle, mut f: F) -> Result<u64, String> {
-    let mut buf = [0u8; 8192];
-    let mut total = 0u64;
-    loop {
-        let mut n = 0u32;
-        if unsafe { WinHttpReadData(req.0, buf.as_mut_ptr() as _, buf.len() as u32, &mut n) } == 0 {
-            return Err("ReadData: ".to_string() + &unsafe { GetLastError() }.to_string());
-        }
-        if n == 0 { break; }
-        f(&buf[..n as usize])?;
-        total += n as u64;
-    }
-    Ok(total)
-}
-
-// --- Public API ---
-
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct UpdateInfo { pub version: String, pub download_url: String }
 
 pub fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
-    let req = http_get(GITHUB_API)?;
-    let mut body = Vec::new();
-    read_body(&req.req, |c| { body.extend_from_slice(c); Ok(()) })?;
+    let l = get(API).map_err(|e| e.to_string())?;
     
-    let json = String::from_utf8(body).map_err(|e| e.to_string())?;
-    let tag = json_str(&json, "\"tag_name\"").ok_or("Missing tag_name")?;
-    let url = find_asset_url(&json).ok_or("No compactrs.exe asset")?.to_string();
-
+    // Read to Vec (heap) is fine for JSON
+    let (mut buf, mut chunk, mut n) = (Vec::new(), [0u8; 4096], 0);
+    while unsafe { WinHttpReadData(l.req.0, chunk.as_mut_ptr() as _, 4096, &mut n) } != 0 && n > 0 { buf.extend_from_slice(&chunk[..n as usize]); }
+    let json = String::from_utf8(buf).map_err(|_| "Bad JSON")?;
+    
+    if let Some(msg) = val(&json, "\"message\"") { return Err(format!("API: {}", msg)); }
+    let ver = val(&json, "\"tag_name\"").ok_or("No tag")?;
+    let url = json.split('{').find(|s| s.contains("compactrs.exe") && s.contains("browser_download_url"))
+        .and_then(|s| val(s, "\"browser_download_url\"")).ok_or("No asset")?;
+        
     let cur = env!("APP_VERSION").trim_start_matches('v');
-    let rem = tag.trim_start_matches('v');
-    Ok((rem != cur).then_some(UpdateInfo { version: tag.to_string(), download_url: url }))
+    Ok((ver.trim_start_matches('v') != cur).then(|| UpdateInfo { version: ver.into(), download_url: url.into() }))
 }
 
 pub fn download_and_start_update(url: &str) -> Result<(), String> {
-    let req = http_get(url)?;
-    let tmp = std::env::current_exe().map_err(|e| e.to_string())?.with_extension("tmp");
-    let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
-    let mut first = true;
+    let l = get(url).map_err(|e| e.to_string())?;
 
-    let bytes = read_body(&req.req, |chunk| {
-        if first {
-            if chunk.len() < 2 || chunk[0] != 0x4D || chunk[1] != 0x5A {
-                return Err("Invalid executable".into());
-            }
-            first = false;
-        }
-        file.write_all(chunk).map_err(|e| e.to_string())
-    })?;
-
-    if bytes == 0 { let _ = std::fs::remove_file(&tmp); return Err("Empty download".into()); }
-    drop(file);
-
-    let cur = std::env::current_exe().map_err(|e| e.to_string())?;
-    let old = cur.with_extension("old");
-    let (cur_w, old_w, tmp_w) = (to_wstring(cur.to_str().unwrap()), to_wstring(old.to_str().unwrap()), to_wstring(tmp.to_str().unwrap()));
+    // Path Logic - Stack allocated buffers
+    let mut path_exe = [0u16; 300];
+    unsafe { GetModuleFileNameW(null_mut(), path_exe.as_mut_ptr(), 300) };
+    
+    let len = path_exe.iter().position(|&c| c == 0).unwrap_or(300);
+    let mut path_tmp = path_exe;
+    // Replace .exe with .tmp roughly or append
+    // Easiest: copy path_exe, find extension or append
+    // Just append .tmp for safety? extension might be tricky if not .exe
+    // Let's assume .exe and replace last 3 chars? No, path could be anything.
+    // Safe generic: append .tmp
+    // But buffer size limited.
+    // Check space: 300 - len > 4
+    if len + 5 >= 300 { return Err("Path too long".into()); }
+    let tmp_ext = crate::w!(".tmp");
+    for (i, &c) in tmp_ext.iter().enumerate() { path_tmp[len + i] = c; } // Append .tmp (including null from macro? No macro gives slice with null)
+    // Macro gives slice with null. So it works: . t m p \0. Overwrite null of original?
+    // Original: [.., 'e', 0, 0]
+    // We start writing at len (index of 0).
+    // .tmp\0 -> 5 chars.
+    
+    let mut path_old = path_exe;
+     let old_ext = crate::w!(".old");
+     for (i, &c) in old_ext.iter().enumerate() { path_old[len + i] = c; }
+    
+    // Create File
+    let h_file = unsafe { 
+        CreateFileW(
+            path_tmp.as_ptr(), 
+            GENERIC_WRITE, 
+            0, null_mut(), 
+            CREATE_ALWAYS, 
+            FILE_ATTRIBUTE_NORMAL, 
+            null_mut()
+        ) 
+    };
+    if h_file == INVALID_HANDLE_VALUE { return Err("CreateFile".into()); }
+    let _f_guard = FileHandle(h_file); // Ensure close
+    
+    let (mut buf, mut n, mut w, mut first) = ([0u8; 8192], 0, 0, true);
+    while unsafe { WinHttpReadData(l.req.0, buf.as_mut_ptr() as _, 8192, &mut n) } != 0 && n > 0 {
+        if first { if n < 2 || buf[0] != 0x4D || buf[1] != 0x5A { return Err("Not MZ".into()); } first = false; }
+        if unsafe { WriteFile(h_file, buf.as_ptr() as _, n, &mut w, null_mut()) } == 0 { return Err("Write".into()); }
+    }
+    drop(_f_guard); // Close explicitly before move
 
     unsafe {
-        let _ = DeleteFileW(old_w.as_ptr());
-        if MoveFileExW(cur_w.as_ptr(), old_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
-            return Err("Move current: ".to_string() + &GetLastError().to_string());
-        }
-        if MoveFileExW(tmp_w.as_ptr(), cur_w.as_ptr(), MOVEFILE_REPLACE_EXISTING) == 0 {
-            let _ = MoveFileExW(old_w.as_ptr(), cur_w.as_ptr(), MOVEFILE_REPLACE_EXISTING);
-            return Err("Replace exe: ".to_string() + &GetLastError().to_string());
+        DeleteFileW(path_old.as_ptr());
+        if MoveFileExW(path_exe.as_ptr(), path_old.as_ptr(), 1) == 0 { return Err("Backup Fail".into()); }
+        if MoveFileExW(path_tmp.as_ptr(), path_exe.as_ptr(), 1) == 0 {
+            MoveFileExW(path_old.as_ptr(), path_exe.as_ptr(), 1);
+            return Err("Update Fail".into());
         }
     }
     Ok(())

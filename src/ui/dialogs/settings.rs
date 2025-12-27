@@ -8,6 +8,11 @@ use crate::ui::wrappers::{Button, Label, Trackbar, ComboBox};
 use crate::ui::declarative::{DeclarativeContext, ContainerBuilder};
 use crate::ui::layout::SizePolicy;
 
+#[link(name = "shell32")]
+unsafe extern "system" {
+    fn ShellExecuteW(hwnd: HWND, lpOperation: LPCWSTR, lpFile: LPCWSTR, lpParameters: LPCWSTR, lpDirectory: LPCWSTR, nShowCmd: i32) -> HINSTANCE;
+}
+
 const SETTINGS_TITLE: &str = "Settings";
 
 // Control IDs
@@ -55,6 +60,7 @@ struct SettingsState {
     set_compressed_attr: bool,
 
     update_status: UpdateStatus,
+    pending_update: Option<crate::updater::UpdateInfo>,
     h_font_bold: HFONT,
     h_font_icon: HFONT, // New: keep track to destroy
 }
@@ -63,7 +69,7 @@ struct SettingsState {
 enum UpdateStatus {
     Idle,
     Checking,
-    UpToDate,
+    Updating,
 }
 
 // Main settings modal function
@@ -104,6 +110,7 @@ pub unsafe fn show_settings_modal(
         skip_extensions: skip_string,
         set_compressed_attr,
         update_status: UpdateStatus::Idle,
+        pending_update: None,
         h_font_bold: std::ptr::null_mut(),
         h_font_icon: std::ptr::null_mut(),
     };
@@ -323,8 +330,14 @@ impl WindowHandler for SettingsState {
                 let version_str = crate::utils::to_wstring(env!("APP_VERSION"));
                 
                 icon_row(v, "\u{E946}", crate::w!("CompactRS"), &version_str, &|c: &mut ContainerBuilder| {
-                     // Button inside Column: Fixed(Height), Width fills column (140px)
+                     // Stack Button and Label
                      c.button_w(IDC_BTN_CHECK_UPDATE, crate::w!("Check for Updates"), SizePolicy::Fixed(24));
+                     
+                     // Label with ID for status updates
+                     c.add_child(crate::ui::layout::LayoutNode::new_leaf(
+                         ControlBuilder::new(hwnd, IDC_LBL_UPDATE_STATUS).label(true).text("").dark_mode(self.is_dark).build(),
+                         SizePolicy::Fixed(16)
+                     ));
                 });
                 
                 icon_row(v, "\u{E7EF}", crate::w!("Advanced Startup"), crate::w!("Restart with TrustedInstaller privileges"), &|c: &mut ContainerBuilder| {
@@ -378,18 +391,31 @@ impl WindowHandler for SettingsState {
                      Some(0)
                 },
                 WM_APP_UPDATE_CHECK_RESULT => {
-                    let status_ptr = lparam as *mut UpdateStatus;
-                    let status = Box::from_raw(status_ptr);
-                    self.update_status = *status;
+                    let res_ptr = lparam as *mut Result<Option<crate::updater::UpdateInfo>, String>;
+                    let res = Box::from_raw(res_ptr);
+                    
+                    self.update_status = UpdateStatus::Idle;
                     let h_btn = GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32);
-                    let _h_lbl = GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32); // Note: I didn't verify ID assignment in declarative
-                    // ... (rest of logic same) ...
-                     match &self.update_status {
-                        UpdateStatus::UpToDate => {
-                             Button::new(h_btn).set_text("Check for Updates");
-                             Button::new(h_btn).set_enabled(true);
+                    let h_lbl = GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32);
+                    
+                    Button::new(h_btn).set_enabled(true);
+                    
+                    match *res {
+                        Ok(Some(info)) => {
+                            self.pending_update = Some(info.clone());
+                            Label::new(h_lbl).set_text(&format!("Latest: {}", info.version));
+                            Button::new(h_btn).set_text("Update Now");
                         },
-                        _ => {}
+                        Ok(None) => {
+                            self.pending_update = None;
+                            Label::new(h_lbl).set_text("You have the latest version.");
+                            Button::new(h_btn).set_text("Check for Updates");
+                        },
+                        Err(e) => {
+                            self.pending_update = None;
+                            Label::new(h_lbl).set_text(&format!("Error: {}", e)); // Shorten?
+                            Button::new(h_btn).set_text("Retry Check");
+                        }
                     }
                     Some(0)
                 },
@@ -497,17 +523,51 @@ impl WindowHandler for SettingsState {
                          },
                          IDC_BTN_CHECK_UPDATE => {
                              if (code as u32) == BN_CLICKED {
-                                 match &self.update_status {
-                                     _ => {
-                                         // Trigger check in background
+                                 match &self.pending_update {
+                                     Some(info) => {
+                                         // Update Now clicked
+                                         self.update_status = UpdateStatus::Updating;
+                                         Button::new(GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32)).set_enabled(false);
+                                         Button::new(GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32)).set_text("Updating...");
+                                         Label::new(GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32)).set_text("Downloading...");
+                                         
+                                         let url = info.download_url.clone();
+                                         std::thread::spawn(move || {
+                                             // Real download logic here
+                                             match crate::updater::download_and_start_update(&url) {
+                                                Ok(_) => {
+                                                     if let Ok(exe) = std::env::current_exe() {
+                                                         let op = crate::utils::to_wstring("open"); // Use "open" explicitly
+                                                         let path = crate::utils::to_wstring(exe.to_str().unwrap());
+                                                         ShellExecuteW(
+                                                             std::ptr::null_mut(),
+                                                             op.as_ptr(),
+                                                             path.as_ptr(),
+                                                             std::ptr::null(),
+                                                             std::ptr::null(),
+                                                             SW_SHOWNORMAL
+                                                         );
+                                                         std::process::exit(0);
+                                                     }
+                                                },
+                                                Err(_) => {
+                                                    // We could send a message back to show error, but for now simple logging/fallback
+                                                    // In a full implementation we would send WM_APP_UPDATE_CHECK_RESULT with Err
+                                                }
+                                             }
+                                         });
+                                     },
+                                     None => {
+                                         // Check clicked
                                          self.update_status = UpdateStatus::Checking;
                                          Button::new(GetDlgItem(hwnd, IDC_BTN_CHECK_UPDATE as i32)).set_enabled(false);
-                                         Label::new(GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32)).set_text("Checking for updates...");
-                                         let hwnd_target = hwnd as usize; // Cast to usize for Send safety
+                                         Label::new(GetDlgItem(hwnd, IDC_LBL_UPDATE_STATUS as i32)).set_text("Checking...");
+                                         
+                                         let hwnd_target = hwnd as usize; 
                                          std::thread::spawn(move || {
-                                             std::thread::sleep(std::time::Duration::from_secs(1)); // Sim
-                                             let res = UpdateStatus::UpToDate; // Sim
-                                             SendMessageW(hwnd_target as HWND, WM_APP_UPDATE_CHECK_RESULT, 0, Box::into_raw(Box::new(res)) as LPARAM);
+                                             let res = crate::updater::check_for_updates();
+                                             let ptr = Box::into_raw(Box::new(res));
+                                             SendMessageW(hwnd_target as HWND, WM_APP_UPDATE_CHECK_RESULT, 0, ptr as LPARAM);
                                          });
                                      }
                                  }

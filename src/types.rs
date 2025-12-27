@@ -1428,7 +1428,19 @@ unsafe extern "system" {
         dwFlagsAndAttributes: u32,
         hTemplateFile: HANDLE
     ) -> HANDLE;
+    pub fn WriteFile(
+        hFile: HANDLE,
+        lpBuffer: *const c_void,
+        nNumberOfBytesToWrite: u32,
+        lpNumberOfBytesWritten: *mut u32,
+        lpOverlapped: *mut c_void
+    ) -> BOOL;
+}
+
+pub const CREATE_ALWAYS: u32 = 2;
     
+#[link(name = "kernel32")]
+unsafe extern "system" {
     pub fn DeviceIoControl(
         hDevice: HANDLE,
         dwIoControlCode: u32,
