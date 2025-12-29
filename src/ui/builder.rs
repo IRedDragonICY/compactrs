@@ -52,7 +52,7 @@ impl<'a> ControlBuilder<'a> {
     // --- Presets ---
     pub fn button(mut self) -> Self {
         self.class_name = Cow::Borrowed(w!("BUTTON"));
-        self.style |= BS_PUSHBUTTON as u32;
+        self.style |= (BS_PUSHBUTTON as u32) | WS_TABSTOP;
         self
     }
 

@@ -1093,6 +1093,11 @@ unsafe extern "system" fn listview_subclass_proc(
     let main_hwnd = dwrefdata as HWND;
     let is_dark = crate::ui::theme::is_app_dark_mode(main_hwnd);
 
+    // Centralized Shortcut Handling (DRY)
+    if crate::ui::input::handle_subclass_dispatch(hwnd, umsg, wparam) {
+        return 0;
+    }
+
     if umsg == WM_NOTIFY {
             // SAFETY: lparam points to NMHDR struct provided by the system.
             let nmhdr = &*(lparam as *const NMHDR);

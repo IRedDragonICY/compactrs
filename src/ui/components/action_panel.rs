@@ -115,30 +115,12 @@ impl ActionPanel {
 
 impl Component for ActionPanel {
     unsafe fn create(&mut self, parent: HWND) -> Result<(), String> { unsafe {
-        let instance = GetModuleHandleW(std::ptr::null());
-        
-        // Register Class with custom procedure
-        let class_name = crate::w!("CompactRsActionPanel");
-        let mut wc: WNDCLASSW = std::mem::zeroed();
-        wc.lpfnWndProc = Some(action_panel_proc);
-        wc.hInstance = instance;
-        wc.lpszClassName = class_name.as_ptr();
-        wc.style = CS_HREDRAW | CS_VREDRAW;
-        wc.hbrBackground = std::ptr::null_mut(); 
-        
-        RegisterClassW(&wc);
-        
-        self.hwnd_panel = CreateWindowExW(
-            0,
-            class_name.as_ptr(),
-            std::ptr::null(),
-            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 
-            0, 0, 100, 60,
+        // Use centralized Panel creation
+        self.hwnd_panel = crate::ui::components::panel::Panel::create(
             parent,
-            std::ptr::null_mut(),
-            instance,
-            std::ptr::null_mut(),
-        );
+            "CompactRsActionPanel",
+            0, 0, 100, 60
+        )?;
 
         let is_dark = crate::ui::theme::is_system_dark_mode();
         let font = crate::ui::theme::get_app_font();
@@ -264,61 +246,13 @@ impl Component for ActionPanel {
             crate::ui::theme::apply_theme(self.hwnd_lbl_algo, crate::ui::theme::ControlType::Window, is_dark);
             
             // Store theme prop for WndProc
-            let prop_val = if is_dark { 2 } else { 1 };
-            SetPropW(self.hwnd_panel, crate::w!("CompactRs_Theme").as_ptr(), prop_val as isize as _);
-
-            InvalidateRect(self.hwnd_panel, std::ptr::null(), 1);
+            crate::ui::components::panel::Panel::update_theme(self.hwnd_panel, is_dark);
         }
     }
 }
 
 // Window Procedure for ActionPanel
-unsafe extern "system" fn action_panel_proc(hwnd: HWND, umsg: u32, wparam: usize, lparam: isize) -> isize {
-    match umsg {
-        WM_COMMAND | WM_DRAWITEM | WM_NOTIFY => {
-             // Forward notifications to parent
-             let parent = GetParent(hwnd);
-             if parent != std::ptr::null_mut() {
-                 SendMessageW(parent, umsg, wparam, lparam);
-             }
-             if umsg == WM_DRAWITEM {
-                 return 1; // Handled
-             }
-             return 0;
-        },
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => {
-            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
-            let is_dark = if prop_val != 0 { prop_val == 2 } else { crate::ui::theme::is_system_dark_mode() };
 
-            if let Some(res) = crate::ui::theme::handle_standard_colors(hwnd, umsg, wparam, is_dark) {
-                return res as isize;
-            }
-        },
-        WM_ERASEBKGND => {
-            let hdc = wparam as HDC;
-            let mut rect: RECT = std::mem::zeroed();
-            GetClientRect(hwnd, &mut rect);
-            
-            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
-            let is_dark = if prop_val != 0 { prop_val == 2 } else { crate::ui::theme::is_system_dark_mode() };
-
-            let brush = if is_dark {
-                crate::ui::theme::get_dark_brush()
-            } else {
-                 (COLOR_WINDOW + 1) as HBRUSH
-            };
-            
-            unsafe { FillRect(hdc, &rect, brush); }
-            return 1;
-        },
-        WM_DESTROY => {
-            RemovePropW(hwnd, crate::w!("CompactRs_Theme").as_ptr());
-        },
-        _ => {}
-    }
-    
-    DefWindowProcW(hwnd, umsg, wparam, lparam)
-}
 
 impl ActionPanel {
     pub unsafe fn refresh_layout(&self) {

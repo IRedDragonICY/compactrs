@@ -49,6 +49,12 @@ unsafe extern "system" fn theme_subclass_proc(
         // For standard controls, theming is often done by the parent responding to WM_CTLCOLOR*.
         // BUT, if we use "Visual Styles" (SetWindowTheme(hwnd, mode)), that's on the child.
         
+        WM_KEYDOWN => {
+            if unsafe { crate::ui::input::handle_subclass_dispatch(hwnd, msg, wparam) } {
+                return 0;
+            }
+            unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+        }
         _ => unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) },
     }
 }

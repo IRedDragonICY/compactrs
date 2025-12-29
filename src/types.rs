@@ -35,7 +35,6 @@ pub use std::ffi::c_void;
 
 pub type WNDPROC = Option<unsafe extern "system" fn(hwnd: HWND, uMsg: u32, wParam: WPARAM, lParam: LPARAM) -> LRESULT>;
 
-// ...
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -152,6 +151,9 @@ pub struct SYSTEMTIME {
 }
 
 // Common Constants needed for UI
+pub const WS_EX_LAYERED: u32 = 0x00080000;
+pub const WS_EX_CONTROLPARENT: u32 = 0x00010000;
+pub const WS_EX_TOOLWINDOW: u32 = 0x00000080;
 pub const WS_OVERLAPPED: u32 = 0x00000000;
 pub const WS_CAPTION: u32 = 0x00C00000;
 pub const WS_SYSMENU: u32 = 0x00080000;
@@ -176,6 +178,7 @@ pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_SIZE: u32 = 0x0005;
 pub const WM_PAINT: u32 = 0x000F;
 pub const WM_CLOSE: u32 = 0x0010;
+pub const WM_KEYDOWN: u32 = 0x0100;
 pub const WM_CHAR: u32 = 0x0102;
 pub const WM_COMMAND: u32 = 0x0111;
 pub const WM_CTLCOLORSTATIC: u32 = 0x0138;
@@ -432,6 +435,7 @@ pub const WM_SETFONT: u32 = 0x0030;
 pub const WM_CTLCOLORBTN: u32 = 0x0135;
 pub const WM_CTLCOLORDLG: u32 = 0x0136;
 pub const WM_CTLCOLOREDIT: u32 = 0x0133;
+pub const WM_CTLCOLORLISTBOX: u32 = 0x0134;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_THEMECHANGED: u32 = 0x031A;
 
@@ -596,6 +600,7 @@ pub const WM_HSCROLL: u32 = 0x0114;
 pub const WM_GETMINMAXINFO: u32 = 0x0024;
 pub const WM_INITDIALOG: u32 = 0x0110;
 pub const WM_APP_UPDATE_CHECK_RESULT: u32 = WM_USER + 1; // Assuming WM_USER is defined or I need to define it.
+pub const WM_APP_SHORTCUT: u32 = WM_USER + 900;
 pub const WM_USER: u32 = 0x0400;
 
 // Button, ComboBox, Edit Notifications & Styles

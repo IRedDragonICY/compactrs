@@ -9,6 +9,7 @@ pub mod status_bar;
 pub mod action_panel;
 pub mod header_panel;
 pub mod search_panel; // New
+pub mod panel;
 
 pub use base::Component;
 pub use file_list::FileListView;

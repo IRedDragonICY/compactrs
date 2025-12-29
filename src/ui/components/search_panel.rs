@@ -91,36 +91,14 @@ impl SearchPanel {
 
 impl Component for SearchPanel {
     unsafe fn create(&mut self, parent: HWND) -> Result<(), String> { unsafe {
-        let instance = GetModuleHandleW(std::ptr::null_mut());
+        let _instance = GetModuleHandleW(std::ptr::null_mut());
         
-        // Create container window with custom class for message handling
-        let class_name = w!("CompactRsSearchPanel");
-        
-        // Register class
-        let mut wc: WNDCLASSW = std::mem::zeroed();
-        wc.lpfnWndProc = Some(search_panel_proc);
-        wc.hInstance = instance;
-        wc.lpszClassName = class_name.as_ptr();
-        wc.style = CS_HREDRAW | CS_VREDRAW;
-        wc.hbrBackground = if crate::ui::theme::is_system_dark_mode() {
-            crate::ui::theme::get_dark_brush()
-        } else {
-             (COLOR_WINDOW + 1) as HBRUSH
-        };
-        
-        RegisterClassW(&wc);
-
-        self.hwnd_panel = CreateWindowExW(
-            0,
-            class_name.as_ptr(), 
-            std::ptr::null_mut(),
-            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
-            0, 0, 100, 100, // Size set later in on_resize
+        // Use centralized Panel creation
+        self.hwnd_panel = crate::ui::components::panel::Panel::create(
             parent,
-            std::ptr::null_mut(),
-            instance,
-            std::ptr::null_mut(),
-        );
+            "CompactRsSearchPanel",
+            0, 0, 100, 100
+        )?;
 
         let is_dark = crate::ui::theme::is_system_dark_mode();
         let font = crate::ui::theme::get_app_font();
@@ -242,11 +220,9 @@ impl Component for SearchPanel {
         
         // Store theme state in property so WndProc can access it
         // 1 = Light, 2 = Dark. This distinguishes "Explicit Light" from "Not Set" (0).
-        let prop_val = if is_dark { 2 } else { 1 };
-        SetPropW(self.hwnd_panel, crate::w!("CompactRs_Theme").as_ptr(), prop_val as isize as _);
-
-        // Update: Custom class handles it now. Force repaint.
-        InvalidateRect(self.hwnd_panel, std::ptr::null(), 1);
+        unsafe {
+            crate::ui::components::panel::Panel::update_theme(self.hwnd_panel, is_dark);
+        }
     }
 }
 
@@ -278,59 +254,4 @@ impl SearchPanel {
 }
 
 // Window Procedure for SearchPanel
-unsafe extern "system" fn search_panel_proc(hwnd: HWND, umsg: u32, wparam: usize, lparam: isize) -> isize {
-    match umsg {
-        WM_COMMAND => {
-             // Forward notifications (Edit change, Combo select) to parent (Main Window)
-             let parent = GetParent(hwnd);
-             if parent != std::ptr::null_mut() {
-                 SendMessageW(parent, umsg, wparam, lparam);
-             }
-             return 0;
-        },
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT => {
-            // Check property first (1=Light, 2=Dark), fallback to system
-            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
-            let is_dark = if prop_val != 0 {
-                prop_val == 2
-            } else {
-                crate::ui::theme::is_system_dark_mode()
-            };
 
-            // Use centralized handler
-            if let Some(res) = crate::ui::theme::handle_standard_colors(hwnd, umsg, wparam, is_dark) {
-                return res as isize;
-            }
-        },
-        WM_ERASEBKGND => {
-            // Handle background erasure to prevent white flash
-            let hdc = wparam as HDC;
-            let mut rect: RECT = std::mem::zeroed();
-            GetClientRect(hwnd, &mut rect);
-            
-            let prop_val = GetPropW(hwnd, crate::w!("CompactRs_Theme").as_ptr()) as usize;
-            let is_dark = if prop_val != 0 {
-                prop_val == 2
-            } else {
-                crate::ui::theme::is_system_dark_mode()
-            };
-
-            let brush = if is_dark {
-                crate::ui::theme::get_dark_brush()
-            } else {
-             (COLOR_WINDOW + 1) as HBRUSH
-            };
-            
-            unsafe {
-                FillRect(hdc, &rect, brush);
-            }
-            return 1;
-        },
-        WM_DESTROY => {
-            RemovePropW(hwnd, crate::w!("CompactRs_Theme").as_ptr());
-        },
-        _ => {}
-    }
-    
-    DefWindowProcW(hwnd, umsg, wparam, lparam)
-}

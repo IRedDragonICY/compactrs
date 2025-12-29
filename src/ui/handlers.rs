@@ -622,21 +622,7 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
     }
 }
 
-pub unsafe fn on_list_keydown(st: &mut AppState, _hwnd: HWND, key: u16) {
-    if key == VK_DELETE as u16 {
-        on_remove_selected(st);
-    } else if key == 0x41 { // 'A' key
-        let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
-        if ctrl_pressed {
-             if let Some(ctrls) = &st.controls {
-                 let count = ctrls.file_list.get_item_count();
-                 for i in 0..count {
-                     ctrls.file_list.set_selected(i, true);
-                 }
-             }
-        }
-    }
-}
+
 
 pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) -> bool {
     if row < 0 { return false; } 
@@ -830,7 +816,7 @@ pub unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM)
 
 // --- Drag and Drop / Clipboard Handler ---
 
-pub unsafe fn process_hdrop(_hwnd: HWND, hdrop: HDROP, st: &mut AppState) {
+pub unsafe fn process_hdrop(_hwnd: HWND, hdrop: HDROP, st: &mut AppState, should_finish: bool) {
     let count = DragQueryFileW(hdrop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
     let mut paths = Vec::new();
     let mut buffer = [0u16; 1024];
@@ -842,7 +828,12 @@ pub unsafe fn process_hdrop(_hwnd: HWND, hdrop: HDROP, st: &mut AppState) {
             paths.push(s);
         }
     }
-    DragFinish(hdrop);
+    
+    // Only call DragFinish if we own the handle (WM_DROPFILES)
+    if should_finish {
+        DragFinish(hdrop);
+    }
+    
     st.ingest_paths(paths);
     update_process_button_state(st);
 }
@@ -854,7 +845,8 @@ pub unsafe fn process_clipboard(hwnd: HWND, st: &mut AppState) {
     if IsClipboardFormatAvailable(15) != 0 {
          let hdrop = GetClipboardData(15) as HDROP;
          if !hdrop.is_null() {
-             process_hdrop(hwnd, hdrop, st);
+             // Do NOT finish hdrop from clipboard!
+             process_hdrop(hwnd, hdrop, st, false);
          }
     } else if IsClipboardFormatAvailable(13) != 0 {
         // CF_UNICODETEXT = 13

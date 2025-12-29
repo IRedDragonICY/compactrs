@@ -31,6 +31,10 @@ unsafe extern "system" fn edit_subclass_proc(hwnd: HWND, msg: u32, wparam: WPARA
         return CallWindowProcW(Some(std::mem::transmute(old_proc)), hwnd, msg, wparam, lparam);
     }
 
+    if crate::ui::input::handle_subclass_dispatch(hwnd, msg, wparam as usize) {
+        return 0;
+    }
+
     if msg == WM_CHAR {
         // Ctrl+Backspace produces 0x7F (127)
         if wparam == 0x7F {

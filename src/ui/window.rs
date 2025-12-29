@@ -137,18 +137,17 @@ impl WindowHandler for AppState {
         unsafe {
             self.taskbar = Some(TaskbarProgress::new(hwnd));
             
-            // 1. StatusBar
-            let mut status_bar = StatusBar::new(StatusBarIds {
-                label_id: IDC_STATIC_TEXT,
-                progress_id: IDC_PROGRESS_BAR,
+            // 1. HeaderPanel (Tab Index 0)
+            let mut header_panel = HeaderPanel::new(HeaderPanelIds {
+                btn_settings: IDC_BTN_SETTINGS,
+                btn_about: IDC_BTN_ABOUT,
+                btn_shortcuts: IDC_BTN_SHORTCUTS,
+                btn_console: IDC_BTN_CONSOLE,
+                btn_watcher: crate::ui::controls::IDC_BTN_WATCHER,
             });
-            let _ = status_bar.create(hwnd);
-            
-            // 2. FileListView
-            // Y position will be adjusted in on_resize to account for SearchPanel
-            let file_list = FileListView::new(hwnd, 10, 100, 860, 320, IDC_BATCH_LIST);
-            
-            // 5. Search Panel
+            let _ = header_panel.create(hwnd);
+
+            // 2. Search Panel (Tab Index 1)
             let search_ids = SearchPanelIds {
                 edit_search: IDC_SEARCH_EDIT,
                 combo_filter_col: IDC_COMBO_FILTER_COL,
@@ -163,8 +162,12 @@ impl WindowHandler for AppState {
             };
             let mut search_panel = SearchPanel::new(search_ids);
             let _ = search_panel.create(hwnd);
+
+            // 3. FileListView (Tab Index 2)
+            // Y position will be adjusted in on_resize to account for SearchPanel
+            let file_list = FileListView::new(hwnd, 10, 100, 860, 320, IDC_BATCH_LIST);
             
-            // 3. ActionPanel
+            // 4. ActionPanel (Tab Index 3)
             // Initial layout Y will be set during resize, but we need a value.
             let mut action_panel = ActionPanel::new(ActionPanelIds {
                 btn_files: IDC_BTN_ADD_FILES,
@@ -189,15 +192,13 @@ impl WindowHandler for AppState {
             });
             let _ = action_panel.create(hwnd);
             
-            // 4. HeaderPanel
-            let mut header_panel = HeaderPanel::new(HeaderPanelIds {
-                btn_settings: IDC_BTN_SETTINGS,
-                btn_about: IDC_BTN_ABOUT,
-                btn_shortcuts: IDC_BTN_SHORTCUTS,
-                btn_console: IDC_BTN_CONSOLE,
-                btn_watcher: crate::ui::controls::IDC_BTN_WATCHER,
+            // 5. StatusBar (Tab Index 4)
+            let mut status_bar = StatusBar::new(StatusBarIds {
+                label_id: IDC_STATIC_TEXT,
+                progress_id: IDC_PROGRESS_BAR,
             });
-            let _ = header_panel.create(hwnd);
+            let _ = status_bar.create(hwnd);
+
             // Disable cancel and pause buttons initially
             crate::ui::wrappers::Button::new(action_panel.cancel_hwnd()).set_enabled(false);
             crate::ui::wrappers::Button::new(action_panel.pause_hwnd()).set_enabled(false);
@@ -335,7 +336,7 @@ impl WindowHandler for AppState {
                 },
                 WM_COPYDATA => Some(self.handle_copy_data(hwnd, lparam)),
                 WM_DROPFILES => {
-                    handlers::process_hdrop(hwnd, wparam as _, self);
+                    handlers::process_hdrop(hwnd, wparam as _, self, true);
                     Some(0)
                 },
                 // FIX: Use WM_SETTINGCHANGE to ensure it matches the import, not a variable capture
@@ -353,7 +354,13 @@ impl WindowHandler for AppState {
                 },
                 WM_NOTIFY => Some(self.handle_notify(hwnd, lparam)),
                 WM_CONTEXTMENU => Some(self.handle_context_menu(hwnd, wparam)),
-                0x0100 => Some(self.handle_keydown(hwnd, wparam)), // WM_KEYDOWN
+                WM_KEYDOWN => Some(self.handle_keydown(hwnd, wparam, hwnd)),
+                // WM_APP_SHORTCUT = WM_USER + 900
+                1924 => {
+                    // Re-use handle_keydown logic as it does exactly what we want (resolves key -> action)
+                    let source_hwnd = lparam as HWND;
+                    Some(self.handle_keydown(hwnd, wparam, source_hwnd))
+                },
                 WM_LBUTTONDOWN | crate::types::WM_LBUTTONDBLCLK => {
                     // Clicking on the window background (outside listview) deselects all
                     if let Some(ctrls) = &self.controls {
@@ -1297,9 +1304,6 @@ impl AppState {
                 if nmhdr.code == NM_CLICK || nmhdr.code == NM_DBLCLK {
                     let nmia = &*(lparam as *const NMITEMACTIVATE);
                     handlers::on_list_click(self, hwnd, nmia.iItem, nmia.iSubItem, nmhdr.code);
-                } else if nmhdr.code == LVN_KEYDOWN {
-                    let nmkd = &*(lparam as *const NMLVKEYDOWN);
-                    handlers::on_list_keydown(self, hwnd, nmkd.wVKey as u16);
                 } else if nmhdr.code == LVN_COLUMNCLICK {
                     handlers::on_column_click(self, lparam);
                 } else if nmhdr.code == LVN_ITEMCHANGED {
@@ -1333,32 +1337,11 @@ impl AppState {
         }
     }
 
-    unsafe fn handle_keydown(&mut self, hwnd: HWND, wparam: WPARAM) -> LRESULT {
+    unsafe fn handle_keydown(&mut self, hwnd: HWND, wparam: WPARAM, source_hwnd: HWND) -> LRESULT {
         unsafe {
-            let vk = wparam as u16;
-            let ctrl_pressed = (GetKeyState(VK_CONTROL as i32) as u16 & 0x8000) != 0;
-            let shift_pressed = (GetKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
-
-            if ctrl_pressed {
-                match vk {
-                    0x56 => handlers::process_clipboard(hwnd, self), // V - Paste
-                    0x4F => { // O - Open
-                        if shift_pressed { handlers::on_add_folder(self); } 
-                        else { handlers::on_add_files(self); }
-                    },
-                    0x41 => { // A - Select All
-                         if let Some(ctrls) = &self.controls {
-                             let count = ctrls.file_list.get_item_count();
-                             for i in 0..count {
-                                 ctrls.file_list.set_selected(i, true);
-                             }
-                         }
-                    },
-                    _ => {}
-                }
-            } else if vk == VK_DELETE as u16 {
-                handlers::on_remove_selected(self);
-            }
+            use crate::ui::input::{resolve_key_action, handle_global_shortcut};
+            let action = resolve_key_action(wparam as i32);
+            handle_global_shortcut(hwnd, self, action, source_hwnd);
             0
         }
     }
