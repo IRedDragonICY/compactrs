@@ -274,6 +274,7 @@ pub const CDDS_ITEM: u32 = 0x00010000;
 pub const CDDS_ITEMPREPAINT: u32 = CDDS_ITEM | CDDS_PREPAINT;
 pub const CDRF_NEWFONT: u32 = 0x00000002;
 pub const CDRF_NOTIFYITEMDRAW: u32 = 0x00000020;
+pub const CDRF_SKIPDEFAULT: u32 = 0x00000004;
 pub const CDDS_SUBITEM: u32 = 0x00020000;
 
 // ListView Messages & Structs

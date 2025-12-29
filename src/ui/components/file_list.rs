@@ -80,7 +80,7 @@ impl FileListView {
             0,
             class_name.as_ptr(),
             empty_str.as_ptr(),
-            WS_VISIBLE | WS_CHILD | WS_BORDER | LVS_REPORT | LVS_SHOWSELALWAYS,
+            WS_VISIBLE | WS_CHILD | LVS_REPORT | LVS_SHOWSELALWAYS,
             x,
             y,
             w,
@@ -453,34 +453,9 @@ impl FileListView {
     /// * `is_dark` - Whether to apply dark mode theme
     pub fn set_theme(&self, is_dark: bool) {
         unsafe {
-            crate::ui::theme::allow_dark_mode_for_window(self.hwnd, is_dark);
-
-            // Apply theme (ItemsView/Explorer)
-            if is_dark {
-                crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::ItemsView, true);
-            } else {
-                crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::List, false);
-            }
-
-            // Set colors
-            let (bg_color, text_color) = if is_dark {
-                (crate::ui::theme::COLOR_LIST_BG_DARK, crate::ui::theme::COLOR_LIST_TEXT_DARK)
-            } else {
-                (crate::ui::theme::COLOR_LIST_BG_LIGHT, crate::ui::theme::COLOR_LIST_TEXT_LIGHT)
-            };
-
-            SendMessageW(self.hwnd, LVM_SETBKCOLOR, 0, bg_color as isize);
-            SendMessageW(self.hwnd, LVM_SETTEXTBKCOLOR, 0, bg_color as isize);
-            SendMessageW(self.hwnd, LVM_SETTEXTCOLOR, 0, text_color as isize);
-
-            // Get and theme the header control
-            let header = SendMessageW(self.hwnd, LVM_GETHEADER, 0, 0) as HWND;
-
-            if header != std::ptr::null_mut() {
-                crate::ui::theme::allow_dark_mode_for_window(header, is_dark);
-                crate::ui::theme::apply_theme(header, crate::ui::theme::ControlType::Header, is_dark);
-            }
-
+            // Use centralized flat theme helper (no borders, no grid lines)
+            crate::ui::theme::apply_flat_listview_theme(self.hwnd, is_dark);
+            
             // Force redraw
             let _ = InvalidateRect(self.hwnd, std::ptr::null_mut(), 1);
         }
@@ -1113,23 +1088,10 @@ unsafe extern "system" fn listview_subclass_proc(
             let is_from_header = nmhdr.hwndFrom == header_hwnd;
 
             if is_from_header {
-                // ========================================================
-                // Header Control Custom Draw (dark mode text)
-                // ========================================================
-                if is_dark {
-                    let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
-
-                    if nmcd.dwDrawStage == CDDS_PREPAINT {
-                        // Request item-level notifications for header items
-                        return CDRF_NOTIFYITEMDRAW as LRESULT;
-                    }
-
-                    if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
-                        // Set text color to white for header items in dark mode
-                        SetTextColor(nmcd.hdc, crate::ui::theme::COLOR_HEADER_TEXT_DARK);
-                        SetBkMode(nmcd.hdc, TRANSPARENT as i32);
-                        return CDRF_NEWFONT as LRESULT;
-                    }
+                // Use centralized header custom draw helper
+                let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
+                if let Some(result) = crate::ui::theme::handle_flat_header_customdraw(header_hwnd, nmcd, is_dark) {
+                    return result;
                 }
             } else if nmhdr.hwndFrom == hwnd {
                 // ========================================================

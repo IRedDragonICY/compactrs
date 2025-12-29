@@ -113,7 +113,7 @@ impl WindowHandler for WatcherState {
             // 1. List View
             let h_list = builder(IDC_LIST_WATCHERS)
                 .listview()
-                .style(WS_BORDER | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS)
+                .style(LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS)
                 .build();
             
             let lv = ListView::new(h_list);

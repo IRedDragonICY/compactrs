@@ -141,6 +141,181 @@ pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) 
     }
 }
 
+/// Applies flat (borderless, no grid lines) theme to a ListView control.
+/// This is the centralized helper for modern Windows 11 style ListViews.
+/// Both FileListView and wrapper ListViews should use this.
+pub unsafe fn apply_flat_listview_theme(hwnd: HWND, is_dark: bool) {
+    // Enable dark mode for the window FIRST
+    allow_dark_mode_for_window(hwnd, is_dark);
+    
+    // Remove borders for flat look
+    let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+    SetWindowLongW(hwnd, GWL_STYLE, (style & !WS_BORDER) as i32);
+    
+    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+    SetWindowLongW(hwnd, GWL_EXSTYLE, (ex_style & !(WS_EX_CLIENTEDGE | WS_EX_STATICEDGE)) as i32);
+    
+    // Force frame update
+    SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, 
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    
+    // Use empty theme to disable visual styles that add grid lines/dividers
+    // This gives us a clean flat look without column separators
+    let empty = crate::w!("");
+    SetWindowTheme(hwnd, empty.as_ptr(), std::ptr::null());
+    
+    // Apply colors
+    let (bg, text) = if is_dark {
+        (COLOR_LIST_BG_DARK, COLOR_LIST_TEXT_DARK)
+    } else {
+        (COLOR_LIST_BG_LIGHT, COLOR_LIST_TEXT_LIGHT)
+    };
+    
+    SendMessageW(hwnd, LVM_SETBKCOLOR, 0, bg as isize);
+    SendMessageW(hwnd, LVM_SETTEXTCOLOR, 0, text as isize);
+    SendMessageW(hwnd, LVM_SETTEXTBKCOLOR, 0, bg as isize);
+    
+    // Apply flat theme to header (uses custom draw for no dividers)
+    let h_header = SendMessageW(hwnd, LVM_GETHEADER, 0, 0) as HWND;
+    if !h_header.is_null() {
+        allow_dark_mode_for_window(h_header, is_dark);
+        SetWindowTheme(h_header, empty.as_ptr(), std::ptr::null());
+        InvalidateRect(h_header, std::ptr::null(), 1);
+    }
+}
+
+/// Constants for header custom draw
+const CDDS_POSTPAINT: u32 = 0x00000002;
+const CDRF_NOTIFYPOSTPAINT: u32 = 0x00000010;
+const HDM_GETITEMW: u32 = 0x1200 + 11;
+const HDI_TEXT: u32 = 0x0002;
+const DT_FLAGS: u32 = 0x20 | 0x4 | 0x8000; // DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS
+
+#[repr(C)]
+struct HDITEMW {
+    mask: u32, cxy: i32, psz_text: *mut u16, hbm: isize,
+    cch_text_max: i32, fmt: i32, l_param: isize, i_image: i32,
+    i_order: i32, type_: u32, pv_filter: *mut std::ffi::c_void, state: u32,
+}
+
+/// Handles NM_CUSTOMDRAW for header controls to achieve flat look without dividers.
+/// Returns Some(LRESULT) if handled, None if should use default processing.
+/// This is the centralized helper - both FileListView and wrapper ListViews use this.
+pub unsafe fn handle_flat_header_customdraw(
+    header_hwnd: HWND,
+    nmcd: &mut NMCUSTOMDRAW,
+    is_dark: bool,
+) -> Option<LRESULT> {
+    let bg_color = if is_dark { COLOR_LIST_BG_DARK } else { COLOR_LIST_BG_LIGHT };
+    
+    if nmcd.dwDrawStage == CDDS_PREPAINT {
+        return Some((CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT) as LRESULT);
+    }
+    
+    if nmcd.dwDrawStage == CDDS_POSTPAINT {
+        // Cover bottom border
+        let mut header_rect: RECT = std::mem::zeroed();
+        GetClientRect(header_hwnd, &mut header_rect);
+        
+        let bottom_rect = RECT {
+            left: header_rect.left,
+            top: header_rect.bottom - 2,
+            right: header_rect.right,
+            bottom: header_rect.bottom,
+        };
+        
+        let brush = CreateSolidBrush(bg_color);
+        FillRect(nmcd.hdc, &bottom_rect, brush);
+        DeleteObject(brush as *mut std::ffi::c_void);
+        return Some(CDRF_SKIPDEFAULT as LRESULT);
+    }
+    
+    if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
+        let hdc = nmcd.hdc;
+        let rc = nmcd.rc;
+        
+        // Fill background
+        let brush = CreateSolidBrush(bg_color);
+        FillRect(hdc, &rc, brush);
+        DeleteObject(brush as *mut std::ffi::c_void);
+        
+        // Get header text
+        let mut text_buf = [0u16; 64];
+        let mut hdi: HDITEMW = std::mem::zeroed();
+        hdi.mask = HDI_TEXT;
+        hdi.psz_text = text_buf.as_mut_ptr();
+        hdi.cch_text_max = 64;
+        SendMessageW(header_hwnd, HDM_GETITEMW, nmcd.dwItemSpec, &mut hdi as *mut _ as isize);
+        
+        // Set colors and draw text
+        let text_color = if is_dark { COLOR_HEADER_TEXT_DARK } else { COLOR_LIST_TEXT_LIGHT };
+        SetTextColor(hdc, text_color);
+        SetBkMode(hdc, TRANSPARENT as i32);
+        
+        let mut text_rc = rc;
+        text_rc.left += 8;
+        text_rc.right -= 4;
+        
+        let text_len = text_buf.iter().position(|&c| c == 0).unwrap_or(0) as i32;
+        DrawTextW(hdc, text_buf.as_ptr(), text_len, &mut text_rc, DT_FLAGS);
+        
+        return Some(CDRF_SKIPDEFAULT as LRESULT);
+    }
+    
+    None
+}
+
+/// Handles NM_CUSTOMDRAW for ListView body to cover column divider lines.
+/// Call this AFTER default processing to paint over the theme's dividers.
+/// Returns Some(LRESULT) if handled (POSTPAINT), None otherwise.
+pub unsafe fn handle_listview_column_dividers(
+    listview_hwnd: HWND,
+    nmcd: &NMCUSTOMDRAW,
+    is_dark: bool,
+) -> Option<LRESULT> {
+    // Only handle POSTPAINT to draw over theme's column dividers
+    if nmcd.dwDrawStage == CDDS_POSTPAINT {
+        let bg_color = if is_dark { COLOR_LIST_BG_DARK } else { COLOR_LIST_BG_LIGHT };
+        let brush = CreateSolidBrush(bg_color);
+        
+        let h_header = SendMessageW(listview_hwnd, LVM_GETHEADER, 0, 0) as HWND;
+        if !h_header.is_null() {
+            let col_count = SendMessageW(h_header, 0x1200, 0, 0) as i32; // HDM_GETITEMCOUNT
+            
+            // Get ListView client rect
+            let mut lv_rect: RECT = std::mem::zeroed();
+            GetClientRect(listview_hwnd, &mut lv_rect);
+            
+            // Get header height to know where ListView body starts
+            let mut header_rect: RECT = std::mem::zeroed();
+            GetWindowRect(h_header, &mut header_rect);
+            let header_height = header_rect.bottom - header_rect.top;
+            
+            // Draw vertical bars at each column boundary to cover dividers
+            let mut x_pos = 0i32;
+            for col in 0..col_count {
+                // Get column width using LVM_GETCOLUMNWIDTH
+                let col_width = SendMessageW(listview_hwnd, 0x101D, col as usize, 0) as i32;
+                x_pos += col_width;
+                
+                // Draw a 2-pixel wide bar at the column boundary
+                let divider_rect = RECT {
+                    left: x_pos - 1,
+                    top: header_height,
+                    right: x_pos + 1,
+                    bottom: lv_rect.bottom,
+                };
+                FillRect(nmcd.hdc, &divider_rect, brush);
+            }
+        }
+        
+        DeleteObject(brush as *mut std::ffi::c_void);
+        return Some(0);
+    }
+    
+    None
+}
+
 /// Recursively applies theme to child controls.
 pub unsafe fn apply_theme_recursive(parent: HWND, is_dark: bool) {
     let mut child = GetWindow(parent, GW_CHILD);
@@ -160,6 +335,17 @@ unsafe fn apply_theme_to_child(hwnd: HWND, is_dark: bool) {
      let len = GetClassNameW(hwnd, name_buf.as_mut_ptr(), 256);
      let class_name = String::from_utf16_lossy(&name_buf[..len as usize]).to_lowercase();
      
+     // Special handling for ListView - use flat theme helper
+     if class_name == "syslistview32" {
+         apply_flat_listview_theme(hwnd, is_dark);
+         return;
+     }
+     
+     // Skip header - already handled by apply_flat_listview_theme
+     if class_name == "sysheader32" {
+         return;
+     }
+     
      let ctype = if class_name == "button" {
          let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
          let bs_typ = style & 0xF; 
@@ -174,10 +360,6 @@ unsafe fn apply_theme_to_child(hwnd: HWND, is_dark: bool) {
          }
      } else if class_name == "combobox" {
          ControlType::ComboBox
-     } else if class_name == "syslistview32" {
-         ControlType::List
-     } else if class_name == "sysheader32" {
-         ControlType::Header
      } else if class_name == "msctls_trackbar32" {
          ControlType::Trackbar
      } else if class_name == "edit" {

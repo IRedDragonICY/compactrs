@@ -208,36 +208,8 @@ impl ListView {
     }
 
     pub fn apply_theme(&self, is_dark: bool) {
-         unsafe { 
-             crate::ui::theme::allow_dark_mode_for_window(self.hwnd, is_dark);
-
-             // Apply theme (ItemsView/Explorer) matching FileListView logic
-             if is_dark {
-                 crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::ItemsView, true);
-             } else {
-                 crate::ui::theme::apply_theme(self.hwnd, crate::ui::theme::ControlType::List, false);
-             }
-             
-              // Apply theme colors
-              
-              let (bg, text) = if is_dark {
-                  (crate::ui::theme::COLOR_LIST_BG_DARK, crate::ui::theme::COLOR_LIST_TEXT_DARK)
-              } else {
-                  (crate::ui::theme::COLOR_LIST_BG_LIGHT, crate::ui::theme::COLOR_LIST_TEXT_LIGHT)
-              };
-              
-              SendMessageW(self.hwnd, LVM_SETBKCOLOR, 0, bg as isize);
-              SendMessageW(self.hwnd, LVM_SETTEXTCOLOR, 0, text as isize);
-              SendMessageW(self.hwnd, LVM_SETTEXTBKCOLOR, 0, bg as isize);
- 
-              // Also theme the header
-              let h_header = SendMessageW(self.hwnd, LVM_GETHEADER, 0, 0) as HWND;
-              if h_header != std::ptr::null_mut() {
-                  crate::ui::theme::allow_dark_mode_for_window(h_header, is_dark);
-                  crate::ui::theme::apply_theme(h_header, crate::ui::theme::ControlType::Header, is_dark);
-                  InvalidateRect(h_header, std::ptr::null(), 1);
-              }
-          }
+        // Use centralized flat theme helper (no borders, no grid lines)
+        unsafe { crate::ui::theme::apply_flat_listview_theme(self.hwnd, is_dark); }
     }
 
     /// Installs a subclass to handle custom drawing for the header in dark mode.
@@ -254,38 +226,31 @@ impl ListView {
     }
 }
 
-/// Subclass procedure to force white text on ListView headers in dark mode.
+/// Subclass procedure for flat header drawing.
 unsafe extern "system" fn header_subclass_proc(
     hwnd: HWND,
     umsg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
     _uidsubclass: usize,
-    dwrefdata: usize,
+    _dwrefdata: usize,
 ) -> LRESULT {
     unsafe {
         if umsg == WM_NOTIFY {
             let nmhdr = &*(lparam as *const NMHDR);
             
             if nmhdr.code == NM_CUSTOMDRAW {
-                 // Check if it's from Header
-                 let h_header = SendMessageW(hwnd, LVM_GETHEADER, 0, 0) as HWND;
-                 if nmhdr.hwndFrom == h_header {
-                     let _parent_hwnd = dwrefdata as HWND;
-                     let is_dark = crate::ui::theme::is_system_dark_mode(); 
-                     
-                     if is_dark {
-                         let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
-                         if nmcd.dwDrawStage == CDDS_PREPAINT {
-                             return CDRF_NOTIFYITEMDRAW as LRESULT;
-                         }
-                         if nmcd.dwDrawStage == CDDS_ITEMPREPAINT {
-                             SetTextColor(nmcd.hdc, crate::ui::theme::COLOR_HEADER_TEXT_DARK);
-                             SetBkMode(nmcd.hdc, TRANSPARENT as i32);
-                             return CDRF_NEWFONT as LRESULT;
-                         }
-                     }
-                 }
+                let h_header = SendMessageW(hwnd, LVM_GETHEADER, 0, 0) as HWND;
+                
+                // Handle header custom draw for flat look
+                if nmhdr.hwndFrom == h_header {
+                    let nmcd = &mut *(lparam as *mut NMCUSTOMDRAW);
+                    let is_dark = crate::ui::theme::is_system_dark_mode();
+                    
+                    if let Some(result) = crate::ui::theme::handle_flat_header_customdraw(h_header, nmcd, is_dark) {
+                        return result;
+                    }
+                }
             }
         }
         DefSubclassProc(hwnd, umsg, wparam, lparam)
