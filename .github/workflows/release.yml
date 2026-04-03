@@ -75,7 +75,7 @@ jobs:
       - name: Calculate Version
         id: version
         run: |
-          $version = Get-Date -Format "vyyyy.MM.dd-rHHmm"
+          $version = Get-Date -Format "vyyyy.M.d-rHHmm"
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Determined Version: $version"
         shell: pwsh
