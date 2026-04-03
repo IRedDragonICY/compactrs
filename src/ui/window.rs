@@ -1,4 +1,3 @@
-/* --- src/ui/window.rs --- */
 #![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use crate::types::*;
@@ -529,13 +528,9 @@ impl AppState {
         for alg in algos {
             combo.add_string(String::from_utf16_lossy(alg).as_str());
         }
-        let algo_index = match self.config.default_algo {
-            WofAlgorithm::Xpress4K => 1,
-            WofAlgorithm::Xpress8K => 2,
-            WofAlgorithm::Xpress16K => 3,
-            WofAlgorithm::Lzx => 4,
-        };
-        combo.set_selected_index(algo_index);
+        
+        // Use EXACT index from config to prevent random reset bugs
+        combo.set_selected_index(self.config.combo_algo_index as i32);
         
         // Action Mode Combo
         let h_action_mode = action_panel.action_mode_hwnd();
@@ -544,7 +539,9 @@ impl AppState {
         for mode in action_modes {
             action_mode_combo.add_string(mode);
         }
-        action_mode_combo.set_selected_index(0);
+        
+        // Use EXACT index from config to prevent random reset bugs
+        action_mode_combo.set_selected_index(self.config.combo_action_index as i32);
         
         // Force Checkbox
         if self.force_compress {
@@ -1204,13 +1201,13 @@ impl AppState {
                 self.config.window_height = rect.bottom - rect.top;
             }
             if let Some(ctrls) = &self.controls {
-                let idx = ComboBox::new(ctrls.action_panel.combo_hwnd()).get_selected_index();
-                self.config.default_algo = match idx {
-                    1 => WofAlgorithm::Xpress4K,
-                    3 => WofAlgorithm::Xpress16K, 
-                    4 => WofAlgorithm::Lzx,
-                    _ => WofAlgorithm::Xpress8K,
-                };
+                // Save EXACT combobox indices to persist UI state correctly
+                let algo_idx = ComboBox::new(ctrls.action_panel.combo_hwnd()).get_selected_index();
+                self.config.combo_algo_index = if algo_idx >= 0 { algo_idx as u8 } else { 0 };
+                
+                let action_idx = ComboBox::new(ctrls.action_panel.action_mode_hwnd()).get_selected_index();
+                self.config.combo_action_index = if action_idx >= 0 { action_idx as u8 } else { 0 };
+
                 self.config.force_compress = Button::new(ctrls.action_panel.force_hwnd()).is_checked();
             }
             self.config.theme = self.theme;

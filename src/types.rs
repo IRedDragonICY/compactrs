@@ -639,10 +639,10 @@ pub const NM_DBLCLK: u32 = 0xFFFFFFFD; // -3
 pub const NM_RCLICK: u32 = 0xFFFFFFFB; // -5
 pub const NM_CUSTOMDRAW: u32 = 0xFFFFFFF4; // -12
 
-pub const LVN_FIRST: u32 = 0xFFFFFF00; // -100 (approx, casting issues usually)
-pub const LVN_ITEMCHANGED: u32 = 0xFFFFFF95; // -101
-pub const LVN_KEYDOWN: u32 = 0xFFFFFF9A; // -156
-pub const LVN_COLUMNCLICK: u32 = 0xFFFFFF94; // -108
+pub const LVN_FIRST: u32 = (-100i32) as u32; 
+pub const LVN_ITEMCHANGED: u32 = ((-100i32) - 1) as u32;
+pub const LVN_KEYDOWN: u32 = ((-100i32) - 55) as u32;
+pub const LVN_COLUMNCLICK: u32 = ((-100i32) - 8) as u32;
 
 // Message Filter
 pub const MSGFLT_ALLOW: u32 = 1;

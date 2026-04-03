@@ -10,7 +10,7 @@ use crate::ui::state::AppTheme;
 #[derive(Clone, Copy, Debug)]
 pub struct AppConfig {
     pub magic: u32,   // 0x43505253 ("CPRS")
-    pub version: u32, // 1
+    pub version: u32, // 8
     pub theme: AppTheme,
     pub default_algo: WofAlgorithm,
     pub force_compress: bool,
@@ -30,6 +30,10 @@ pub struct AppConfig {
     pub enable_skip_heuristics: bool,
     pub skip_extensions_buf: [u16; 512], // Comma separated list
     pub set_compressed_attr: bool, // New in v7
+    
+    // New in v8 (Persist precise UI Combobox states)
+    pub combo_algo_index: u8,
+    pub combo_action_index: u8,
 }
 
 
@@ -48,7 +52,7 @@ impl Default for AppConfig {
 
         Self {
             magic: 0x43505253,
-            version: 7,
+            version: 8,
             theme: AppTheme::System,
             default_algo: WofAlgorithm::Xpress8K, // Default to XPRESS8K
             force_compress: false,
@@ -67,6 +71,8 @@ impl Default for AppConfig {
             enable_skip_heuristics: true,
             skip_extensions_buf: buf,
             set_compressed_attr: false,
+            combo_algo_index: 0, // 0 = "As Listed"
+            combo_action_index: 0, // 0 = "As Listed"
         }
     }
 }
@@ -89,7 +95,8 @@ impl AppConfig {
                 if file.read_exact(&mut buffer).is_ok() {
                     unsafe {
                         let config = std::ptr::read_unaligned(buffer.as_ptr() as *const AppConfig);
-                        if config.magic == 0x43505253 && config.version == 7 {
+                        // Check for version 8
+                        if config.magic == 0x43505253 && config.version == 8 {
                             return config;
                         }
                     }

@@ -254,9 +254,6 @@ impl FileListView {
             lvi.mask = LVIF_TEXT;
             lvi.iItem = row;
 
-            // Helper macro for settings subitems to avoid repetition
-            // ... explicit calls are fine for now
-
             // Col 1 = Current State
             lvi.iSubItem = columns::CURRENT;
             lvi.pszText = current_wide.as_ptr() as *mut _;
@@ -288,53 +285,16 @@ impl FileListView {
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 7 = Ratio
-            // Calculate initial ratio (if logic/disk are available, else "-")
-            // Note: pass strings usually, but here we might need to calculate if passed? 
-            // The caller passes strings, but we can't parse them easily back to u64 here.
-            // Let's rely on update or pass a default "-". 
-            // BETTER: Use what we have. We'll update add_item signature in next step if needed, 
-            // but for now let's just initialize with "-" and let subsequent updates handle it, 
-            // OR we can try to use the passed strings if they are non-empty/valid?
-            // Actually, the best way is to calculate it right here if we had the numbers. 
-            // Since we don't have the raw numbers passed in (only formatted strings), 
-            // let's initialize with "-" for now. Wait, `add_item` is called with `size_logical` etc as strings.
-            // I'll update it to "-" initially.
-            // Wait, the plan said "Update add_item signature OR initialize with -".
-            // Let's initialize with "-" for now as it's safer without changing signature widely yet.
-            // Actually, I can use the helper if I change the signature.
-            // Let's stick to "-" for now to minimize signature churn, 
-            // as `ingest_paths` calls this with "Calculating..." strings anyway.
             let ratio_wide = w!("-");
             lvi.iSubItem = columns::RATIO;
             lvi.pszText = ratio_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
             // Col 8 = Progress
-            lvi.iSubItem = columns::PROGRESS;
-            // ... (rest shifted)
-            // Wait, I need to match the previous indices? 
-            // Previous: Progress was 7. Now it is 8.
-            // So I need to set index to 8.
-            
-            // Col 8 = Progress (was 7)
-            // We need to provide empty progress initially or what was passed?
-            // `add_item` doesn't take progress string, it sets up defaults.
-            // Actually `add_item` doesn't take progress. It inits with nothing?
-            // Existing code:
-            // // Col 8 = Status (shows Pending)  <-- This was comment for old col 8? No, old col 8 was STATUS.
-            // Let's look at original code:
-            // // Col 8 = Status (shows Pending)
-            // lvi.iSubItem = columns::STATUS;
-            // So Progress col (idx 7 old) was skipped? 
-            // Let's check `setup_columns`:
-            // 7: Progress, 8: Status.
-            // Original `add_item` set `columns::STATUS` (which was 8). 
-            // Did it set Progress? No, it seems it didn't set Progress initially (maybe empty default).
-            
-            // So for new code:
-            // Ratio is 7. Progress is 8. Status is 9. Start is 10.
-            
-            lvi.iSubItem = columns::STATUS; // Now 9
+            // Not set initially, left empty
+
+            // Col 9 = Status
+            lvi.iSubItem = columns::STATUS;
             lvi.pszText = status_wide.as_ptr() as *mut _;
             SendMessageW(self.hwnd, LVM_SETITEMW, 0, &lvi as *const _ as isize);
 
@@ -418,11 +378,12 @@ impl FileListView {
 
         unsafe {
             loop {
-                let start_param = item_idx as usize;
+                // Ensure proper -1 cast for 64-bit platforms
+                let start_param = if item_idx < 0 { -1isize as usize } else { item_idx as usize };
                 let next = SendMessageW(
                     self.hwnd,
                     LVM_GETNEXTITEM,
-                    if item_idx < 0 { usize::MAX } else { start_param },
+                    start_param,
                     LVNI_SELECTED as isize,
                 );
                 if (next as i32) < 0 {
@@ -602,17 +563,9 @@ impl FileListView {
         }
     }
 
-    /// Helper to convert WofAlgorithm to string.
-
-
-    // Local allow_dark_mode_for_window removed in favor of theme::allow_dark_mode_for_window
-
     /// Updates the playback controls (Start/Pause/Stop) for a row based on state.
     pub fn update_playback_controls(&self, row: i32, state: crate::ui::state::ProcessingState, is_complete: bool) {
         // Use to_wstring for combined strings
-        // Format: [Watch]   [Playback...]
-        // If complete: Only [Watch]
-        // If complete: Show Watch + Start (to allow re-run)
         let text_wide = if is_complete {
              crate::utils::to_wstring("\u{1F441}    ▶")
         } else {
@@ -1148,4 +1101,3 @@ unsafe extern "system" fn listview_subclass_proc(
     // SAFETY: DefSubclassProc is called with valid parameters.
     DefSubclassProc(hwnd, umsg, wparam, lparam)
 }}
-
