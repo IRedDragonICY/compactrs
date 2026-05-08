@@ -46,7 +46,7 @@ pub enum ProcessResult {
 struct FileTask {
     path: String,
     action: BatchAction,
-    row_idx: usize,
+    item_id: u32,
     algorithm: WofAlgorithm,
 }
 
@@ -68,7 +68,7 @@ impl<T> SharedReceiver<T> {
 
 /// Orchestrates batch processing with producer-consumer threading model.
 pub fn batch_process_worker(
-    items: Vec<(String, BatchAction, usize, WofAlgorithm)>, 
+    items: Vec<(String, BatchAction, u32, WofAlgorithm)>, 
     tx: Sender<UiMessage>, 
     state: Arc<AtomicU8>,
     force: bool,
@@ -86,11 +86,11 @@ pub fn batch_process_worker(
     let _ = tx.send(UiMessage::StatusText(to_wstring("Discovering files...")));
     
     // 1. Discovery Phase
-    let mut row_totals = std::collections::HashMap::new();
-    let mut row_paths = std::collections::HashMap::new();
+    let mut item_totals = std::collections::HashMap::new();
+    let mut item_paths = std::collections::HashMap::new();
     let mut total_files = 0u64;
 
-    for (path, _, row, _) in &items {
+    for (path, _, id, _) in &items {
         // Use scanner for discovery
         let count = if std::path::Path::new(path).is_file() {
             1
@@ -99,12 +99,12 @@ pub fn batch_process_worker(
             crate::engine::scanner::scan_path_metrics(path).file_count
         };
         
-        row_totals.insert(*row, count);
-        row_paths.insert(*row, path.clone());
+        item_totals.insert(*id, count);
+        item_paths.insert(*id, path.clone());
         total_files += count;
         
-        // Initial Row Progress (0/count)
-        let _ = tx.send(UiMessage::RowProgress(*row as i32, 0, count, 0));
+        // Initial Item Progress (0/count)
+        let _ = tx.send(UiMessage::RowProgress(*id, 0, count, 0));
     }
     
     global_total.fetch_add(total_files, Ordering::Relaxed);
@@ -126,18 +126,28 @@ pub fn batch_process_worker(
     let success = Arc::new(AtomicU64::new(0));
     let failed = Arc::new(AtomicU64::new(0));
     
-    // Track row progress
-    let max_row = items.iter().map(|(_, _, r, _)| *r).max().unwrap_or(0);
-    let row_processed_counts = Arc::new((0..=max_row).map(|_| AtomicU64::new(0)).collect::<Vec<_>>());
-    let row_disk_sizes = Arc::new((0..=max_row).map(|_| AtomicU64::new(0)).collect::<Vec<_>>());
-    let row_totals = Arc::new(row_totals);
-    let row_paths = Arc::new(row_paths);
+    // Use DashMap or concurrent Maps in real scenario, but since we know maximum possible id during run
+    // we can't easily pre-allocate a perfect flat array if IDs are sparse. 
+    // We'll use a simple Mutexed HashMap for cross-thread counters since item count is small vs file count.
+    
+    // Initialize the maps for the items we are processing
+    let mut m1 = std::collections::HashMap::new();
+    let mut m2 = std::collections::HashMap::new();
+    for (_, _, id, _) in &items {
+         m1.insert(*id, Arc::new(AtomicU64::new(0)));
+         m2.insert(*id, Arc::new(AtomicU64::new(0)));
+    }
+    let item_processed_counts = Arc::new(m1);
+    let item_disk_sizes = Arc::new(m2);
+
+    let item_totals = Arc::new(item_totals);
+    let item_paths = Arc::new(item_paths);
 
     // Producer Thread
     let state_producer = Arc::clone(&state);
     let items_producer = items.clone();
     let producer_handle = std::thread::spawn(move || {
-        for (path, action, row, algo) in items_producer {
+        for (path, action, id, algo) in items_producer {
             if check_stop_signal(&state_producer) { break; }
             
             // Determine directory attribute logic
@@ -145,7 +155,7 @@ pub fn batch_process_worker(
             let disable_attr = action == BatchAction::Decompress;
 
             if std::path::Path::new(&path).is_file() {
-                let _ = file_tx.send(FileTask { path, action, row_idx: row, algorithm: algo });
+                let _ = file_tx.send(FileTask { path, action, item_id: id, algorithm: algo });
             } else {
                 // IT IS A DIRECTORY
                 crate::log_info!(&["Processing dir: ", &path, " AttrEnable: ", &enable_attr.to_string()].concat());
@@ -167,7 +177,7 @@ pub fn batch_process_worker(
                         }
                     } else {
                         // File found: send to worker
-                        let _ = file_tx.send(FileTask { path: full_path.to_string(), action, row_idx: row, algorithm: algo });
+                        let _ = file_tx.send(FileTask { path: full_path.to_string(), action, item_id: id, algorithm: algo });
                     }
                 });
             }
@@ -183,10 +193,10 @@ pub fn batch_process_worker(
             let g_tot = Arc::clone(&global_total);
             let success = Arc::clone(&success);
             let failed = Arc::clone(&failed);
-            let row_proc = Arc::clone(&row_processed_counts);
-            let row_size = Arc::clone(&row_disk_sizes);
-            let row_tot = Arc::clone(&row_totals);
-            let row_p = Arc::clone(&row_paths);
+            let row_proc = Arc::clone(&item_processed_counts);
+            let row_size = Arc::clone(&item_disk_sizes);
+            let row_tot = Arc::clone(&item_totals);
+            let row_p = Arc::clone(&item_paths);
             let tx = tx.clone();
             let st = Arc::clone(&state);
             let force = force;
@@ -219,34 +229,32 @@ pub fn batch_process_worker(
                     
                     if cur % 20 == 0 || cur >= tot {
                          let _ = tx.send(UiMessage::Progress(cur, tot));
-                         // Status update "Processed X/Y" is now handled by UI window.rs
                     }
 
-                    // Row Progress
-                    if let Some(counter) = row_proc.get(task.row_idx) {
+                    // Item Progress
+                    if let Some(counter) = row_proc.get(&task.item_id) {
                         let r_cur = counter.fetch_add(1, Ordering::Relaxed) + 1;
-                        let r_tot = *row_tot.get(&task.row_idx).unwrap_or(&1);
+                        let r_tot = *row_tot.get(&task.item_id).unwrap_or(&1);
                         
-                        if let Some(sz) = row_size.get(task.row_idx) {
+                        if let Some(sz) = row_size.get(&task.item_id) {
                             sz.fetch_add(size, Ordering::Relaxed);
                         }
 
                          if r_cur % 5 == 0 || r_cur == r_tot {
                               // Current processed bytes
-                              let current_bytes = row_size.get(task.row_idx).map(|a| a.load(Ordering::Relaxed)).unwrap_or(0);
+                              let current_bytes = row_size.get(&task.item_id).map(|a| a.load(Ordering::Relaxed)).unwrap_or(0);
                               
                               if r_cur == r_tot {
                                   // Row Finished
-                                  let algo_st = if let Some(p) = row_p.get(&task.row_idx) {
+                                  let algo_st = if let Some(p) = row_p.get(&task.item_id) {
                                       detect_path_algorithm(p)
                                   } else {
                                       crate::engine::wof::CompressionState::None
                                   };
                                   
-                                  // Final progress update implies finished
-                                  let _ = tx.send(UiMessage::RowFinished(task.row_idx as i32, current_bytes, r_tot, algo_st));
+                                  let _ = tx.send(UiMessage::RowFinished(task.item_id, current_bytes, r_tot, algo_st));
                               } else {
-                                  let _ = tx.send(UiMessage::RowProgress(task.row_idx as i32, r_cur, r_tot, current_bytes));
+                                  let _ = tx.send(UiMessage::RowProgress(task.item_id, r_cur, r_tot, current_bytes));
                               }
                          }
                     }
@@ -258,14 +266,14 @@ pub fn batch_process_worker(
     let _ = producer_handle.join();
 
     // Explicitly finish empty rows (consumers never ran for them)
-    for (row, count) in row_totals.iter() {
+    for (id, count) in item_totals.iter() {
         if *count == 0 {
-             let algo_st = if let Some(p) = row_paths.get(row) {
+             let algo_st = if let Some(p) = item_paths.get(id) {
                   detect_path_algorithm(p)
              } else {
                   crate::engine::wof::CompressionState::None
              };
-             let _ = tx.send(UiMessage::RowFinished(*row as i32, 0, 0, algo_st));
+             let _ = tx.send(UiMessage::RowFinished(*id, 0, 0, algo_st));
         }
     }
 

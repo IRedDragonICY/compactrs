@@ -1,4 +1,3 @@
-/* --- src/types.rs --- */
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
 
 
@@ -289,6 +288,7 @@ pub const TBM_SETRANGE: u32 = 0x0406;
 pub const CDDS_PREPAINT: u32 = 0x00000001;
 pub const CDDS_ITEM: u32 = 0x00010000;
 pub const CDDS_ITEMPREPAINT: u32 = CDDS_ITEM | CDDS_PREPAINT;
+pub const CDRF_DODEFAULT: u32 = 0x00000000;
 pub const CDRF_NEWFONT: u32 = 0x00000002;
 pub const CDRF_NOTIFYITEMDRAW: u32 = 0x00000020;
 pub const CDRF_SKIPDEFAULT: u32 = 0x00000004;
@@ -508,6 +508,7 @@ pub const ES_NUMBER: u32 = 0x2000;
 pub const LVS_REPORT: u32 = 0x0001;
 pub const LVS_SINGLESEL: u32 = 0x0004;
 pub const LVS_SHOWSELALWAYS: u32 = 0x0008;
+pub const LVS_OWNERDATA: u32 = 0x1000;
 
 // ListView Extended Styles
 pub const LVS_EX_FULLROWSELECT: u32 = 0x00000020;
@@ -566,6 +567,9 @@ pub const LVM_SORTITEMS: u32 = LVM_FIRST + 48;
 pub const LVM_GETITEMTEXTW: u32 = LVM_FIRST + 115;
 pub const LVM_FINDITEMW: u32 = LVM_FIRST + 83;
 pub const LVM_GETSUBITEMRECT: u32 = LVM_FIRST + 56;
+pub const LVM_SETITEMCOUNT: u32 = LVM_FIRST + 47;
+pub const LVM_REDRAWITEMS: u32 = LVM_FIRST + 21;
+pub const LVSICF_NOINVALIDATEALL: u32 = 0x00000001;
 
 pub const LVNI_SELECTED: u32 = 0x0002;
 pub const LVFI_PARAM: u32 = 0x0001;
@@ -658,6 +662,8 @@ pub const LVN_FIRST: u32 = (-100i32) as u32;
 pub const LVN_ITEMCHANGED: u32 = ((-100i32) - 1) as u32;
 pub const LVN_KEYDOWN: u32 = ((-100i32) - 55) as u32;
 pub const LVN_COLUMNCLICK: u32 = ((-100i32) - 8) as u32;
+pub const LVN_GETDISPINFOW: u32 = ((-100i32) - 77) as u32;
+pub const LVN_ODCACHEHINT: u32 = ((-100i32) - 13) as u32;
 
 // Message Filter
 pub const MSGFLT_ALLOW: u32 = 1;
@@ -755,6 +761,12 @@ pub struct NMLVKEYDOWN {
     pub hdr: NMHDR,
     pub wVKey: u16,
     pub flags: u32,
+}
+
+#[repr(C)]
+pub struct NMLVDISPINFOW {
+    pub hdr: NMHDR,
+    pub item: LVITEMW,
 }
 
 pub const COINIT_APARTMENTTHREADED: u32 = 0x2;

@@ -3,7 +3,6 @@
 use crate::types::*;
 use std::thread;
 use std::sync::atomic::Ordering;
-use std::cmp::Ordering as CmpOrdering;
 
 use crate::ui::state::{AppState, BatchAction, ProcessingState, BatchStatus};
 use crate::ui::taskbar::TaskbarState;
@@ -40,19 +39,18 @@ pub unsafe fn on_remove_selected(st: &mut AppState) {
     selected_indices.sort_by(|a, b| b.cmp(a));
     
     let ids_to_remove: Vec<u32> = selected_indices.iter()
-        .filter_map(|&idx| st.batch_items.get(idx).map(|item| item.id))
+        .filter_map(|&ui_idx| {
+             if ui_idx < st.filtered_items.len() {
+                 st.batch_items.get(st.filtered_items[ui_idx]).map(|i| i.id)
+             } else { None }
+        })
         .collect();
     
     for id in ids_to_remove { 
         st.remove_batch_item(id); 
     }
     
-    if let Some(ctrls) = &st.controls {
-        for idx in selected_indices { 
-            ctrls.file_list.remove_item(idx as i32); 
-        }
-    }
-    
+    st.refresh_file_list();
     update_process_button_state(st);
 }
 
@@ -89,25 +87,33 @@ pub unsafe fn on_process_all(st: &mut AppState, hwnd: HWND, is_auto_start: bool)
     }
     
     if let Some(ctrls) = &st.controls {
-        let mut indices = ctrls.file_list.get_selected_indices();
+        let ui_indices = ctrls.file_list.get_selected_indices();
         
-        if indices.is_empty() {
-           indices = st.batch_items.iter().enumerate()
+        let mut actual_indices = Vec::new();
+        
+        if ui_indices.is_empty() {
+           actual_indices = st.batch_items.iter().enumerate()
                 .filter(|(_, item)| item.status == BatchStatus::Pending || matches!(item.status, BatchStatus::Error(_)))
                 .map(|(i, _)| i)
                 .collect();
                 
-            if indices.is_empty() && !is_auto_start {
+            if actual_indices.is_empty() && !is_auto_start {
                  let w_info = to_wstring("Info");
                  let w_msg = to_wstring("No pending items to process.");
                  MessageBoxW(hwnd, w_msg.as_ptr(), w_info.as_ptr(), MB_OK | MB_ICONINFORMATION);
                  return;
             }
+        } else {
+             for idx in ui_indices {
+                 if idx < st.filtered_items.len() {
+                     actual_indices.push(st.filtered_items[idx]);
+                 }
+             }
         }
         
-        if indices.is_empty() { return; }
+        if actual_indices.is_empty() { return; }
 
-        start_processing(st, hwnd, indices);
+        start_processing(st, hwnd, actual_indices);
     }
 }
 
@@ -146,8 +152,10 @@ pub unsafe fn start_processing_internal(st: &mut AppState, hwnd: HWND, indices_t
         };
         
         if !use_as_listed {
-            for &row in &indices_to_process {
-                ctrls.file_list.update_algorithm(row as i32, global_algo);
+            for &idx in &indices_to_process {
+                if let Some(item) = st.batch_items.get_mut(idx) {
+                    item.algorithm = global_algo;
+                }
             }
         }
         
@@ -164,9 +172,7 @@ pub unsafe fn start_processing_internal(st: &mut AppState, hwnd: HWND, indices_t
         
         update_process_button_state(st);
         
-        for &idx in &indices_to_process {
-            ctrls.file_list.update_playback_controls(idx as i32, ProcessingState::Running, false);
-        }
+        ctrls.file_list.redraw_all();
         
         let action_mode_idx = ComboBox::new(ctrls.action_panel.action_mode_hwnd()).get_selected_index();
         
@@ -176,7 +182,7 @@ pub unsafe fn start_processing_internal(st: &mut AppState, hwnd: HWND, indices_t
                     1 => BatchAction::Compress, 2 => BatchAction::Decompress, _ => item.action,
                 };
                 let effective_algo = if use_as_listed { item.algorithm } else { global_algo };
-                (item.path.clone(), effective_action, idx, effective_algo)
+                (item.path.clone(), effective_action, item.id, effective_algo)
             })
         }).collect();
         
@@ -206,9 +212,13 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
     st.global_state.store(ProcessingState::Stopped as u8, Ordering::Relaxed);
     st.processing_queue.clear();
     
-    for item in &st.batch_items {
+    for item in &mut st.batch_items {
         if let Some(flag) = &item.state_flag { flag.store(ProcessingState::Stopped as u8, Ordering::Relaxed); }
+        if item.status != BatchStatus::Complete {
+             item.status_override = Some("Cancelled".to_string());
+        }
     }
+    
     if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
     if let Some(ctrls) = &st.controls {
         Button::new(ctrls.action_panel.cancel_hwnd()).set_enabled(false);
@@ -219,12 +229,7 @@ pub unsafe fn on_stop_processing(st: &mut AppState) {
         
         Label::new(ctrls.status_bar.label_hwnd()).set_text("Stopping...");
         
-        for (i, item) in st.batch_items.iter().enumerate() {
-             ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Stopped, item.status == BatchStatus::Complete);
-             if item.status != BatchStatus::Complete {
-                 ctrls.file_list.update_status_text(i as i32, "Cancelled");
-             }
-        }
+        ctrls.file_list.redraw_all();
     }
 }
 
@@ -250,26 +255,22 @@ pub unsafe fn on_pause_clicked(st: &mut AppState) {
     
     update_process_button_state(st);
     
-    if let Some(ctrls) = &st.controls {
-        for (i, item) in st.batch_items.iter().enumerate() {
-            if item.status == BatchStatus::Processing || item.status == BatchStatus::Pending {
-                 match new_state {
-                     ProcessingState::Paused => {
-                         ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Paused, false);
-                         ctrls.file_list.update_status_text(i as i32, "Paused");
-                     },
-                     ProcessingState::Running => {
-                         ctrls.file_list.update_playback_controls(i as i32, ProcessingState::Running, false);
-                         if item.status == BatchStatus::Processing {
-                             ctrls.file_list.update_status_text(i as i32, "Processing");
-                         } else {
-                             ctrls.file_list.update_status_text(i as i32, "Pending");
-                         }
-                     },
-                     _ => {}
-                 }
-            }
+    for item in st.batch_items.iter_mut() {
+        if item.status == BatchStatus::Processing || item.status == BatchStatus::Pending {
+             match new_state {
+                 ProcessingState::Paused => {
+                     item.status_override = Some("Paused".to_string());
+                 },
+                 ProcessingState::Running => {
+                     item.status_override = None;
+                 },
+                 _ => {}
+             }
         }
+    }
+    
+    if let Some(ctrls) = &st.controls {
+        ctrls.file_list.redraw_all();
     }
 }
 
@@ -378,7 +379,7 @@ pub unsafe fn should_block_header_resize(lparam: LPARAM) -> bool {
 }
 
 pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, code: u32) {
-    if row < 0 {
+    if row < 0 || (row as usize) >= st.filtered_items.len() {
         if let Some(ctrls) = &st.controls {
             ctrls.file_list.deselect_all();
             update_process_button_state(st);
@@ -386,12 +387,14 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
         return; 
     }
     
+    let item_idx = st.filtered_items[row as usize];
+    
     if col == 0 && code == NM_DBLCLK { 
-         if let Some(item) = st.batch_items.get(row as usize) {
+         if let Some(item) = st.batch_items.get(item_idx) {
              reveal_path_in_explorer(&item.path);
          }
     } else if col == 2 && code == NM_DBLCLK { 
-          if let Some(item) = st.batch_items.get_mut(row as usize) {
+          if let Some(item) = st.batch_items.get_mut(item_idx) {
               item.algorithm = match item.algorithm {
                   WofAlgorithm::Xpress4K => WofAlgorithm::Xpress8K,
                   WofAlgorithm::Xpress8K => WofAlgorithm::Xpress16K,
@@ -403,17 +406,15 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
               
                   if let Some(cached) = item.get_cached_estimate(algo) {
                       item.estimated_size = cached;
-                      let est_str = crate::utils::format_size(cached);
                       if let Some(ctrls) = &st.controls { 
-                          ctrls.file_list.update_algorithm(row, algo); 
-                          ctrls.file_list.update_item_text(row, 5, &est_str);
+                          ctrls.file_list.redraw_item(row);
                       }
                   } else {
                       let path = item.path.clone();
                       let id = item.id;
+                      item.estimated_size = 0; // Clears to Estimating...
                       if let Some(ctrls) = &st.controls { 
-                          ctrls.file_list.update_algorithm(row, algo); 
-                          ctrls.file_list.update_item_text(row, 5, &to_wstring("Estimating..."));
+                          ctrls.file_list.redraw_item(row);
                       }
                   let tx = st.tx.clone();
                   thread::spawn(move || {
@@ -423,14 +424,14 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
               }
           }
     } else if col == 3 && code == NM_DBLCLK { 
-          if let Some(item) = st.batch_items.get_mut(row as usize) {
+          if let Some(item) = st.batch_items.get_mut(item_idx) {
               let new_action = match item.action {
                   BatchAction::Compress => BatchAction::Decompress,
                   BatchAction::Decompress => BatchAction::Compress,
               };
               item.action = new_action;
               
-              if let Some(ctrls) = &st.controls { ctrls.file_list.update_action(row, new_action); }
+              if let Some(ctrls) = &st.controls { ctrls.file_list.redraw_item(row); }
           }
     } else if col == 10 && code == NM_CLICK { 
             if let Some(ctrls) = &st.controls {
@@ -448,7 +449,7 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                 let split_x = 32; 
                 
                 if rel_x <= split_x {
-                    if let Some(item) = st.batch_items.get(row as usize) {
+                    if let Some(item) = st.batch_items.get(item_idx) {
                         let path = item.path.clone();
                          {
                              let mut tasks = st.watcher_tasks.lock().unwrap();
@@ -487,31 +488,31 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                     
                     match current_state {
                         ProcessingState::Idle | ProcessingState::Stopped => {
-                            if let Some(_) = st.batch_items.get(row as usize) {
-                                 action_to_take = Some((false, true, row));
+                            if let Some(_) = st.batch_items.get(item_idx) {
+                                 action_to_take = Some((false, true, item_idx));
                             }
                         },
                         ProcessingState::Running => {
                             if rel_playback_x > (playback_width / 2) {
-                                 action_to_take = Some((true, false, row));
+                                 action_to_take = Some((true, false, item_idx));
                             } else {
-                                 action_to_take = Some((false, false, row));
+                                 action_to_take = Some((false, false, item_idx));
                             }
                         },
                         ProcessingState::Paused => {
                             if rel_playback_x > (playback_width / 2) {
-                                 action_to_take = Some((true, false, row));
+                                 action_to_take = Some((true, false, item_idx));
                             } else {
-                                 action_to_take = Some((false, true, row));
+                                 action_to_take = Some((false, true, item_idx));
                             }
                         },
                     }
                     
-                    if let Some((is_stop, is_start_resume, r)) = action_to_take {
+                    if let Some((is_stop, is_start_resume, i_idx)) = action_to_take {
                         if is_stop {
                             on_stop_processing(st);
                             if let Some(ctrls) = &st.controls {
-                                 ctrls.file_list.update_playback_controls(r, ProcessingState::Stopped, st.batch_items[r as usize].status == BatchStatus::Complete);
+                                 ctrls.file_list.redraw_all();
                             }
                         } else if is_start_resume {
                             let global = ProcessingState::from_u8(st.global_state.load(Ordering::Relaxed));
@@ -519,25 +520,32 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
                                  st.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
                                  if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Normal); }
                                  
+                                 for i in st.batch_items.iter_mut() {
+                                     i.status_override = None;
+                                 }
+
                                  if let Some(ctrls) = &st.controls {
-                                     ctrls.file_list.update_playback_controls(r, ProcessingState::Running, false);
-                                     ctrls.file_list.update_status_text(r, "Processing");
+                                     ctrls.file_list.redraw_all();
                                      Label::new(ctrls.status_bar.label_hwnd()).set_text("Resumed.");
                                  }
                             } else {
-                                 let indices = vec![r as usize];
+                                 let indices = vec![i_idx];
                                  start_processing(st, hwnd, indices);
                                  if let Some(ctrls) = &st.controls {
-                                     ctrls.file_list.update_playback_controls(r, ProcessingState::Running, false);
+                                     ctrls.file_list.redraw_item(row);
                                  }
                             }
                         } else {
                              st.global_state.store(ProcessingState::Paused as u8, Ordering::Relaxed);
                              if let Some(tb) = &st.taskbar { tb.set_state(TaskbarState::Paused); }
                              
+                             for i in st.batch_items.iter_mut() {
+                                 if i.status == BatchStatus::Processing || i.status == BatchStatus::Pending {
+                                     i.status_override = Some("Paused".to_string());
+                                 }
+                             }
                              if let Some(ctrls) = &st.controls {
-                                 ctrls.file_list.update_playback_controls(r, ProcessingState::Paused, false);
-                                 ctrls.file_list.update_status_text(r, "Paused");
+                                 ctrls.file_list.redraw_all();
                                  Label::new(ctrls.status_bar.label_hwnd()).set_text("Paused.");
                              }
                         }
@@ -550,7 +558,8 @@ pub unsafe fn on_list_click(st: &mut AppState, hwnd: HWND, row: i32, col: i32, c
 
 
 pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) -> bool {
-    if row < 0 { return false; } 
+    if row < 0 || (row as usize) >= st.filtered_items.len() { return false; } 
+    let item_idx = st.filtered_items[row as usize];
 
     if col == 2 {
         let mut pt: POINT = std::mem::zeroed();
@@ -564,7 +573,7 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
             let _ = AppendMenuW(menu, MF_STRING, 2004, to_wstring("LZX").as_ptr());
             let _ = AppendMenuW(menu, MF_STRING, 2005, to_wstring("LZNT1").as_ptr());
 
-            if let Some(item) = st.batch_items.get(row as usize) {
+            if let Some(item) = st.batch_items.get(item_idx) {
                 let check_id = match item.algorithm {
                     WofAlgorithm::Xpress4K => 2001,
                     WofAlgorithm::Xpress8K => 2002,
@@ -588,25 +597,21 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                     _ => WofAlgorithm::Xpress8K,
                 };
 
-                if let Some(item) = st.batch_items.get_mut(row as usize) {
+                if let Some(item) = st.batch_items.get_mut(item_idx) {
                     if item.algorithm != new_algo {
                         item.algorithm = new_algo;
                         
-                        if let Some(ctrls) = &st.controls { 
-                            ctrls.file_list.update_algorithm(row, item.algorithm);
-                        }
-
                         if let Some(cached) = item.get_cached_estimate(new_algo) {
                             item.estimated_size = cached;
-                            let est_str = crate::utils::format_size(cached);
                             if let Some(ctrls) = &st.controls { 
-                                ctrls.file_list.update_item_text(row, 5, &est_str);
+                                ctrls.file_list.redraw_item(row);
                             }
                         } else {
                             let path = item.path.clone();
                             let id = item.id;
+                            item.estimated_size = 0; // Trigger "Estimating..."
                             if let Some(ctrls) = &st.controls { 
-                                ctrls.file_list.update_item_text(row, 5, &to_wstring("Estimating..."));
+                                ctrls.file_list.redraw_item(row);
                             }
                             let tx = st.tx.clone();
                             thread::spawn(move || {
@@ -629,7 +634,7 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
             let _ = AppendMenuW(menu, MF_STRING, 3001, to_wstring("Compress").as_ptr());
             let _ = AppendMenuW(menu, MF_STRING, 3002, to_wstring("Decompress").as_ptr());
 
-            if let Some(item) = st.batch_items.get(row as usize) {
+            if let Some(item) = st.batch_items.get(item_idx) {
                 let check_id = match item.action {
                     crate::ui::state::BatchAction::Compress => 3001,
                     crate::ui::state::BatchAction::Decompress => 3002,
@@ -647,11 +652,11 @@ pub unsafe fn on_list_rclick(st: &mut AppState, hwnd: HWND, row: i32, col: i32) 
                     _ => crate::ui::state::BatchAction::Compress,
                 };
                 
-                if let Some(item) = st.batch_items.get_mut(row as usize) {
+                if let Some(item) = st.batch_items.get_mut(item_idx) {
                     if item.action != new_action {
                         item.action = new_action;
                          if let Some(ctrls) = &st.controls { 
-                            ctrls.file_list.update_action(row, new_action); 
+                            ctrls.file_list.redraw_item(row); 
                         }
                     }
                 }
@@ -674,9 +679,10 @@ pub unsafe fn on_column_click(st: &mut AppState, lparam: LPARAM) {
         st.sort_ascending = true;
     }
     
+    st.sort_filtered_items();
+    
     if let Some(ctrls) = &st.controls {
-        let context = st as *const AppState as isize;
-        ctrls.file_list.sort_items(compare_items, context);
+        ctrls.file_list.redraw_all();
         ctrls.file_list.set_sort_indicator(st.sort_column, st.sort_ascending);
     }
 }
@@ -687,8 +693,8 @@ pub unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM)
     let hwnd_from = wparam as HWND;
     if let Some(ctrls) = &st.controls {
         if hwnd_from == ctrls.file_list.hwnd() {
-            let selected = ctrls.file_list.get_selected_indices();
-            if !selected.is_empty() {
+            let selected_ui_rows = ctrls.file_list.get_selected_indices();
+            if !selected_ui_rows.is_empty() {
                 let mut pt: POINT = std::mem::zeroed();
                 GetCursorPos(&mut pt);
                 let menu = CreatePopupMenu();
@@ -696,8 +702,12 @@ pub unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM)
                     let mut any_processing = false;
                     let mut any_pending = false;
                     
+                    let selected: Vec<usize> = selected_ui_rows.into_iter()
+                        .filter_map(|r| if r < st.filtered_items.len() { Some(st.filtered_items[r]) } else { None })
+                        .collect();
+
                     for &idx in &selected {
-                        if let Some(item) = st.batch_items.get(idx as usize) {
+                        if let Some(item) = st.batch_items.get(idx) {
                             match item.status {
                                 BatchStatus::Processing => { any_processing = true; },
                                 BatchStatus::Pending => { any_pending = true; },
@@ -721,11 +731,11 @@ pub unsafe fn handle_context_menu(st: &mut AppState, hwnd: HWND, wparam: WPARAM)
                         1003 => { Button::new(GetDlgItem(hwnd, IDC_BTN_CANCEL as i32)).set_enabled(false); on_stop_processing(st); },
                         1004 => { on_remove_selected(st); },
                         1005 => {
-                             start_processing(st, hwnd, selected.clone());
+                             start_processing(st, hwnd, selected);
                         },
                         1006 => {
                             if let Some(&first_idx) = selected.first() {
-                                if let Some(item) = st.batch_items.get(first_idx as usize) {
+                                if let Some(item) = st.batch_items.get(first_idx) {
                                     reveal_path_in_explorer(&item.path);
                                 }
                             }
@@ -792,59 +802,4 @@ pub unsafe fn process_clipboard(hwnd: HWND, st: &mut AppState) {
     }
     
     CloseClipboard();
-}
-
-// --- Sorter ---
-
-pub unsafe extern "system" fn compare_items(lparam1: isize, lparam2: isize, lparam_sort: isize) -> i32 {
-    let state = &*(lparam_sort as *const AppState);
-    let id1 = lparam1 as u32;
-    let id2 = lparam2 as u32;
-    
-    let item1 = state.batch_items.iter().find(|i| i.id == id1);
-    let item2 = state.batch_items.iter().find(|i| i.id == id2);
-    
-    match (item1, item2) {
-        (Some(i1), Some(i2)) => {
-            let ord = match state.sort_column {
-                0 => i1.path.to_lowercase().cmp(&i2.path.to_lowercase()), 
-                2 => {
-                    let p1 = match i1.algorithm {
-                        WofAlgorithm::Xpress4K => 0, WofAlgorithm::Xpress8K => 1, WofAlgorithm::Xpress16K => 2, WofAlgorithm::Lzx => 3, WofAlgorithm::Lznt1 => 4,
-                    };
-                    let p2 = match i2.algorithm {
-                        WofAlgorithm::Xpress4K => 0, WofAlgorithm::Xpress8K => 1, WofAlgorithm::Xpress16K => 2, WofAlgorithm::Lzx => 3, WofAlgorithm::Lznt1 => 4,
-                    };
-                    p1.cmp(&p2)
-                },
-                3 => {
-                    let p1 = match i1.action { BatchAction::Compress => 0, BatchAction::Decompress => 1 };
-                    let p2 = match i2.action { BatchAction::Compress => 0, BatchAction::Decompress => 1 };
-                    p1.cmp(&p2)
-                },
-                4 => i1.logical_size.cmp(&i2.logical_size),
-                5 => i1.estimated_size.cmp(&i2.estimated_size),
-                6 => i1.disk_size.cmp(&i2.disk_size),
-                8 => {
-                   let p1 = match &i1.status { 
-                       BatchStatus::Pending => 0, BatchStatus::Processing => 1, BatchStatus::Complete => 2, BatchStatus::Error(_) => 3 
-                   };
-                   let p2 = match &i2.status { 
-                       BatchStatus::Pending => 0, BatchStatus::Processing => 1, BatchStatus::Complete => 2, BatchStatus::Error(_) => 3 
-                   };
-                   p1.cmp(&p2)
-                },
-                _ => CmpOrdering::Equal,
-            };
-            
-            let result = match ord {
-                CmpOrdering::Less => -1,
-                CmpOrdering::Equal => 0,
-                CmpOrdering::Greater => 1,
-            };
-            
-            if state.sort_ascending { result } else { -result }
-        },
-        _ => 0
-    }
 }

@@ -16,11 +16,10 @@ use crate::ui::components::{
 use crate::ui::theme;
 use crate::ui::handlers; 
 use crate::engine::wof::{WofAlgorithm, CompressionState};
-use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings, format_size};
+use crate::utils::{to_wstring, u64_to_wstring, concat_wstrings};
 use crate::w;
 use crate::ui::framework::{WindowHandler, WindowBuilder, WindowAlignment, load_app_icon};
 use crate::config::AppConfig;
-// use crate::engine::dynamic_import; // Removed
 
 const WINDOW_CLASS_NAME: &str = "CompactRS_Class";
 const WINDOW_TITLE: &str = "CompactRS";
@@ -331,132 +330,6 @@ impl WindowHandler for AppState {
 // Logic Helper Functions (Extensions to AppState for Window Logic)
 
 impl AppState {
-    unsafe fn refresh_file_list(&mut self) {
-        if let Some(ctrls) = &self.controls {
-            ctrls.file_list.clear_all();
-            
-            let search = &self.search_state;
-            let filter_text = search.text.trim().to_lowercase();
-            let use_custom_match = search.use_regex && !search.text.trim().is_empty();
-
-            for item in &self.batch_items {
-                // 1. Column/Text Filter
-                let text_match = if search.text.is_empty() {
-                    true
-                } else {
-                    let haystack = match search.filter_column {
-                        crate::ui::state::FilterColumn::Path => item.path.to_lowercase(),
-                        crate::ui::state::FilterColumn::Status => {
-                            use crate::ui::state::BatchStatus;
-                            match item.status {
-                                BatchStatus::Pending => "pending".to_string(),
-                                BatchStatus::Processing => "processing".to_string(),
-                                BatchStatus::Complete => "complete".to_string(),
-                                BatchStatus::Error(_) => "error".to_string(),
-                            }
-                        },
-                    };
-                    
-                    if use_custom_match {
-                        let pattern = &search.text;
-                        if search.case_sensitive {
-                             let haystack_raw = match search.filter_column {
-                                crate::ui::state::FilterColumn::Path => item.path.clone(),
-                                crate::ui::state::FilterColumn::Status => {
-                                    use crate::ui::state::BatchStatus;
-                                    match &item.status {
-                                        BatchStatus::Pending => "Pending".to_string(),
-                                        BatchStatus::Processing => "Processing".to_string(),
-                                        BatchStatus::Complete => "Complete".to_string(),
-                                        BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
-                                    }
-                                },
-                            };
-                            crate::utils::matcher::is_match(pattern, &haystack_raw)
-                        } else {
-                           crate::utils::matcher::is_match(&filter_text, &haystack)
-                        }
-                    } else if search.case_sensitive {
-                         let haystack_raw = match search.filter_column {
-                            crate::ui::state::FilterColumn::Path => item.path.clone(),
-                            crate::ui::state::FilterColumn::Status => {
-                                    use crate::ui::state::BatchStatus;
-                                    match &item.status {
-                                        BatchStatus::Pending => "Pending".to_string(),
-                                        BatchStatus::Processing => "Processing".to_string(),
-                                        BatchStatus::Complete => "Complete".to_string(),
-                                        BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
-                                    }
-                            },
-                        };
-                        haystack_raw.contains(&search.text)
-                    } else {
-                        haystack.contains(&filter_text)
-                    }
-                };
-                
-                if !text_match { continue; }
-                
-                // 2. Algorithm Filter
-                if let Some(target_algo) = search.algorithm_filter {
-                    if item.algorithm != target_algo { continue; }
-                }
-                
-                // 3. Size Filter
-                let size_match = match search.size_filter {
-                    1 => item.logical_size < 1_000_000, 
-                    2 => item.logical_size > 100_000_000, 
-                    _ => true,
-                };
-                if !size_match { continue; }
-
-                // Add to List
-                let logical_str = format_size(item.logical_size);
-                let disk_str = format_size(item.disk_size);
-                
-                ctrls.file_list.add_item(
-                    item.id, 
-                    item, 
-                    &logical_str, 
-                    &disk_str, 
-                    w!("Estimating..."), 
-                    crate::engine::wof::CompressionState::None 
-                );
-            }
-            
-            // Update "Showing results" label
-            let current_count = ctrls.file_list.get_item_count();
-            let total_count = self.batch_items.len();
-            
-            let is_default_state = search.text.trim().is_empty() 
-                && search.algorithm_filter.is_none() 
-                && search.size_filter == 0
-                && !search.use_regex;
-
-            let msg = if is_default_state {
-                if total_count == 0 {
-                    crate::utils::to_wstring("Ready.")
-                } else {
-                    let prefix = crate::w!("Ready. ");
-                    let count_str = crate::utils::fmt_u32(total_count as u32);
-                    let suffix = crate::w!(" items loaded.");
-                    crate::utils::concat_wstrings(&[prefix, &count_str, suffix])
-                }
-            } else {
-                 if current_count == 0 {
-                     crate::utils::to_wstring("No matching items found.")
-                 } else {
-                     let prefix = crate::w!("Found ");
-                     let count_str = crate::utils::fmt_u32(current_count as u32);
-                     let suffix = crate::w!(" matching items.");
-                     crate::utils::concat_wstrings(&[prefix, &count_str, suffix])
-                 }
-            };
-            
-            crate::ui::wrappers::Label::new(ctrls.search_panel.results_hwnd()).set_text_w(&msg);
-        }
-    }
-
     unsafe fn populate_ui_combos(&self, action_panel: &ActionPanel) {
         let h_combo = action_panel.combo_hwnd();
         let algos = [w!("As Listed"), w!("XPRESS4K"), w!("XPRESS8K"), w!("XPRESS16K"), w!("LZX"), w!("LZNT1")];
@@ -496,26 +369,23 @@ impl AppState {
                                 batch_item.action = startup_item.action;
                             }
                             let metrics = crate::engine::worker::scan_path_metrics(&startup_item.path);
-                            let logical_size = metrics.logical_size;
-                            let disk_size = metrics.disk_size;
-                            let detected_algo = metrics.compression_state;
-                            let logical_str = format_size(logical_size);
-                            let disk_str = format_size(disk_size);
-                            
-                            if let Some(ctrls) = &self.controls {
-                                if let Some(batch_item) = self.batch_items.iter().find(|i| i.id == item_id) {
-                                    ctrls.file_list.add_item(item_id, batch_item, &logical_str, &disk_str, w!("Estimating..."), detected_algo);
-                                    if let Some(pos) = self.batch_items.iter().position(|i| i.id == item_id) {
-                                        ctrls.file_list.set_selected(pos as i32, true);
-                                        self.pending_ipc_ids.push(item_id);
-                                    }
-                                }
+                            if let Some(item) = self.get_batch_item_mut(item_id) {
+                                item.logical_size = metrics.logical_size;
+                                item.disk_size = metrics.disk_size;
+                                item.final_state = Some(metrics.compression_state);
                             }
+                            self.pending_ipc_ids.push(item_id);
                      }
                 }
                 
+                self.refresh_file_list();
                 if let Some(ctrls) = &self.controls {
                      ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(0);
+                     for &id in &self.pending_ipc_ids {
+                         if let Some(row) = self.find_ui_row_by_id(id) {
+                             ctrls.file_list.set_selected(row, true);
+                         }
+                     }
                 }
                 SetTimer(hwnd, 2, 500, None);
             }
@@ -637,13 +507,10 @@ impl AppState {
                 
                 if !self.pending_ipc_ids.is_empty() {
                      if let Some(ctrls) = &self.controls {
-                         let count = ctrls.file_list.get_item_count();
-                         for i in 0..count {
-                             ctrls.file_list.set_selected(i, false);
-                         }
+                         ctrls.file_list.deselect_all();
                          for &id in &self.pending_ipc_ids {
-                             if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
-                                 ctrls.file_list.set_selected(pos as i32, true);
+                             if let Some(row) = self.find_ui_row_by_id(id) {
+                                 ctrls.file_list.set_selected(row, true);
                              }
                          }
                      }
@@ -726,6 +593,7 @@ impl AppState {
                          if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::NoProgress); }
                          if let Some(ctrls) = &self.controls {
                              EnableWindow(ctrls.action_panel.cancel_hwnd(), FALSE);
+                             ctrls.file_list.redraw_all();
                          }
                          handlers::update_process_button_state(self);
 
@@ -739,30 +607,19 @@ impl AppState {
                          if let Some(item) = self.batch_items.get_mut(pos) {
                              item.logical_size = logical;
                              item.disk_size = disk;
-                         }
-
-                         if let Some(ctrls) = &self.controls {
-                             let log_str = format_size(logical);
-                             let disk_str = format_size(disk);
-                             let ratio_str = crate::utils::calculate_ratio_string(logical, disk);
-                             let count_str = u64_to_wstring(count);
-                             
-                             if let Some(row) = ctrls.file_list.find_item_by_id(id) {
-                                 ctrls.file_list.update_item_text(row, 4, &log_str);
-                                 ctrls.file_list.update_item_text(row, 6, &disk_str);
-                                 ctrls.file_list.update_item_text(row, 7, &ratio_str);
-                                 
-                                 let current_state = self.global_state.load(Ordering::Relaxed);
-                                 if current_state == ProcessingState::Stopped as u8 {
-                                     ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
-                                 } else if current_state == ProcessingState::Paused as u8 {
-                                     ctrls.file_list.update_item_text(row, 9, w!("Paused"));
-                                 } else {
-                                     let status_text = concat_wstrings(&[w!("Scanning... "), &count_str]);
-                                     ctrls.file_list.update_item_text(row, 9, &status_text);
-                                 }
+                             let current_state = self.global_state.load(Ordering::Relaxed);
+                             if current_state == ProcessingState::Stopped as u8 {
+                                 item.status_override = Some("Cancelled".to_string());
+                             } else if current_state == ProcessingState::Paused as u8 {
+                                 item.status_override = Some("Paused".to_string());
+                             } else {
+                                 item.status_override = Some(format!("Scanning... {}", count));
                              }
-
+                         }
+                         if let Some(row) = self.find_ui_row_by_id(id) {
+                             if let Some(ctrls) = &self.controls { ctrls.file_list.redraw_item(row); }
+                         }
+                         if let Some(ctrls) = &self.controls {
                              if let Some(item) = self.batch_items.get(pos) {
                                  let prefix = crate::w!("Scanning: ");
                                  let path_w = to_wstring(&item.path);
@@ -776,81 +633,32 @@ impl AppState {
                          }
                      }
                  },
-                 UiMessage::RowProgress(row_idx, cur, tot, bytes) => {
-                     if let Some(ctrls) = &self.controls {
-                         let item_id = self.batch_items.get(row_idx as usize).map(|i| i.id);
-                         
-                         if let Some(id) = item_id {
-                             if let Some(row) = ctrls.file_list.find_item_by_id(id) {
-                                 let cur_w = u64_to_wstring(cur);
-                                 let tot_w = u64_to_wstring(tot);
-                                 let prog_str = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
-                                 ctrls.file_list.update_item_text(row, 8, &prog_str);
-                                 
-                                 if bytes > 0 {
-                                     let size_str = format_size(bytes);
-                                     ctrls.file_list.update_item_text(row, 6, &size_str);
-                                 }
-
-                                 let current_state = self.global_state.load(Ordering::Relaxed);
-                                 if current_state == ProcessingState::Stopped as u8 {
-                                      ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
-                                 } else if current_state == ProcessingState::Paused as u8 {
-                                      ctrls.file_list.update_item_text(row, 9, w!("Paused"));
-                                 } else {
-                                      ctrls.file_list.update_item_text(row, 9, w!("Running"));
-                                 }
-                             }
+                 UiMessage::RowProgress(id, cur, tot, bytes) => {
+                     if let Some(pos) = self.batch_items.iter().position(|i| i.id == id) {
+                         if let Some(item) = self.batch_items.get_mut(pos) {
+                             item.progress = (cur, tot);
+                             if bytes > 0 { item.disk_size = bytes; }
+                             item.status_override = None;
+                             item.status = BatchStatus::Processing;
                          }
                      }
+                     if let Some(row) = self.find_ui_row_by_id(id) {
+                         if let Some(ctrls) = &self.controls { ctrls.file_list.redraw_item(row); }
+                     }
                  },
-                 UiMessage::RowFinished(row_idx, final_bytes, total_count, final_state) => {
-                     if let Some(ctrls) = &self.controls {
-                         let item_id = self.batch_items.get(row_idx as usize).map(|i| i.id);
-                         if let Some(id) = item_id {
-                             if let Some(row) = ctrls.file_list.find_item_by_id(id) {
-                                 ctrls.file_list.update_item_text(row, 9, w!("Done"));
-                                 
-                                 let tot_w = u64_to_wstring(total_count);
-                                 let prog_str = concat_wstrings(&[&tot_w, &to_wstring("/"), &tot_w]);
-                                 ctrls.file_list.update_item_text(row, 8, &prog_str);
-                                 
-                                 if final_bytes > 0 {
-                                     let size_str = format_size(final_bytes);
-                                     ctrls.file_list.update_item_text(row, 6, &size_str);
-                                 }
-                                 
-                                 ctrls.file_list.update_playback_controls(row, ProcessingState::Stopped, true);
-                             }
-                         }
-
-                         if let Some(item) = self.batch_items.get_mut(row_idx as usize) {
+                 UiMessage::RowFinished(id, final_bytes, total_count, final_state) => {
+                     if let Some(pos) = self.batch_items.iter().position(|i| i.id == id) {
+                         if let Some(item) = self.batch_items.get_mut(pos) {
                              item.disk_size = final_bytes;
                              item.status = BatchStatus::Complete;
                              item.state_flag = None;
                              item.progress = (total_count, total_count);
+                             item.status_override = None;
+                             item.final_state = Some(final_state);
                          }
-
-                         if let Some(ctrls) = &self.controls {
-                             if let Some(id) = item_id {
-                                 if let Some(row) = ctrls.file_list.find_item_by_id(id) {
-                                     if let Some(item) = self.batch_items.get(row_idx as usize) {
-                                          let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, final_bytes);
-                                          ctrls.file_list.update_item_text(row, 7, &ratio_str);
-                                     }
-    
-                                     let state_str = match final_state {
-                                         CompressionState::None => w!("-"),
-                                         CompressionState::Specific(algo) => match algo {
-                                             WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
-                                             WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"), WofAlgorithm::Lznt1 => w!("LZNT1"),
-                                         },
-                                         CompressionState::Mixed => w!("Mixed"),
-                                     };
-                                     ctrls.file_list.update_item_text(row, 1, state_str);
-                                 }
-                             }
-                         }
+                     }
+                     if let Some(row) = self.find_ui_row_by_id(id) {
+                         if let Some(ctrls) = &self.controls { ctrls.file_list.redraw_item(row); }
                      }
                      handlers::update_process_button_state(self);
                  },
@@ -859,51 +667,36 @@ impl AppState {
                          let id = self.add_batch_item(path.clone());
                          self.set_item_algorithm(id, algo);
                          
-                         if let Some(ctrls) = &self.controls {
-                             if let Some(item) = self.batch_items.last() {
-                                  ctrls.file_list.add_item(id, item, w!("Pending..."), w!("-"), w!("-"), CompressionState::None);
-                             }
-                             
+                         self.refresh_file_list();
+                         
+                         let original_idx = if let Some(ctrls) = &self.controls {
                              let combo = crate::ui::wrappers::ComboBox::new(ctrls.action_panel.combo_hwnd());
-                             let original_idx = combo.get_selected_index();
+                             let idx = combo.get_selected_index();
                              combo.set_selected_index(0);
-                             
-                             if let Some(pos) = self.batch_items.iter().position(|i| i.id == id) {
-                                 handlers::start_processing(self, hwnd, vec![pos]);
-                             }
-                             
-                             if let Some(ctrls) = &self.controls {
-                                 crate::ui::wrappers::ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(original_idx);
-                             }
+                             idx
+                         } else { 0 };
+                         
+                         if let Some(row) = self.find_ui_row_by_id(id) {
+                             handlers::start_processing(self, hwnd, vec![row as usize]);
+                         }
+                         
+                         if let Some(ctrls) = &self.controls {
+                             crate::ui::wrappers::ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(original_idx);
                          }
                      }
                  },
                  UiMessage::BatchItemAnalyzed(id, log, disk, state) => {
-                     let log_str = format_size(log);
-                     let disk_str = format_size(disk);
-                     let ratio_str = crate::utils::calculate_ratio_string(log, disk);
-                     
                      if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
                          if let Some(item) = self.batch_items.get_mut(pos) {
                              item.logical_size = log;
                              item.disk_size = disk;
+                             item.status_override = None;
+                             item.final_state = Some(state);
                          }
-                         
+                         if let Some(row) = self.find_ui_row_by_id(id) {
+                             if let Some(ctrls) = &self.controls { ctrls.file_list.redraw_item(row); }
+                         }
                          if let Some(ctrls) = &self.controls {
-                             ctrls.file_list.update_item_text(pos as i32, 4, &log_str);
-                             ctrls.file_list.update_item_text(pos as i32, 6, &disk_str);
-                             ctrls.file_list.update_item_text(pos as i32, 7, &ratio_str);
-                             
-                             let state_str = match state {
-                                CompressionState::None => w!("-"),
-                                CompressionState::Specific(algo) => match algo {
-                                    WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
-                                    WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"), WofAlgorithm::Lznt1 => w!("LZNT1"),
-                                },
-                                CompressionState::Mixed => w!("Mixed"),
-                             };
-                             ctrls.file_list.update_item_text(pos as i32, 1, state_str);
-                             ctrls.file_list.update_item_text(pos as i32, 9, w!("Pending"));
                              let count = self.batch_items.len();
                              let count_w = u64_to_wstring(count as u64);
                              let msg = concat_wstrings(&[&count_w, w!(" item(s) analyzed.")]);
@@ -917,9 +710,8 @@ impl AppState {
                          if let Some(item) = self.batch_items.get_mut(pos) {
                              item.cache_estimate(algo, est_size);
                          }
-                         if let Some(ctrls) = &self.controls {
-                             let est_str_local = crate::utils::format_size(est_size);
-                             ctrls.file_list.update_item_text(pos as i32, 5, &est_str_local);
+                         if let Some(row) = self.find_ui_row_by_id(id) {
+                             if let Some(ctrls) = &self.controls { ctrls.file_list.redraw_item(row); }
                          }
                      }
                      self.update_accuracy_label();
@@ -1010,21 +802,18 @@ impl AppState {
 
             let mut items_to_estimate: Vec<(u32, String, WofAlgorithm)> = Vec::new();
             
-            for (i, item) in self.batch_items.iter_mut().enumerate() {
+            for item in self.batch_items.iter_mut() {
                 let effective_algo = algo.unwrap_or(item.algorithm);
-                
                 if let Some(cached) = item.get_cached_estimate(effective_algo) {
                     item.estimated_size = cached;
-                    let est_str = format_size(cached);
-                    if let Some(ctrls) = &self.controls {
-                        ctrls.file_list.update_item_text(i as i32, 5, &est_str);
-                    }
                 } else {
                     items_to_estimate.push((item.id, item.path.clone(), effective_algo));
-                    if let Some(ctrls) = &self.controls {
-                        ctrls.file_list.update_item_text(i as i32, 5, w!("Estimating..."));
-                    }
+                    item.estimated_size = 0; // Clears it to "Estimating..."
                 }
+            }
+
+            if let Some(ctrls) = &self.controls {
+                ctrls.file_list.redraw_all();
             }
 
             if items_to_estimate.is_empty() {
@@ -1035,7 +824,6 @@ impl AppState {
             std::thread::spawn(move || {
                 for (id, path, algo) in items_to_estimate {
                     let estimated = crate::engine::estimator::estimate_path(&path, algo);
-                    let _est_str = crate::utils::format_size(estimated);
                     let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated));
                 }
             });
@@ -1104,25 +892,12 @@ impl AppState {
                               
                               if let Some(ctrls) = &self.controls {
                                    ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(0);
-                                   
-                                   let algo_name = match algo {
-                                       WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
-                                       WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX", WofAlgorithm::Lznt1 => "LZNT1",
-                                   };
-                                   let action_name = match action {
-                                       BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
-                                   };
-                                   ctrls.file_list.update_item_text(pos as i32, 2, &to_wstring(algo_name));
-                                   ctrls.file_list.update_item_text(pos as i32, 3, &to_wstring(action_name));
-
                                    if !self.ipc_active {
-                                       let count = ctrls.file_list.get_item_count();
-                                       for i in 0..count {
-                                           ctrls.file_list.set_selected(i, false);
-                                       }
+                                       ctrls.file_list.deselect_all();
                                    }
-                                   
-                                   ctrls.file_list.set_selected(pos as i32, true);
+                                   if let Some(row) = self.find_ui_row_by_id(id) {
+                                       ctrls.file_list.set_selected(row, true);
+                                   }
                                    self.pending_ipc_ids.push(id);
                               }
                          }
@@ -1144,7 +919,121 @@ impl AppState {
             
             let nmhdr = &*(lparam as *const NMHDR);
             if nmhdr.idFrom == IDC_BATCH_LIST as usize {
-                if nmhdr.code == NM_CLICK || nmhdr.code == NM_DBLCLK {
+                if nmhdr.code == LVN_GETDISPINFOW {
+                    let pdi = lparam as *mut NMLVDISPINFOW;
+                    let row = (*pdi).item.iItem as usize;
+                    let col = (*pdi).item.iSubItem;
+
+                    if row < self.filtered_items.len() {
+                        let item_idx = self.filtered_items[row];
+                        if let Some(item) = self.batch_items.get(item_idx) {
+                            let mut text: Option<Vec<u16>> = None;
+                            match col {
+                                0 => text = Some(to_wstring(&item.path)),
+                                1 => {
+                                    let state = item.final_state.unwrap_or(CompressionState::None);
+                                    text = Some(match state {
+                                        CompressionState::None => w!("-").to_vec(),
+                                        CompressionState::Specific(algo) => match algo {
+                                            WofAlgorithm::Xpress4K => w!("XPRESS4K").to_vec(),
+                                            WofAlgorithm::Xpress8K => w!("XPRESS8K").to_vec(),
+                                            WofAlgorithm::Xpress16K => w!("XPRESS16K").to_vec(),
+                                            WofAlgorithm::Lzx => w!("LZX").to_vec(),
+                                            WofAlgorithm::Lznt1 => w!("LZNT1").to_vec(),
+                                        },
+                                        CompressionState::Mixed => w!("Mixed").to_vec(),
+                                    });
+                                },
+                                2 => {
+                                    text = Some(match item.algorithm {
+                                        WofAlgorithm::Xpress4K => w!("XPRESS4K").to_vec(),
+                                        WofAlgorithm::Xpress8K => w!("XPRESS8K").to_vec(),
+                                        WofAlgorithm::Xpress16K => w!("XPRESS16K").to_vec(),
+                                        WofAlgorithm::Lzx => w!("LZX").to_vec(),
+                                        WofAlgorithm::Lznt1 => w!("LZNT1").to_vec(),
+                                    });
+                                },
+                                3 => text = Some(if item.action == BatchAction::Compress { w!("Compress").to_vec() } else { w!("Decompress").to_vec() }),
+                                4 => text = Some(crate::utils::format_size(item.logical_size)),
+                                5 => {
+                                    if item.estimated_size > 0 {
+                                        text = Some(crate::utils::format_size(item.estimated_size));
+                                    } else {
+                                        text = Some(w!("Estimating...").to_vec());
+                                    }
+                                },
+                                6 => {
+                                    if item.disk_size > 0 {
+                                         text = Some(crate::utils::format_size(item.disk_size));
+                                    } else {
+                                         text = Some(w!("-").to_vec());
+                                    }
+                                },
+                                7 => text = Some(crate::utils::calculate_ratio_string(item.logical_size, item.disk_size)),
+                                8 => {
+                                    let cur_w = u64_to_wstring(item.progress.0);
+                                    let tot_w = u64_to_wstring(item.progress.1);
+                                    text = Some(crate::utils::concat_wstrings(&[&cur_w, w!(" / "), &tot_w]));
+                                },
+                                9 => {
+                                    if let Some(ref override_msg) = item.status_override {
+                                        text = Some(to_wstring(override_msg));
+                                    } else {
+                                        let st = match &item.status {
+                                            BatchStatus::Pending => w!("Pending").to_vec(),
+                                            BatchStatus::Processing => w!("Processing").to_vec(),
+                                            BatchStatus::Complete => w!("Complete").to_vec(),
+                                            BatchStatus::Error(_) => w!("Error").to_vec(),
+                                        };
+                                        text = Some(st);
+                                    }
+                                },
+                                10 => {
+                                    let is_complete = item.status == BatchStatus::Complete;
+                                    let global_state = ProcessingState::from_u8(self.global_state.load(std::sync::atomic::Ordering::Relaxed));
+                                    let t = if is_complete {
+                                        crate::utils::to_wstring("\u{1F441}    ▶")
+                                    } else {
+                                        match global_state {
+                                            ProcessingState::Idle | ProcessingState::Stopped => crate::utils::to_wstring("\u{1F441}    ▶"),
+                                            ProcessingState::Running => {
+                                                if item.status == BatchStatus::Processing {
+                                                    crate::utils::to_wstring("\u{1F441}    \u{23F8}   \u{23F9}")
+                                                } else {
+                                                    crate::utils::to_wstring("\u{1F441}    ▶")
+                                                }
+                                            },
+                                            ProcessingState::Paused => {
+                                                if item.status == BatchStatus::Processing || item.status == BatchStatus::Pending {
+                                                    crate::utils::to_wstring("\u{1F441}    \u{25B6}   \u{23F9}")
+                                                } else {
+                                                    crate::utils::to_wstring("\u{1F441}    ▶")
+                                                }
+                                            },
+                                        }
+                                    };
+                                    text = Some(t);
+                                },
+                                _ => {}
+                            }
+
+                            if let Some(mut t) = text {
+                                if ((*pdi).item.mask & LVIF_TEXT) != 0 {
+                                    let max_len = (*pdi).item.cchTextMax as usize;
+                                    if max_len > 0 {
+                                        if t.last() != Some(&0) { t.push(0); }
+                                        let copy_len = std::cmp::min(t.len(), max_len);
+                                        std::ptr::copy_nonoverlapping(t.as_ptr(), (*pdi).item.pszText, copy_len);
+                                        if copy_len > 0 {
+                                            *((*pdi).item.pszText.add(copy_len - 1)) = 0;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return 0; // handled
+                } else if nmhdr.code == NM_CLICK || nmhdr.code == NM_DBLCLK {
                     let nmia = &*(lparam as *const NMITEMACTIVATE);
                     handlers::on_list_click(self, hwnd, nmia.iItem, nmia.iSubItem, nmhdr.code);
                 } else if nmhdr.code == LVN_COLUMNCLICK {
@@ -1161,7 +1050,7 @@ impl AppState {
                         let is_dark = theme::resolve_mode(self.theme);
                         let list_hwnd = ctrls.file_list.hwnd();
                         if let Some(result) = crate::ui::components::file_list::handle_listview_customdraw(
-                            list_hwnd, lparam, is_dark, &self.batch_items
+                            list_hwnd, lparam, is_dark, &self.batch_items, &self.filtered_items
                         ) {
                             return result;
                         }

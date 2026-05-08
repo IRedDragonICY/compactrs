@@ -2,7 +2,7 @@ use crate::types::HWND;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64}};
 use std::collections::HashMap;
-use crate::engine::wof::WofAlgorithm;
+use crate::engine::wof::{WofAlgorithm, CompressionState};
 use crate::config::AppConfig;
 use crate::ui::components::{FileListView, Component};
 use crate::engine::worker::scan_path_streaming;
@@ -58,25 +58,24 @@ pub enum UiMessage {
     BatchItemStatus(u32, BatchStatus),   // Individual item status update
     BatchItemProgress(u32, u64, u64),    // Individual item progress (id, current, total)
     
-    /// Raw row progress: (row_index, current, total, bytes_processed)
-    RowProgress(i32, u64, u64, u64),
+    /// Raw row progress: (id, current, total, bytes_processed)
+    RowProgress(u32, u64, u64, u64),
     
     /// Incremental scan progress: (id, logical_size, disk_size, file_count)
     ScanProgress(u32, u64, u64, u64),
     
     Log(LogEntry),
     
-    /// Status text message (UTF-8)
     /// Status text message (UTF-16)
     StatusText(Vec<u16>),
     
     Finished,
     
-    /// Single item finished: (row_index, final_size_bytes, total_count, final_state)
-    RowFinished(i32, u64, u64, crate::engine::wof::CompressionState),
+    /// Single item finished: (id, final_size_bytes, total_count, final_state)
+    RowFinished(u32, u64, u64, CompressionState),
     
     /// Item analyzed (id, logical_size, disk_size, compression_state)
-    BatchItemAnalyzed(u32, u64, u64, crate::engine::wof::CompressionState),
+    BatchItemAnalyzed(u32, u64, u64, CompressionState),
     
     /// Estimated size update: (id, algorithm, estimated_size)
     UpdateEstimate(u32, WofAlgorithm, u64),
@@ -151,6 +150,8 @@ pub struct BatchItem {
     pub algorithm: WofAlgorithm,    // Selected compression algorithm
     pub action: BatchAction,        // Compress or Decompress
     pub status: BatchStatus,        // Pending, Processing, Complete, Error
+    pub status_override: Option<String>, // UI override text
+    pub final_state: Option<CompressionState>, // Final detected state
     pub progress: (u64, u64),       // (current, total) files
     pub state_flag: Option<Arc<AtomicU8>>, // Processing state
     // Added for sorting
@@ -169,6 +170,8 @@ impl BatchItem {
             algorithm: WofAlgorithm::Xpress8K, // Default
             action: BatchAction::Compress,
             status: BatchStatus::Pending,
+            status_override: None,
+            final_state: None,
             progress: (0, 0),
             state_flag: None,
             logical_size: 0,
@@ -212,9 +215,6 @@ impl Controls {
     /// # Safety
     /// Calls Win32 APIs for theme updates.
     pub unsafe fn update_theme(&mut self, is_dark: bool, main_hwnd: HWND) {
-        
-
-        
         unsafe {
             // Get the cached app font
             let hfont = crate::ui::theme::get_app_font();
@@ -233,7 +233,6 @@ impl Controls {
             self.search_panel.set_font(hfont);
             
             // Set font on ListView
-            // Set font on ListView
             self.file_list.set_font(hfont);
             
             // Apply subclass for header theming
@@ -246,6 +245,7 @@ impl Controls {
 pub struct AppState {
     // New batch processing state
     pub batch_items: Vec<BatchItem>,
+    pub filtered_items: Vec<usize>, // maps UI row to batch_items index
     pub processing_queue: Vec<usize>, // Queue of item indices waiting for processing
     
     // Search State
@@ -302,6 +302,7 @@ impl AppState {
 
         Self {
             batch_items: Vec::new(),
+            filtered_items: Vec::new(),
             processing_queue: Vec::new(),
             search_state: SearchState::default(),
             next_item_id: 1,
@@ -329,6 +330,11 @@ impl AppState {
         }
     }
     
+    /// Map BatchItem ID to UI row index
+    pub fn find_ui_row_by_id(&self, id: u32) -> Option<i32> {
+        self.filtered_items.iter().position(|&idx| self.batch_items.get(idx).map_or(false, |i| i.id == id)).map(|p| p as i32)
+    }
+
     /// Add a new batch item and return its ID
     pub fn add_batch_item(&mut self, path: String) -> u32 {
         let id = self.next_item_id;
@@ -369,6 +375,7 @@ impl AppState {
     /// Clear all batch items
     pub fn clear_batch(&mut self) {
         self.batch_items.clear();
+        self.filtered_items.clear();
     }
 
     /// Ingest a list of file paths, adding them to the batch and starting analysis
@@ -388,24 +395,17 @@ impl AppState {
                     .map(|i| i.algorithm)
                     .unwrap_or(WofAlgorithm::Xpress8K);
                 
-                // Update UI immediately
-                if let Some(ctrls) = &self.controls {
-                     if let Some(batch_item) = self.batch_items.iter().find(|i| i.id == id) {
-                         ctrls.file_list.add_item(
-                             id, 
-                             batch_item, 
-                             &to_wstring("Calculating..."), 
-                             &to_wstring("Calculating..."),
-                             &to_wstring("Estimating..."),
-                             crate::engine::wof::CompressionState::None
-                         );
-                     }
+                if let Some(item) = self.get_batch_item_mut(id) {
+                     item.status_override = Some("Calculating...".to_string());
                 }
+
                 items_to_analyze.push((id, path, algo));
             }
         }
         
         if items_to_analyze.is_empty() { return; }
+
+        unsafe { self.refresh_file_list(); }
 
         let tx = self.tx.clone();
         
@@ -418,10 +418,167 @@ impl AppState {
                  
                  // Estimate compressed size
                  let estimated = crate::engine::estimator::estimate_path(&path, algo);
-                 let _est_str = crate::utils::format_size(estimated);
                  let _ = tx.send(UiMessage::UpdateEstimate(id, algo, estimated));
             }
             let _ = tx.send(UiMessage::StatusText(to_wstring("Ready.")));
         });
+    }
+
+    pub fn sort_filtered_items(&mut self) {
+        if self.sort_column < 0 { return; }
+        let sort_col = self.sort_column;
+        let asc = self.sort_ascending;
+        let items = &self.batch_items;
+        
+        self.filtered_items.sort_by(|&a, &b| {
+            let i1 = &items[a];
+            let i2 = &items[b];
+            let ord = match sort_col {
+                0 => i1.path.to_lowercase().cmp(&i2.path.to_lowercase()), 
+                1 => {
+                    let s1 = i1.final_state.unwrap_or(CompressionState::None);
+                    let s2 = i2.final_state.unwrap_or(CompressionState::None);
+                    let v1 = match s1 { CompressionState::None => 0, CompressionState::Specific(_) => 1, CompressionState::Mixed => 2 };
+                    let v2 = match s2 { CompressionState::None => 0, CompressionState::Specific(_) => 1, CompressionState::Mixed => 2 };
+                    v1.cmp(&v2)
+                },
+                2 => (i1.algorithm as u32).cmp(&(i2.algorithm as u32)),
+                3 => (i1.action as u32).cmp(&(i2.action as u32)),
+                4 => i1.logical_size.cmp(&i2.logical_size),
+                5 => i1.estimated_size.cmp(&i2.estimated_size),
+                6 => i1.disk_size.cmp(&i2.disk_size),
+                7 => {
+                    let r1 = crate::utils::calculate_saved_percentage(i1.logical_size, i1.disk_size);
+                    let r2 = crate::utils::calculate_saved_percentage(i2.logical_size, i2.disk_size);
+                    r1.partial_cmp(&r2).unwrap_or(std::cmp::Ordering::Equal)
+                },
+                8 => i1.progress.0.cmp(&i2.progress.0),
+                9 => {
+                    let p1 = match &i1.status { BatchStatus::Pending => 0, BatchStatus::Processing => 1, BatchStatus::Complete => 2, BatchStatus::Error(_) => 3 };
+                    let p2 = match &i2.status { BatchStatus::Pending => 0, BatchStatus::Processing => 1, BatchStatus::Complete => 2, BatchStatus::Error(_) => 3 };
+                    p1.cmp(&p2)
+                },
+                _ => std::cmp::Ordering::Equal,
+            };
+            if asc { ord } else { ord.reverse() }
+        });
+    }
+
+    pub unsafe fn refresh_file_list(&mut self) {
+        self.filtered_items.clear();
+
+        // Extract required search state components without maintaining a strict reference 
+        // to `self` to avoid borrow-checker conflicts later.
+        let filter_text = self.search_state.text.trim().to_lowercase();
+        let raw_text = self.search_state.text.clone();
+        let use_custom_match = self.search_state.use_regex && !self.search_state.text.trim().is_empty();
+        let filter_column = self.search_state.filter_column;
+        let case_sensitive = self.search_state.case_sensitive;
+        let algorithm_filter = self.search_state.algorithm_filter;
+        let size_filter = self.search_state.size_filter;
+
+        for (idx, item) in self.batch_items.iter().enumerate() {
+            let text_match = if raw_text.is_empty() {
+                true
+            } else {
+                let haystack = match filter_column {
+                    FilterColumn::Path => item.path.to_lowercase(),
+                    FilterColumn::Status => {
+                        match item.status {
+                            BatchStatus::Pending => "pending".to_string(),
+                            BatchStatus::Processing => "processing".to_string(),
+                            BatchStatus::Complete => "complete".to_string(),
+                            BatchStatus::Error(_) => "error".to_string(),
+                        }
+                    },
+                };
+                
+                if use_custom_match {
+                    let pattern = &raw_text;
+                    if case_sensitive {
+                        let haystack_raw = match filter_column {
+                            FilterColumn::Path => item.path.clone(),
+                            FilterColumn::Status => {
+                                match &item.status {
+                                    BatchStatus::Pending => "Pending".to_string(),
+                                    BatchStatus::Processing => "Processing".to_string(),
+                                    BatchStatus::Complete => "Complete".to_string(),
+                                    BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
+                                }
+                            },
+                        };
+                        crate::utils::matcher::is_match(pattern, &haystack_raw)
+                    } else {
+                       crate::utils::matcher::is_match(&filter_text, &haystack)
+                    }
+                } else if case_sensitive {
+                     let haystack_raw = match filter_column {
+                        FilterColumn::Path => item.path.clone(),
+                        FilterColumn::Status => {
+                                match &item.status {
+                                    BatchStatus::Pending => "Pending".to_string(),
+                                    BatchStatus::Processing => "Processing".to_string(),
+                                    BatchStatus::Complete => "Complete".to_string(),
+                                    BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
+                                }
+                        },
+                    };
+                    haystack_raw.contains(&raw_text)
+                } else {
+                    haystack.contains(&filter_text)
+                }
+            };
+            
+            if !text_match { continue; }
+            
+            if let Some(target_algo) = algorithm_filter {
+                if item.algorithm != target_algo { continue; }
+            }
+            
+            let size_match = match size_filter {
+                1 => item.logical_size < 1_000_000, 
+                2 => item.logical_size > 100_000_000, 
+                _ => true,
+            };
+            if !size_match { continue; }
+
+            self.filtered_items.push(idx);
+        }
+        
+        let is_default_state = raw_text.trim().is_empty() 
+            && algorithm_filter.is_none() 
+            && size_filter == 0
+            && !self.search_state.use_regex;
+
+        self.sort_filtered_items();
+        
+        if let Some(ctrls) = &self.controls {
+            let current_count = self.filtered_items.len();
+            let total_count = self.batch_items.len();
+            
+            ctrls.file_list.set_item_count(current_count as i32);
+
+            let msg = if is_default_state {
+                if total_count == 0 {
+                    crate::utils::to_wstring("Ready.")
+                } else {
+                    let prefix = crate::w!("Ready. ");
+                    let count_str = unsafe { crate::utils::fmt_u32(total_count as u32) };
+                    let suffix = crate::w!(" items loaded.");
+                    crate::utils::concat_wstrings(&[prefix, &count_str, suffix])
+                }
+            } else {
+                 if current_count == 0 {
+                     crate::utils::to_wstring("No matching items found.")
+                 } else {
+                     let prefix = crate::w!("Found ");
+                     let count_str = unsafe { crate::utils::fmt_u32(current_count as u32) };
+                     let suffix = crate::w!(" matching items.");
+                     crate::utils::concat_wstrings(&[prefix, &count_str, suffix])
+                 }
+            };
+            
+            crate::ui::wrappers::Label::new(ctrls.search_panel.results_hwnd()).set_text_w(&msg);
+        }
     }
 }
