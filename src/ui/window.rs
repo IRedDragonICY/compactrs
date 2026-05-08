@@ -1,3 +1,4 @@
+/* --- src/ui/window.rs --- */
 #![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use crate::types::*;
@@ -27,11 +28,6 @@ const WINDOW_TITLE: &str = "CompactRS";
 
 pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
     unsafe {
-        // Initialize Dynamic Imports removed
-        // Dynamic Import init removed
-
-
-
         // Enable dark mode for the application
         theme::set_preferred_app_mode(true);
 
@@ -66,8 +62,6 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         let win_height = if config.window_height > 0 { config.window_height } else { 600 };
         
         // Setup State
-        // Main window state must live for the app lifetime.
-        // We use Box::leak (conceptually similar to the previous manual pointer management).
         let mut state = Box::new(AppState::new());
         // Load watcher tasks
         let loaded_tasks = crate::watcher_config::WatcherConfig::load();
@@ -78,7 +72,6 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         // Start Watcher Thread
         let watcher_tasks_ref = state.watcher_tasks.clone();
         let watcher_tx = state.tx.clone();
-        // We spawn it detached, global state management handles exit
         std::thread::spawn(move || {
             crate::engine::watcher::start_watcher_thread(watcher_tasks_ref, watcher_tx);
         });
@@ -93,8 +86,7 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
             .background(bg_brush)
             .build(std::ptr::null_mut())?;
 
-        // Hostile Takeover: Force window to foreground (Bypass ASLR/Focus restrictions)
-        // Hostile Takeover: Force window to foreground (Bypass ASLR/Focus restrictions)
+        // Hostile Takeover: Force window to foreground
         let foreground_hwnd = crate::types::GetForegroundWindow();
         if !foreground_hwnd.is_null() {
             let foreground_thread = crate::types::GetWindowThreadProcessId(foreground_hwnd, std::ptr::null_mut());
@@ -121,7 +113,7 @@ unsafe fn flash_window(hwnd: HWND) {
         cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
         hwnd,
         dwFlags: FLASHW_ALL | FLASHW_TIMERNOFG,
-        uCount: 0, // Flash until window comes to foreground
+        uCount: 0, 
         dwTimeout: 0,
     };
     crate::types::FlashWindowEx(&mut fwi as *mut _ as *const _);
@@ -136,7 +128,6 @@ impl WindowHandler for AppState {
         unsafe {
             self.taskbar = Some(TaskbarProgress::new(hwnd));
             
-            // 1. HeaderPanel (Tab Index 0)
             let mut header_panel = HeaderPanel::new(HeaderPanelIds {
                 btn_settings: IDC_BTN_SETTINGS,
                 btn_about: IDC_BTN_ABOUT,
@@ -146,7 +137,6 @@ impl WindowHandler for AppState {
             });
             let _ = header_panel.create(hwnd);
 
-            // 2. Search Panel (Tab Index 1)
             let search_ids = SearchPanelIds {
                 edit_search: IDC_SEARCH_EDIT,
                 combo_filter_col: IDC_COMBO_FILTER_COL,
@@ -162,47 +152,35 @@ impl WindowHandler for AppState {
             let mut search_panel = SearchPanel::new(search_ids);
             let _ = search_panel.create(hwnd);
 
-            // 3. FileListView (Tab Index 2)
-            // Y position will be adjusted in on_resize to account for SearchPanel
             let file_list = FileListView::new(hwnd, 10, 100, 860, 320, IDC_BATCH_LIST);
             
-            // 4. ActionPanel (Tab Index 3)
-            // Initial layout Y will be set during resize, but we need a value.
             let mut action_panel = ActionPanel::new(ActionPanelIds {
                 btn_files: IDC_BTN_ADD_FILES,
                 btn_folder: IDC_BTN_ADD_FOLDER,
                 btn_remove: IDC_BTN_REMOVE,
                 btn_clear: IDC_BTN_CLEAR,
-                
                 lbl_input: IDC_LBL_INPUT,
-                
                 combo_action_mode: IDC_COMBO_ACTION_MODE,
                 lbl_action_mode: IDC_LBL_ACTION_MODE,
-                
                 combo_algo: IDC_COMBO_ALGO,
                 lbl_algo: IDC_LBL_ALGO,
-                
                 chk_force: IDC_CHK_FORCE,
                 lbl_accuracy: crate::ui::controls::IDC_LBL_ACCURACY,
-                
                 btn_process: IDC_BTN_PROCESS_ALL,
                 btn_cancel: IDC_BTN_CANCEL,
                 btn_pause: IDC_BTN_PAUSE,
             });
             let _ = action_panel.create(hwnd);
             
-            // 5. StatusBar (Tab Index 4)
             let mut status_bar = StatusBar::new(StatusBarIds {
                 label_id: IDC_STATIC_TEXT,
                 progress_id: IDC_PROGRESS_BAR,
             });
             let _ = status_bar.create(hwnd);
 
-            // Disable cancel and pause buttons initially
             crate::ui::wrappers::Button::new(action_panel.cancel_hwnd()).set_enabled(false);
             crate::ui::wrappers::Button::new(action_panel.pause_hwnd()).set_enabled(false);
 
-            // Populate Combos
             self.populate_ui_combos(&action_panel);
 
             self.controls = Some(Controls {
@@ -213,29 +191,23 @@ impl WindowHandler for AppState {
                 search_panel,
             });
             
-            // Set initial state of buttons (Disabled if empty)
             handlers::update_process_button_state(self);
 
-            // Timer for UI updates
             SetTimer(hwnd, 1, 100, None);
             
-            // Drag and Drop
             DragAcceptFiles(hwnd, 1);
             ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ALLOW, std::ptr::null_mut());
             ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, std::ptr::null_mut());
             ChangeWindowMessageFilterEx(hwnd, 0x0049, MSGFLT_ALLOW, std::ptr::null_mut()); 
             
-            // Apply saved theme
             let is_dark = theme::resolve_mode(self.theme);
             theme::set_window_frame_theme(hwnd, is_dark);
             if let Some(ctrls) = &mut self.controls {
                 ctrls.update_theme(is_dark, hwnd);
             }
             
-            // Process startup items (CLI args)
             self.handle_startup_items(hwnd);
 
-            // Initialize global logger
             crate::logger::init_logger(self.tx.clone());
             if self.config.log_enabled {
                 crate::logger::set_log_level(self.config.log_level_mask);
@@ -257,42 +229,29 @@ impl WindowHandler for AppState {
             }
             
             match msg {
-                 // Custom Message: Set Enable Force Stop
                 0x8003 => {
                     self.enable_force_stop = wparam != 0;
                     Some(0)
                 },
-                
-                // Custom Message: Set System Guard
                 0x8006 => {
                     self.config.enable_system_guard = wparam != 0;
                     Some(0)
                 },
-                
-                // Custom Message: Set Low Power Mode
                 0x8007 => {
                     self.low_power_mode = wparam != 0;
                     Some(0)
                 },
-                
-                // Custom Message: Query Force Stop
                 0x8004 => {
                     let should_kill = self.handle_force_stop_request(hwnd, wparam);
                      Some(if should_kill { 1 } else { 0 })
                 },
-                
-                // Custom Message: Theme Changed
                 0x8001 => {
                     self.handle_theme_change_request(hwnd, wparam);
                     Some(0)
                 },
-                
-                // Custom Message: Log Settings Changed (0x8008)
                 0x8008 => {
                     let enabled = wparam != 0;
                     let mask = lparam as u8;
-                    // Update state config (best effort, though handlers.rs does it usually on close)
-                    // For now, let's just update the global atomic so it takes effect instantly.
                     if enabled {
                         crate::logger::set_log_level(mask);
                     } else {
@@ -300,30 +259,22 @@ impl WindowHandler for AppState {
                     }
                     Some(0)
                 },
-                
-                // Custom Message: Set Compressed Attr (0x8009)
                 0x8009 => {
                     self.config.set_compressed_attr = wparam != 0;
                     Some(0)
                 },
-
                 WM_COMMAND => Some(self.dispatch_command(hwnd, wparam, lparam)),
                 WM_TIMER => Some(self.handle_timer(hwnd, wparam)),
-                // FIX: handle_resize -> handle_size
                 WM_SIZE => Some(self.handle_size(hwnd)),
                 WM_CLOSE => {
-                    // Check if processing is active
                     let state = self.global_state.load(std::sync::atomic::Ordering::Relaxed);
                     if state == crate::ui::state::ProcessingState::Running as u8 {
                         let msg = w!("A compression job is currently running.\n\nAre you sure you want to quit?");
                         let title = w!("Confirm Exit");
-                        let res = MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), 
-                            MB_YESNO | MB_ICONWARNING);
-                        
+                        let res = MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), MB_YESNO | MB_ICONWARNING);
                         if res == IDNO {
-                            return Some(0); // Cancel closure
+                            return Some(0);
                         }
-                        // If YES, signal worker to stop before destroying to ensure resources clean up
                         self.global_state.store(crate::ui::state::ProcessingState::Stopped as u8, std::sync::atomic::Ordering::Relaxed);
                     }
                     DestroyWindow(hwnd);
@@ -338,9 +289,7 @@ impl WindowHandler for AppState {
                     handlers::process_hdrop(hwnd, wparam as _, self, true);
                     Some(0)
                 },
-                // FIX: Use WM_SETTINGCHANGE to ensure it matches the import, not a variable capture
                 WM_SETTINGCHANGE => {
-                    // System theme changed?
                     if self.theme == AppTheme::System {
                          let is_dark = theme::resolve_mode(self.theme);
                          theme::set_window_frame_theme(hwnd, is_dark);
@@ -354,21 +303,17 @@ impl WindowHandler for AppState {
                 WM_NOTIFY => Some(self.handle_notify(hwnd, lparam)),
                 WM_CONTEXTMENU => Some(self.handle_context_menu(hwnd, wparam)),
                 WM_KEYDOWN => Some(self.handle_keydown(hwnd, wparam, hwnd)),
-                // WM_APP_SHORTCUT = WM_USER + 900
                 1924 => {
-                    // Re-use handle_keydown logic as it does exactly what we want (resolves key -> action)
                     let source_hwnd = lparam as HWND;
                     Some(self.handle_keydown(hwnd, wparam, source_hwnd))
                 },
                 WM_LBUTTONDOWN | crate::types::WM_LBUTTONDBLCLK => {
-                    // Clicking on the window background (outside listview) deselects all
                     if let Some(ctrls) = &self.controls {
                         ctrls.file_list.deselect_all();
                         handlers::update_process_button_state(self);
                     }
                     None
                 },
-                
                 WM_ERASEBKGND => {
                     let hdc = wparam as HDC;
                     let mut rect: RECT = std::mem::zeroed();
@@ -378,7 +323,6 @@ impl WindowHandler for AppState {
                     FillRect(hdc, &rect, brush);
                     Some(1)
                 },
-                
                 _ => None,
             }
         }
@@ -388,14 +332,12 @@ impl WindowHandler for AppState {
 // Logic Helper Functions (Extensions to AppState for Window Logic)
 
 impl AppState {
-    /// Refresh the file list based on current filters
     unsafe fn refresh_file_list(&mut self) {
         if let Some(ctrls) = &self.controls {
             ctrls.file_list.clear_all();
             
             let search = &self.search_state;
             let filter_text = search.text.trim().to_lowercase();
-            // "use_regex" now means "use custom wildcard/regex matcher"
             let use_custom_match = search.use_regex && !search.text.trim().is_empty();
 
             for item in &self.batch_items {
@@ -433,11 +375,9 @@ impl AppState {
                             };
                             crate::utils::matcher::is_match(pattern, &haystack_raw)
                         } else {
-                            // Pattern lowercased? filter_text is already lowercased search.text
                            crate::utils::matcher::is_match(&filter_text, &haystack)
                         }
                     } else if search.case_sensitive {
-                         // Re-read without lowercase if case sensitive
                          let haystack_raw = match search.filter_column {
                             crate::ui::state::FilterColumn::Path => item.path.clone(),
                             crate::ui::state::FilterColumn::Status => {
@@ -465,8 +405,8 @@ impl AppState {
                 
                 // 3. Size Filter
                 let size_match = match search.size_filter {
-                    1 => item.logical_size < 1_000_000, // Small < 1MB
-                    2 => item.logical_size > 100_000_000, // Large > 100MB
+                    1 => item.logical_size < 1_000_000, 
+                    2 => item.logical_size > 100_000_000, 
                     _ => true,
                 };
                 if !size_match { continue; }
@@ -518,21 +458,17 @@ impl AppState {
         }
     }
 
-    /// Populate initial values for comboboxes and checkboxes
     unsafe fn populate_ui_combos(&self, action_panel: &ActionPanel) {
-        // Algorithm Combo
         let h_combo = action_panel.combo_hwnd();
-        let algos = [w!("As Listed"), w!("XPRESS4K"), w!("XPRESS8K"), w!("XPRESS16K"), w!("LZX")];
+        let algos = [w!("As Listed"), w!("XPRESS4K"), w!("XPRESS8K"), w!("XPRESS16K"), w!("LZX"), w!("LZNT1")];
         
         let combo = ComboBox::new(h_combo);
         for alg in algos {
             combo.add_string(String::from_utf16_lossy(alg).as_str());
         }
         
-        // Use EXACT index from config to prevent random reset bugs
         combo.set_selected_index(self.config.combo_algo_index as i32);
         
-        // Action Mode Combo
         let h_action_mode = action_panel.action_mode_hwnd();
         let action_mode_combo = ComboBox::new(h_action_mode);
         let action_modes = ["As Listed", "Compress All", "Decompress All"];
@@ -540,16 +476,13 @@ impl AppState {
             action_mode_combo.add_string(mode);
         }
         
-        // Use EXACT index from config to prevent random reset bugs
         action_mode_combo.set_selected_index(self.config.combo_action_index as i32);
         
-        // Force Checkbox
         if self.force_compress {
             Button::new(action_panel.force_hwnd()).set_checked(true);
         }
     }
 
-    /// Process items passed via CLI
     unsafe fn handle_startup_items(&mut self, hwnd: HWND) {
         unsafe {
             let startup_items = crate::get_startup_items();
@@ -590,7 +523,6 @@ impl AppState {
         }
     }
 
-    /// Dispatch WM_COMMAND messages to appropriate handlers
     unsafe fn dispatch_command(&mut self, hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         unsafe {
             let id = (wparam & 0xFFFF) as u16;
@@ -627,7 +559,6 @@ impl AppState {
                        let hwnd_ctl = lparam as HWND;
                        self.force_compress = Button::new(hwnd_ctl).is_checked();
                  },
-                 // --- Search Panel Handlers ---
                  IDC_SEARCH_EDIT => {
                      if notification_code as u32 == EN_CHANGE {
                         if let Some(ctrls) = &self.controls {
@@ -659,6 +590,7 @@ impl AppState {
                                 2 => Some(WofAlgorithm::Xpress8K),
                                 3 => Some(WofAlgorithm::Xpress16K),
                                 4 => Some(WofAlgorithm::Lzx),
+                                5 => Some(WofAlgorithm::Lznt1),
                                 _ => None,
                             };
                             self.refresh_file_list();
@@ -687,7 +619,6 @@ impl AppState {
                      }
                  },
                  IDC_COMBO_ALGO => {
-                     // Main Process Algorithm Combo
                      if notification_code == CBN_SELCHANGE {
                          self.on_global_algo_changed();
                      }
@@ -699,22 +630,18 @@ impl AppState {
         }
     }
 
-    /// Handle Timer events (Auto-start and UI updates)
     unsafe fn handle_timer(&mut self, hwnd: HWND, wparam: WPARAM) -> LRESULT {
         unsafe {
-            // Timer 2: One-shot auto-start timer for IPC/CLI items
             if wparam == 2 {
                 KillTimer(hwnd, 2);
                 self.ipc_active = false;
                 
                 if !self.pending_ipc_ids.is_empty() {
                      if let Some(ctrls) = &self.controls {
-                         // clear existing selection
                          let count = ctrls.file_list.get_item_count();
                          for i in 0..count {
                              ctrls.file_list.set_selected(i, false);
                          }
-                         // select pending items
                          for &id in &self.pending_ipc_ids {
                              if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
                                  ctrls.file_list.set_selected(pos as i32, true);
@@ -723,12 +650,10 @@ impl AppState {
                      }
                      self.pending_ipc_ids.clear();
                 }
-                // Send lparam=1 to indicate Auto-Start source
                 SendMessageW(hwnd, WM_COMMAND, IDC_BTN_PROCESS_ALL as usize, 1);
                 return 0;
             }
             
-            // Timer 1: Main UI Refresh Loop
             loop {
                 match self.rx.try_recv() {
                     Ok(msg) => self.process_ui_message(hwnd, msg),
@@ -739,7 +664,6 @@ impl AppState {
         }
     }
 
-    /// Process messages from worker threads and update UI
     unsafe fn process_ui_message(&mut self, hwnd: HWND, msg: UiMessage) {
         unsafe {
             match msg {
@@ -749,7 +673,6 @@ impl AppState {
                          pb.set_range(0, total as i32);
                          pb.set_pos(cur as i32);
                          
-                         // Update Status Bar Text
                          let progress_str = crate::utils::fmt_progress(cur, total);
                          let prefix = crate::w!("Processed ");
                          let msg = crate::utils::concat_wstrings(&[prefix, &progress_str]);
@@ -763,7 +686,6 @@ impl AppState {
                      }
                  },
                  UiMessage::Log(entry) => {
-                     // Check if Error level to update Taskbar/Status
                      if entry.level == crate::logger::LogLevel::Error {
                          if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::Error); }
                          
@@ -780,21 +702,16 @@ impl AppState {
                      crate::ui::dialogs::append_log_entry(self.console_hwnd, entry);
                  },
                  UiMessage::Finished => {
-                     // Check queue for more items
                      if !self.processing_queue.is_empty() {
                          let max = self.config.max_concurrent_items as usize;
-                         // Determine next batch
                          let next_indices: Vec<usize> = if max > 0 && self.processing_queue.len() > max {
                              self.processing_queue.drain(0..max).collect()
                          } else {
                              self.processing_queue.drain(..).collect()
                          };
                          
-                         // Start next batch without going Idle
-                         // Note: We are already in 'Running' state, so we just spawn the next thread
                          handlers::start_processing_internal(self, hwnd, next_indices);
                          
-                         // Update queue status in status bar
                          let queued_count = self.processing_queue.len();
                          if queued_count > 0 {
                              if let Some(ctrls) = &self.controls {
@@ -806,7 +723,6 @@ impl AppState {
                              }
                          }
                      } else {
-                         // Queue empty, really finished
                          self.global_state.store(crate::ui::state::ProcessingState::Idle as u8, std::sync::atomic::Ordering::Relaxed);
                          if let Some(tb) = &self.taskbar { tb.set_state(TaskbarState::NoProgress); }
                          if let Some(ctrls) = &self.controls {
@@ -814,10 +730,8 @@ impl AppState {
                          }
                          handlers::update_process_button_state(self);
 
-                         // Re-acquire WinAPI
-                         // Re-acquire WinAPI
                          if crate::types::GetForegroundWindow() != hwnd {
-                             flash_window(hwnd); // we need to update flash_window too
+                             flash_window(hwnd);
                          }
                      }
                  },
@@ -834,11 +748,10 @@ impl AppState {
                              let ratio_str = crate::utils::calculate_ratio_string(logical, disk);
                              let count_str = u64_to_wstring(count);
                              
-                             // Find visual row by ID
                              if let Some(row) = ctrls.file_list.find_item_by_id(id) {
                                  ctrls.file_list.update_item_text(row, 4, &log_str);
                                  ctrls.file_list.update_item_text(row, 6, &disk_str);
-                                 ctrls.file_list.update_item_text(row, 7, &ratio_str); // Ratio
+                                 ctrls.file_list.update_item_text(row, 7, &ratio_str);
                                  
                                  let current_state = self.global_state.load(Ordering::Relaxed);
                                  if current_state == ProcessingState::Stopped as u8 {
@@ -866,18 +779,15 @@ impl AppState {
                  },
                  UiMessage::RowProgress(row_idx, cur, tot, bytes) => {
                      if let Some(ctrls) = &self.controls {
-                         // Map batch index to item ID
                          let item_id = self.batch_items.get(row_idx as usize).map(|i| i.id);
                          
                          if let Some(id) = item_id {
                              if let Some(row) = ctrls.file_list.find_item_by_id(id) {
-                                 // Update Progress Text (Column 8)
                                  let cur_w = u64_to_wstring(cur);
                                  let tot_w = u64_to_wstring(tot);
                                  let prog_str = concat_wstrings(&[&cur_w, &to_wstring("/"), &tot_w]);
                                  ctrls.file_list.update_item_text(row, 8, &prog_str);
                                  
-                                 // Update Size (Column 6) - Live update
                                  if bytes > 0 {
                                      let size_str = format_size(bytes);
                                      ctrls.file_list.update_item_text(row, 6, &size_str);
@@ -887,7 +797,6 @@ impl AppState {
                                  if current_state == ProcessingState::Stopped as u8 {
                                       ctrls.file_list.update_item_text(row, 9, w!("Cancelled"));
                                  } else if current_state == ProcessingState::Paused as u8 {
-                                     // If effectively paused, don't let "Running" overwrite "Paused"
                                       ctrls.file_list.update_item_text(row, 9, w!("Paused"));
                                  } else {
                                       ctrls.file_list.update_item_text(row, 9, w!("Running"));
@@ -903,23 +812,19 @@ impl AppState {
                              if let Some(row) = ctrls.file_list.find_item_by_id(id) {
                                  ctrls.file_list.update_item_text(row, 9, w!("Done"));
                                  
-                                 // Update Progress Text (Column 8)
                                  let tot_w = u64_to_wstring(total_count);
                                  let prog_str = concat_wstrings(&[&tot_w, &to_wstring("/"), &tot_w]);
                                  ctrls.file_list.update_item_text(row, 8, &prog_str);
                                  
-                                 // Update final size
                                  if final_bytes > 0 {
                                      let size_str = format_size(final_bytes);
                                      ctrls.file_list.update_item_text(row, 6, &size_str);
                                  }
                                  
-                                 // Update visuals for finished item (Watch button only, no Play button)
                                  ctrls.file_list.update_playback_controls(row, ProcessingState::Stopped, true);
                              }
                          }
 
-                         // Update in-memory state
                          if let Some(item) = self.batch_items.get_mut(row_idx as usize) {
                              item.disk_size = final_bytes;
                              item.status = BatchStatus::Complete;
@@ -927,29 +832,23 @@ impl AppState {
                              item.progress = (total_count, total_count);
                          }
 
-                         // Update UI for final state
                          if let Some(ctrls) = &self.controls {
                              if let Some(id) = item_id {
                                  if let Some(row) = ctrls.file_list.find_item_by_id(id) {
-                                     // Calculate Ratio with final sizes
                                      if let Some(item) = self.batch_items.get(row_idx as usize) {
                                           let ratio_str = crate::utils::calculate_ratio_string(item.logical_size, final_bytes);
                                           ctrls.file_list.update_item_text(row, 7, &ratio_str);
                                      }
     
-                                     // Update State/Algorithm Column
                                      let state_str = match final_state {
                                          CompressionState::None => w!("-"),
                                          CompressionState::Specific(algo) => match algo {
                                              WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
-                                             WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
+                                             WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"), WofAlgorithm::Lznt1 => w!("LZNT1"),
                                          },
-                                         CompressionState::Legacy => w!("LZNT1"),
                                          CompressionState::Mixed => w!("Mixed"),
                                      };
                                      ctrls.file_list.update_item_text(row, 1, state_str);
-                                     
-                                     // Start button text already set above
                                  }
                              }
                          }
@@ -957,29 +856,23 @@ impl AppState {
                      handlers::update_process_button_state(self);
                  },
                  UiMessage::WatcherTrigger(path, algo) => {
-                     // Auto-add and start processing for watcher
                      if !self.batch_items.iter().any(|item| item.path == path) {
-                         // Only add if not already in list
                          let id = self.add_batch_item(path.clone());
                          self.set_item_algorithm(id, algo);
                          
-                         // Add to UI
                          if let Some(ctrls) = &self.controls {
                              if let Some(item) = self.batch_items.last() {
                                   ctrls.file_list.add_item(id, item, w!("Pending..."), w!("-"), w!("-"), CompressionState::None);
                              }
                              
-                             // Force "As Listed" mode so per-item algorithm is used
                              let combo = crate::ui::wrappers::ComboBox::new(ctrls.action_panel.combo_hwnd());
                              let original_idx = combo.get_selected_index();
-                             combo.set_selected_index(0); // "As Listed" is index 0
+                             combo.set_selected_index(0);
                              
-                             // Trigger processing for this item immediately
                              if let Some(pos) = self.batch_items.iter().position(|i| i.id == id) {
                                  handlers::start_processing(self, hwnd, vec![pos]);
                              }
                              
-                             // Restore original combo selection
                              if let Some(ctrls) = &self.controls {
                                  crate::ui::wrappers::ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(original_idx);
                              }
@@ -1000,19 +893,18 @@ impl AppState {
                          if let Some(ctrls) = &self.controls {
                              ctrls.file_list.update_item_text(pos as i32, 4, &log_str);
                              ctrls.file_list.update_item_text(pos as i32, 6, &disk_str);
-                             ctrls.file_list.update_item_text(pos as i32, 7, &ratio_str); // Ratio
+                             ctrls.file_list.update_item_text(pos as i32, 7, &ratio_str);
                              
                              let state_str = match state {
                                 CompressionState::None => w!("-"),
                                 CompressionState::Specific(algo) => match algo {
                                     WofAlgorithm::Xpress4K => w!("XPRESS4K"), WofAlgorithm::Xpress8K => w!("XPRESS8K"),
-                                    WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"),
+                                    WofAlgorithm::Xpress16K => w!("XPRESS16K"), WofAlgorithm::Lzx => w!("LZX"), WofAlgorithm::Lznt1 => w!("LZNT1"),
                                 },
-                                CompressionState::Legacy => w!("LZNT1"),
                                 CompressionState::Mixed => w!("Mixed"),
                              };
                              ctrls.file_list.update_item_text(pos as i32, 1, state_str);
-                             ctrls.file_list.update_item_text(pos as i32, 9, w!("Pending")); // Status is now 9
+                             ctrls.file_list.update_item_text(pos as i32, 9, w!("Pending"));
                              let count = self.batch_items.len();
                              let count_w = u64_to_wstring(count as u64);
                              let msg = concat_wstrings(&[&count_w, w!(" item(s) analyzed.")]);
@@ -1024,7 +916,6 @@ impl AppState {
                  UiMessage::UpdateEstimate(id, algo, est_size) => {
                      if let Some(pos) = self.batch_items.iter().position(|item| item.id == id) {
                          if let Some(item) = self.batch_items.get_mut(pos) {
-                             // Cache the result for this algorithm
                              item.cache_estimate(algo, est_size);
                          }
                          if let Some(ctrls) = &self.controls {
@@ -1032,7 +923,6 @@ impl AppState {
                              ctrls.file_list.update_item_text(pos as i32, 5, &est_str_local);
                          }
                      }
-                     // Update accuracy indicator
                      self.update_accuracy_label();
                  },
                  _ => {}
@@ -1046,59 +936,31 @@ impl AppState {
             if GetClientRect(hwnd, &mut client_rect) != 0 {
                 if let Some(ctrls) = &mut self.controls {
                      use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}};
-                     
-                     // Declarative Main Window Layout
-                     // [ Header Area (Status Text + Buttons) ]
-                     // [ Search Panel ]
-                     // [ File List ]
-                     // [ Progress Bar ]
-                     // [ Action Panel ]
 
                      LayoutNode::col(0, 0)
-                        // 1. Header Area: Status Label (Left) + Header Buttons (Right)
                         .with_child(LayoutNode::row(10, 10)
                             .with(ctrls.status_bar.label_hwnd(), Flex(1.0))
-                            .with(ctrls.header_panel.hwnd(), Fixed(220)) // Accommodate buttons
-                            .with_policy(Fixed(50)) // Fixed height for header row
+                            .with(ctrls.header_panel.hwnd(), Fixed(220))
+                            .with_policy(Fixed(50))
                         )
-                        // 2. Search Panel
                         .with(ctrls.search_panel.panel_hwnd(), Fixed(85))
-                        // 3. File List (Expands)
-                        .with_child(LayoutNode::col(10, 0) // Padding around list
+                        .with_child(LayoutNode::col(10, 0)
                              .with(ctrls.file_list.hwnd(), Flex(1.0))
                              .with_policy(Flex(1.0))
                         )
-                        // 4. Progress Bar (Status Bar Part 2)
-                        .with_child(LayoutNode::col(10, 5) // Padding around progress
+                        .with_child(LayoutNode::col(10, 5)
                              .with(ctrls.status_bar.progress_hwnd(), Fixed(22))
-                             .with_policy(Fixed(32)) // Wrapper height
+                             .with_policy(Fixed(32))
                         )
-                        // 5. Action Panel
                         .with(ctrls.action_panel.hwnd(), Fixed(60))
                         .apply_layout(client_rect);
                         
-                     // Trigger content layout updates for container panels
                      ctrls.header_panel.refresh_layout();
                      ctrls.search_panel.refresh_layout();
                      ctrls.action_panel.refresh_layout();
                      
-                     // Force FileList to update columns
                      let mut fl_rect: RECT = std::mem::zeroed();
                      GetWindowRect(ctrls.file_list.hwnd(), &mut fl_rect);
-                     // Map to parent? No, on_resize logic I wrote uses GetClientRect internally now, 
-                     // so the argument is mostly ignored or just used for outer bounds.
-                     // Let's pass the window rect for consistency or just a dummy one if internal logic ignores it.
-                     // The logic I wrote uses the passed rect for SetWindowPos, BUT applied_layout ALREADY did SetWindowPos.
-                     // I should modify on_resize to NOT do SetWindowPos if called from here, OR just basic resize.
-                     // But wait, the previous on_resize performed SetWindowPos AND column resize.
-                     // If I call it now, it might try to SetWindowPos again?
-                     // If I pass the rect from GetWindowRect (screen coords), that's wrong for SetWindowPos (parent coords).
-                     // However, the new logic in file_list.rs reads:
-                     // let width = rect.right - rect.left; ... SetWindowPos(...)
-                     // If I pass a rect that matches current size, SetWindowPos is a no-op (or harmless).
-                     // But I don't have the parent-relative coordinates easily without MapWindowPoints.
-                     
-                     // Force FileList to update columns
                      ctrls.file_list.update_columns();
                 }
             }
@@ -1106,14 +968,10 @@ impl AppState {
         }
     }
 
-    /// Update the accuracy indicator label in the action panel.
-    /// Calculates: Accuracy = min(Est, OnDisk) / max(Est, OnDisk) for compressed items.
-    /// This shows how close the estimation is to actual compressed size.
     unsafe fn update_accuracy_label(&self) {
         if let Some(ctrls) = &self.controls {
             let (mut sum_est, mut sum_disk) = (0u64, 0u64);
             for item in &self.batch_items {
-                // Only count items with valid estimates AND disk sizes different from logical (compressed)
                 if item.estimated_size > 0 && item.disk_size > 0 && item.disk_size < item.logical_size {
                     sum_est += item.estimated_size;
                     sum_disk += item.disk_size;
@@ -1121,7 +979,6 @@ impl AppState {
             }
             
             let text = if sum_disk > 0 && sum_est > 0 {
-                // Accuracy = min/max (how close they are, 100% = perfect)
                 let accuracy = if sum_est > sum_disk {
                     (sum_disk as f64 / sum_est as f64) * 100.0
                 } else {
@@ -1136,39 +993,34 @@ impl AppState {
         }
     }
 
-    /// Re-estimate all items when the global algorithm ComboBox changes
     unsafe fn on_global_algo_changed(&mut self) {
-        // Get the selected algorithm from the ComboBox
         let algo = if let Some(ctrls) = &self.controls {
                 let idx = ComboBox::new(ctrls.action_panel.combo_hwnd()).get_selected_index();
                 match idx {
-                    0 => None, // "As Listed" - use per-item algorithm
+                    0 => None,
                     1 => Some(WofAlgorithm::Xpress4K),
                     2 => Some(WofAlgorithm::Xpress8K),
                     3 => Some(WofAlgorithm::Xpress16K),
                     4 => Some(WofAlgorithm::Lzx),
+                    5 => Some(WofAlgorithm::Lznt1),
                     _ => Some(WofAlgorithm::Xpress8K),
                 }
             } else {
                 return;
             };
 
-            // Check cache first and collect items that need estimation
             let mut items_to_estimate: Vec<(u32, String, WofAlgorithm)> = Vec::new();
             
             for (i, item) in self.batch_items.iter_mut().enumerate() {
                 let effective_algo = algo.unwrap_or(item.algorithm);
                 
-                // Check cache
                 if let Some(cached) = item.get_cached_estimate(effective_algo) {
-                    // Use cached value instantly
                     item.estimated_size = cached;
                     let est_str = format_size(cached);
                     if let Some(ctrls) = &self.controls {
                         ctrls.file_list.update_item_text(i as i32, 5, &est_str);
                     }
                 } else {
-                    // Need to calculate
                     items_to_estimate.push((item.id, item.path.clone(), effective_algo));
                     if let Some(ctrls) = &self.controls {
                         ctrls.file_list.update_item_text(i as i32, 5, w!("Estimating..."));
@@ -1180,7 +1032,6 @@ impl AppState {
                 return;
             }
 
-            // Spawn estimation thread only for items that need it
             let tx = self.tx.clone();
             std::thread::spawn(move || {
                 for (id, path, algo) in items_to_estimate {
@@ -1201,7 +1052,6 @@ impl AppState {
                 self.config.window_height = rect.bottom - rect.top;
             }
             if let Some(ctrls) = &self.controls {
-                // Save EXACT combobox indices to persist UI state correctly
                 let algo_idx = ComboBox::new(ctrls.action_panel.combo_hwnd()).get_selected_index();
                 self.config.combo_algo_index = if algo_idx >= 0 { algo_idx as u8 } else { 0 };
                 
@@ -1215,7 +1065,6 @@ impl AppState {
             self.config.low_power_mode = self.low_power_mode;
             self.config.save();
             
-            // Force explicit process exit to ensure all threads terminate
             std::process::exit(0);
         }
     }
@@ -1235,6 +1084,7 @@ impl AppState {
                          "xpress4k" => WofAlgorithm::Xpress4K,
                          "xpress8k" => WofAlgorithm::Xpress8K,
                          "xpress16k" => WofAlgorithm::Xpress16K,
+                         "lznt1" => WofAlgorithm::Lznt1,
                          "lzx" => WofAlgorithm::Lzx,
                          _ => WofAlgorithm::Xpress8K,
                      };
@@ -1246,7 +1096,6 @@ impl AppState {
                      if !self.batch_items.iter().any(|item| item.path == path) {
                          self.ingest_paths(vec![path.clone()]);
                          
-                         // Apply IPC specifics (Algorithm/Action)
                          if let Some(pos) = self.batch_items.iter().position(|i| i.path == path) {
                               let id = self.batch_items[pos].id;
                               if let Some(item) = self.batch_items.get_mut(pos) {
@@ -1255,12 +1104,11 @@ impl AppState {
                               }
                               
                               if let Some(ctrls) = &self.controls {
-                                   ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(0); // Reset Global Combo
+                                   ComboBox::new(ctrls.action_panel.combo_hwnd()).set_selected_index(0);
                                    
-                                   // Update UI for Algo/Action
                                    let algo_name = match algo {
                                        WofAlgorithm::Xpress4K => "XPRESS4K", WofAlgorithm::Xpress8K => "XPRESS8K",
-                                       WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX",
+                                       WofAlgorithm::Xpress16K => "XPRESS16K", WofAlgorithm::Lzx => "LZX", WofAlgorithm::Lznt1 => "LZNT1",
                                    };
                                    let action_name = match action {
                                        BatchAction::Compress => "Compress", BatchAction::Decompress => "Decompress",
@@ -1291,7 +1139,6 @@ impl AppState {
     
     unsafe fn handle_notify(&mut self, hwnd: HWND, lparam: LPARAM) -> LRESULT {
         unsafe {
-            // Global Header Resize Prevention
             if crate::ui::handlers::should_block_header_resize(lparam) {
                  return 1; 
             }
@@ -1311,7 +1158,6 @@ impl AppState {
                          return 1;
                      }
                 } else if nmhdr.code == NM_CUSTOMDRAW {
-                    // Handle custom draw for Ratio column color coding
                     if let Some(ctrls) = &self.controls {
                         let is_dark = theme::resolve_mode(self.theme);
                         let list_hwnd = ctrls.file_list.hwnd();
@@ -1352,20 +1198,14 @@ impl AppState {
              let slice = std::slice::from_raw_parts(name_ptr, len);
              let name = String::from_utf16_lossy(slice);
              
-             // 1. Check if ignored
              if self.ignored_lock_processes.contains(&name) {
                  return false;
              }
              
-             // 2. Check if dialog already active for this process
              if self.active_lock_dialog.as_deref() == Some(&name) {
-                 // Prevent stacking dialogs for the same process.
-                 // Return false (don't force stop) to let this specific file fail graciously 
-                 // while the user decides on the main dialog.
                  return false;
              }
              
-             // 3. Show dialog
              self.active_lock_dialog = Some(name.clone());
              
              let is_dark = theme::resolve_mode(self.theme);
@@ -1374,7 +1214,6 @@ impl AppState {
              self.active_lock_dialog = None;
              
              if !result {
-                 // User said No (Cancel), ignore this process for the rest of the session/batch
                  self.ignored_lock_processes.insert(name);
              }
              

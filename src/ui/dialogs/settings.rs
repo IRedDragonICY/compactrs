@@ -1,3 +1,4 @@
+/* --- src/ui/dialogs/settings.rs --- */
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::state::AppTheme;
 use crate::ui::builder::ControlBuilder;
@@ -172,22 +173,17 @@ impl WindowHandler for SettingsState {
             
             // Helpers for consistent styling
             let section_header = |b: &mut ContainerBuilder, text: &str| {
-                // Fixed height header: 30px content + 10px padding*2 = 50? No, padding 10 is internal. 
-                // Let's use padding 5, Fixed(35) total.
                 b.row_with_policy(5, SizePolicy::Fixed(35), |r: &mut ContainerBuilder| {
                     r.label(text, SizePolicy::Flex(1.0));
                 });
             };
 
             let icon_row = |b: &mut ContainerBuilder, icon: &str, title: &[u16], sub: &[u16], control_fn: &dyn Fn(&mut ContainerBuilder)| {
-                // Fixed height row: 40px standard
                 b.row_with_policy(5, SizePolicy::Fixed(42), |r: &mut ContainerBuilder| {
                      // Icon Column - Fixed width 30
                      r.col_with_policy(0, SizePolicy::Fixed(30), |c: &mut ContainerBuilder| {
                              let h = ControlBuilder::new(hwnd, 0).label(false).text(icon).font(self.h_font_icon).dark_mode(self.is_dark).build();
                              crate::ui::subclass::apply_theme_to_control(h, self.is_dark);
-                             // Icon centered? Flex spacer around? For now standard top-left
-                             // Use Flex spacer to vertically center if needed.
                              c.add_child(crate::ui::layout::LayoutNode::new_leaf(h, SizePolicy::Fixed(24)));
                      });
                      
@@ -207,15 +203,12 @@ impl WindowHandler for SettingsState {
             };
 
             // Root Container
-            // Start with Fixed or Auto layout?
-            // Since we are forcing Fixed size on children, Root can be whatever (Vertical).
-            let root = ctx.vertical(15, 6, |v: &mut ContainerBuilder| { // Padding 15, Gap 6 (Tight)
+            let root = ctx.vertical(15, 6, |v: &mut ContainerBuilder| {
                 
                 // 1. Appearance
                 section_header(v, "Appearance");
                 
                 icon_row(v, "\u{E713}", crate::w!("Application Theme"), crate::w!("Choose between Light, Dark, or System Default"), &|c: &mut ContainerBuilder| {
-                     // Combo height 24 (Standard)
                      c.combobox(IDC_COMBO_THEME, &["System Default", "Dark Mode", "Light Mode"], 
                          match self.theme { AppTheme::System => 0, AppTheme::Dark => 1, AppTheme::Light => 2 }, 
                          SizePolicy::Fixed(24)); 
@@ -353,13 +346,9 @@ impl WindowHandler for SettingsState {
                      r.label("", SizePolicy::Flex(1.0));
                      r.button_w(IDC_BTN_RESET_ALL, crate::w!("Reset Application Defaults"), SizePolicy::Fixed(180));
                 });
-                
-                // Bottom Spacer
-               // v.label("", SizePolicy::Fixed(10));
             });
             
             // --- FORCE THEME APPLICATION ---
-            // Ensure all controls are correctly themed before layout/show
             crate::ui::theme::apply_theme_recursive(hwnd, self.is_dark);
 
             // --- EXECUTE LAYOUT ---
@@ -591,5 +580,3 @@ impl WindowHandler for SettingsState {
         }
     }
 }
-
-

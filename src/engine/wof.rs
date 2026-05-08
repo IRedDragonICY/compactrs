@@ -1,3 +1,4 @@
+/* --- src/engine/wof.rs --- */
 #![allow(non_snake_case, non_camel_case_types)]
 use std::ffi::c_void;
 use std::fs::File;
@@ -51,8 +52,8 @@ pub fn get_real_file_size(path: &str) -> u64 {
     }
 }
 
-/// Get the WOF compression algorithm used for a file
-/// Returns None if file is not WOF-compressed, Some(algorithm) if it is
+/// Get the WOF or LZNT1 compression algorithm used for a file
+/// Returns None if file is not compressed, Some(algorithm) if it is
 pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
     unsafe {
         let wide = PathBuffer::from(path);
@@ -77,27 +78,26 @@ pub fn get_wof_algorithm(path: &str) -> Option<WofAlgorithm> {
 }
 
 /// Detect the compression state of a file (WOF or Legacy NTFS).
-/// Returns CompressionState::Specific for WOF, Legacy for NTFS, None for uncompressed.
+/// Returns CompressionState::Specific for both WOF and LZNT1, None for uncompressed.
 pub fn detect_compression_state(path: &str) -> CompressionState {
-    // First check WOF
     if let Some(algo) = get_wof_algorithm(path) {
         return CompressionState::Specific(algo);
     }
     
-    // Check NTFS compression attribute
+    // Check NTFS compression attribute as fallback if handle couldn't be opened
     unsafe {
         let wide = PathBuffer::from(path);
         let attrs = crate::types::GetFileAttributesW(wide.as_ptr());
         if attrs != u32::MAX && (attrs & crate::types::FILE_ATTRIBUTE_COMPRESSED) != 0 {
-            return CompressionState::Legacy;
+            return CompressionState::Specific(WofAlgorithm::Lznt1);
         }
     }
     
     CompressionState::None
 }
 
-/// Get the WOF compression algorithm from an already-opened file handle.
-/// Returns None if file is not WOF-compressed.
+/// Get the WOF or LZNT1 compression algorithm from an already-opened file handle.
+/// Returns None if file is not compressed.
 /// 
 /// # Safety
 /// The handle must be a valid, open file handle with at least read access.
@@ -118,36 +118,33 @@ pub fn get_wof_algorithm_from_handle(handle: HANDLE) -> Option<WofAlgorithm> {
             std::ptr::null_mut(),
         );
         
-        if result == 0 {
-            return None;
+        if result != 0 && bytes_returned >= 20 {
+            let wof_info = &out_buffer[0..8];
+            let provider = u32::from_le_bytes([wof_info[4], wof_info[5], wof_info[6], wof_info[7]]);
+            
+            if provider == 2 {
+                let file_info = &out_buffer[8..20];
+                let algorithm = u32::from_le_bytes([file_info[4], file_info[5], file_info[6], file_info[7]]);
+                
+                return match algorithm {
+                    0 => Some(WofAlgorithm::Xpress4K),
+                    1 => Some(WofAlgorithm::Lzx),
+                    2 => Some(WofAlgorithm::Xpress8K),
+                    3 => Some(WofAlgorithm::Xpress16K),
+                    _ => None,
+                };
+            }
         }
         
-        // Parse the output buffer
-        // First comes WOF_EXTERNAL_INFO (8 bytes), then FILE_PROVIDER_EXTERNAL_INFO_V1 (12 bytes)
-        if bytes_returned < 20 {
-            return None;
+        // Fallback to check NTFS LZNT1 compression
+        let mut info: crate::types::BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+        if crate::types::GetFileInformationByHandle(handle, &mut info) != 0 {
+            if (info.dwFileAttributes & crate::types::FILE_ATTRIBUTE_COMPRESSED) != 0 {
+                return Some(WofAlgorithm::Lznt1);
+            }
         }
         
-        let wof_info = &out_buffer[0..8];
-        // provider is at offset 4 (u32)
-        let provider = u32::from_le_bytes([wof_info[4], wof_info[5], wof_info[6], wof_info[7]]);
-        
-        // Check if it's WOF_PROVIDER_FILE (2)
-        if provider != 2 {
-            return None;
-        }
-        
-        let file_info = &out_buffer[8..20];
-        // algorithm is at offset 4 (u32)
-        let algorithm = u32::from_le_bytes([file_info[4], file_info[5], file_info[6], file_info[7]]);
-        
-        match algorithm {
-            0 => Some(WofAlgorithm::Xpress4K),
-            1 => Some(WofAlgorithm::Lzx),
-            2 => Some(WofAlgorithm::Xpress8K),
-            3 => Some(WofAlgorithm::Xpress16K),
-            _ => None,
-        }
+        None
     }
 }
 
@@ -172,6 +169,7 @@ pub enum WofAlgorithm {
     Lzx = 1,
     Xpress8K = 2,
     Xpress16K = 3,
+    Lznt1 = 4, // Legacy NTFS Compression
 }
 
 impl WofAlgorithm {
@@ -185,10 +183,8 @@ impl WofAlgorithm {
 pub enum CompressionState {
     /// Not compressed (or not WOF compressed)
     None,
-    /// Compressed with a specific WOF algorithm (all files if folder)
+    /// Compressed with a specific WOF or LZNT1 algorithm (all files if folder)
     Specific(WofAlgorithm),
-    /// Compressed with legacy NTFS compression (LZNT1)
-    Legacy,
     /// Contains files with different compression algorithms (folder only)
     Mixed,
 }
@@ -484,6 +480,63 @@ fn compress_file_with_backup_semantics(path: &str, algo: WofAlgorithm, force: bo
 
 pub fn compress_file_handle(file: &File, algo: WofAlgorithm, force: bool) -> Result<bool, u32> {
     let handle = file.as_raw_handle() as HANDLE;
+    let mut bytes_returned = 0u32;
+
+    if algo == WofAlgorithm::Lznt1 {
+        unsafe {
+            // Remove WOF if present
+            crate::types::DeviceIoControl(
+                handle,
+                FSCTL_DELETE_EXTERNAL_BACKING,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut bytes_returned,
+                std::ptr::null_mut(),
+            );
+            
+            // Set LZNT1 Compression
+            let compression_state: u16 = COMPRESSION_FORMAT_DEFAULT;
+            let res = crate::types::DeviceIoControl(
+                handle,
+                FSCTL_SET_COMPRESSION,
+                &compression_state as *const _ as *mut c_void,
+                std::mem::size_of::<u16>() as u32,
+                std::ptr::null_mut(),
+                0,
+                &mut bytes_returned,
+                std::ptr::null_mut(),
+            );
+            
+            if res == 0 {
+                return Err(crate::types::GetLastError());
+            }
+        }
+        return Ok(true);
+    }
+
+    // --- Standard WOF Compression Path ---
+
+    unsafe {
+        // If currently LZNT1 compressed, remove it to apply WOF cleanly
+        let mut info: crate::types::BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+        if crate::types::GetFileInformationByHandle(handle, &mut info) != 0 {
+            if (info.dwFileAttributes & crate::types::FILE_ATTRIBUTE_COMPRESSED) != 0 {
+                let none_state: u16 = COMPRESSION_FORMAT_NONE;
+                let _ = crate::types::DeviceIoControl(
+                    handle,
+                    FSCTL_SET_COMPRESSION,
+                    &none_state as *const _ as *mut c_void,
+                    std::mem::size_of::<u16>() as u32,
+                    std::ptr::null_mut(),
+                    0,
+                    &mut bytes_returned,
+                    std::ptr::null_mut(),
+                );
+            }
+        }
+    }
 
     // 1. Prepare WOF_EXTERNAL_INFO
     let wof_info = WOF_EXTERNAL_INFO {
@@ -512,8 +565,6 @@ pub fn compress_file_handle(file: &File, algo: WofAlgorithm, force: bool) -> Res
         let file_slice = std::slice::from_raw_parts(file_ptr, size_of::<FILE_PROVIDER_EXTERNAL_INFO_V1>());
         input_buffer.extend_from_slice(file_slice);
     }
-
-    let mut bytes_returned = 0u32;
     
     unsafe {
         let result = crate::types::DeviceIoControl(

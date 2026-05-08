@@ -1,3 +1,4 @@
+/* --- src/ui/components/file_list.rs --- */
 //! FileListView - A Facade for Win32 ListView control.
 //!
 //! Encapsulates raw Win32 API calls (`SendMessageW`, `LVM_*`) behind a clean,
@@ -199,6 +200,7 @@ impl FileListView {
             WofAlgorithm::Xpress8K => w!("XPRESS8K"),
             WofAlgorithm::Xpress16K => w!("XPRESS16K"),
             WofAlgorithm::Lzx => w!("LZX"),
+            WofAlgorithm::Lznt1 => w!("LZNT1"),
         };
         
         let action_wide = if item.action == crate::ui::state::BatchAction::Compress {
@@ -220,8 +222,8 @@ impl FileListView {
                 WofAlgorithm::Xpress8K => w!("XPRESS8K"),
                 WofAlgorithm::Xpress16K => w!("XPRESS16K"),
                 WofAlgorithm::Lzx => w!("LZX"),
+                WofAlgorithm::Lznt1 => w!("LZNT1"),
             },
-            CompressionState::Legacy => w!("LZNT1"),
             CompressionState::Mixed => w!("Mixed"),
         };
 
@@ -591,6 +593,7 @@ impl FileListView {
             WofAlgorithm::Xpress8K => w!("XPRESS8K"),
             WofAlgorithm::Xpress16K => w!("XPRESS16K"),
             WofAlgorithm::Lzx => w!("LZX"),
+            WofAlgorithm::Lznt1 => w!("LZNT1"),
         };
         self.update_item_text(row, columns::ALGORITHM, name);
     }

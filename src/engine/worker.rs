@@ -1,3 +1,4 @@
+/* --- src/engine/worker.rs --- */
 use std::sync::{Arc, Mutex, atomic::{AtomicU8, AtomicU64, Ordering}};
 use std::sync::mpsc::{Sender, sync_channel, Receiver};
 use crate::types::*;
@@ -327,10 +328,10 @@ fn process_file_core(
                         crate::log_trace!(&["Compressed: ", path].concat());
                         (ProcessResult::Success, disk_size)
                     } else if force {
-                        // Force mode: Check if file is actually compressed (WOF or Legacy)
+                        // Force mode: Check if file is actually compressed (WOF or LZNT1)
                         let state = detect_compression_state(path);
                         match state {
-                            CompressionState::Specific(_) | CompressionState::Legacy => {
+                            CompressionState::Specific(_) => {
                                 crate::log_trace!(&["Compressed (forced, no savings): ", path].concat());
                                 (ProcessResult::Success, disk_size)
                             },

@@ -1,3 +1,4 @@
+/* --- src/ui/dialogs/watcher.rs --- */
 #![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use crate::ui::builder::ControlBuilder;
@@ -9,9 +10,6 @@ use crate::w;
 use crate::utils::format_size;
 use crate::ui::framework::WindowHandler;
 use crate::types::*;
-
-// Imported from crate::types::*;
-
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -69,9 +67,6 @@ pub unsafe fn show_watcher_modal(
 
     let bg_brush = crate::ui::theme::get_background_brush(is_dark);
     
-    // Check for existing window
-    
-
     let class_name = "CompactRS_Watcher";
     let class_name_w = crate::utils::to_wstring(class_name);
     let existing_hwnd = unsafe { FindWindowW(class_name_w.as_ptr(), std::ptr::null()) };
@@ -87,7 +82,6 @@ pub unsafe fn show_watcher_modal(
     use crate::ui::framework::{WindowBuilder, WindowAlignment, show_modal};
     show_modal(
         WindowBuilder::new(&mut state, class_name, WATCHER_TITLE)
-            // Use WS_OVERLAPPEDWINDOW for a normal resizable window, or mix styles
             .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_THICKFRAME | WS_MAXIMIZEBOX)
             .size(700, 400)
             .align(WindowAlignment::CenterOnParent)
@@ -267,36 +261,25 @@ impl WatcherState {
              )
              .apply_layout(rect);
 
-         // Dynamic Column Resizing
-         // We must use the ListView's *actual* client width to be accurate.
-         // rect is the parent window's rect, but h_list might have borders or be smaller.
          let lv_rect = crate::utils::get_client_rect(h_list);
          let list_w = lv_rect.right - lv_rect.left;
          
-         // Calculate fixed width from our constant definition
          let fixed_w: i32 = WATCHER_COLUMNS.iter().skip(1).map(|c| c.width).sum();
-
-         // Precise calculation: Fill exactly the available width.
          let path_w = list_w - fixed_w; 
 
          if path_w > 100 {
              let lv = ListView::new(h_list);
              lv.set_column_width(0, path_w);
-             // Other columns should already be set to their construct-time defaults or last set value
-             // But we should ensure Action is correct if we want to be safe, though constant is cleaner.
-             // lv.set_column_width(6, 60); 
          }
     }
-    
-    // on_resize removed (replaced by do_layout called from WM_SIZE)
 
     fn on_min_max_info(&mut self, _hwnd: HWND, mmi: *mut MINMAXINFO) {
         unsafe {
-            // Set minimum size to prevent UI breaking
             (*mmi).ptMinTrackSize.x = 600;
             (*mmi).ptMinTrackSize.y = 300;
         }
     }
+    
     unsafe fn refresh_list(&self, h_list: HWND) {
         let lv = ListView::new(h_list);
         lv.clear();
@@ -306,13 +289,9 @@ impl WatcherState {
             let path = task.get_path();
             lv.insert_item(i as i32, &path, 0);
 
-            // Calc Size
-            // Note: This is synchronous and might block UI for large folders.
-            // For a settings dialog, this is acceptable for now.
             let metrics = scan_path_metrics(&path);
             let size_str = String::from_utf16_lossy(&format_size(metrics.logical_size));
             let disk_str = String::from_utf16_lossy(&format_size(metrics.disk_size));
-            // Trim nulls if format_size returns them
             let size_str = size_str.trim_matches('\0');
             let disk_str = disk_str.trim_matches('\0');
             
@@ -353,6 +332,7 @@ impl WatcherState {
                 WofAlgorithm::Xpress8K => "XPRESS8K",
                 WofAlgorithm::Xpress16K => "XPRESS16K",
                 WofAlgorithm::Lzx => "LZX",
+                WofAlgorithm::Lznt1 => "LZNT1",
             };
             lv.set_item_text(i as i32, 4, algo);
 
@@ -360,17 +340,12 @@ impl WatcherState {
             let last_run = if task.last_run_timestamp == 0 {
                 crate::utils::to_wstring("Never")
             } else {
-                // Convert Unix timestamp to Windows FILETIME then to SYSTEMTIME
-                // Unix epoch (1970) to Windows epoch (1601) = 11644473600 seconds
                 let windows_ticks = (task.last_run_timestamp + 11644473600) * 10_000_000;
                 let ft = FILETIME {
                     dwLowDateTime: (windows_ticks & 0xFFFFFFFF) as u32,
                     dwHighDateTime: (windows_ticks >> 32) as u32,
                 };
-                let mut local_ft = FILETIME {
-                    dwLowDateTime: 0,
-                    dwHighDateTime: 0,
-                };
+                let mut local_ft = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
                 let mut st = std::mem::zeroed::<SYSTEMTIME>();
                 
                 if unsafe { FileTimeToLocalFileTime(&ft, &mut local_ft) } != 0
@@ -396,5 +371,4 @@ impl WatcherState {
             lv.set_item_text(i as i32, 6, "▶ Run");
         }
     }
-    // add_task removed, now in watcher_add
 }

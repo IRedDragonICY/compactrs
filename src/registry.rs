@@ -1,3 +1,4 @@
+/* --- src/registry.rs --- */
 //! Windows Registry operations for Explorer Context Menu integration.
 //!
 //! Uses the SubCommands pattern to create cascading context menus without
@@ -109,7 +110,8 @@ unsafe fn create_menu_for_root(root_path: &str, exe_path: &str) -> Result<(), St
         ("02_xpress8k", "Compress as XPRESS8K", "--algo xpress8k"),
         ("03_xpress16k", "Compress as XPRESS16K", "--algo xpress16k"),
         ("04_lzx", "Compress as LZX", "--algo lzx"),
-        ("05_decompress", "Decompress", "--action decompress"),
+        ("05_lznt1", "Compress as LZNT1", "--algo lznt1"),
+        ("06_decompress", "Decompress", "--action decompress"),
     ];
     
     for (id, label, args) in menu_items {

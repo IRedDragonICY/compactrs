@@ -1,3 +1,4 @@
+/* --- src/engine/scanner.rs --- */
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -295,6 +296,7 @@ fn resolve_mixed_state(algos: std::collections::HashSet<u32>) -> CompressionStat
         1 => CompressionState::Specific(WofAlgorithm::Lzx),
         2 => CompressionState::Specific(WofAlgorithm::Xpress8K),
         3 => CompressionState::Specific(WofAlgorithm::Xpress16K),
+        4 => CompressionState::Specific(WofAlgorithm::Lznt1),
         _ => CompressionState::None,
     }
 }

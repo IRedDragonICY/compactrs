@@ -1,3 +1,4 @@
+/* --- src/types.rs --- */
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
 
 
@@ -135,6 +136,22 @@ pub struct WNDCLASSW {
 pub struct FILETIME {
     pub dwLowDateTime: u32,
     pub dwHighDateTime: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct BY_HANDLE_FILE_INFORMATION {
+    pub dwFileAttributes: u32,
+    pub ftCreationTime: FILETIME,
+    pub ftLastAccessTime: FILETIME,
+    pub ftLastWriteTime: FILETIME,
+    pub dwVolumeSerialNumberHigh: u32,
+    pub dwVolumeSerialNumberLow: u32,
+    pub nFileSizeHigh: u32,
+    pub nFileSizeLow: u32,
+    pub nNumberOfLinks: u32,
+    pub nFileIndexHigh: u32,
+    pub nFileIndexLow: u32,
 }
 
 #[repr(C)]
@@ -311,8 +328,6 @@ pub struct NMCUSTOMDRAW {
     pub uItemState: u32,
     pub lItemlParam: LPARAM,
 }
-
-
 
 #[repr(C)]
 pub struct LVCOLUMNW {
@@ -657,9 +672,6 @@ pub const FLASHW_TIMERNOFG: u32 = 0x0000000C;
 
 // Memory
 pub const GMEM_MOVEABLE: u32 = 0x0002;
-
-// Removed duplicates (LVCOLUMNW, LVITEMW) logic...
-// Re-adding impl Default matching earlier structs:
 
 impl Default for LVCOLUMNW {
     fn default() -> Self { unsafe { std::mem::zeroed() } }
@@ -1060,6 +1072,7 @@ unsafe extern "system" {
     pub fn GetLastError() -> u32;
     pub fn DeleteFileW(lpFileName: LPCWSTR) -> BOOL;
     pub fn MoveFileExW(lpExistingFileName: LPCWSTR, lpNewFileName: LPCWSTR, dwFlags: u32) -> BOOL;
+    pub fn GetFileInformationByHandle(hFile: HANDLE, lpFileInformation: *mut BY_HANDLE_FILE_INFORMATION) -> BOOL;
 }
 
 #[link(name = "user32")]
@@ -1476,4 +1489,3 @@ pub const GENERIC_WRITE: u32 = 0x40000000;
 pub const WOF_CURRENT_VERSION: u32 = 1;
 pub const WOF_PROVIDER_FILE: u32 = 2;
 pub const FILE_PROVIDER_CURRENT_VERSION: u32 = 1;
-

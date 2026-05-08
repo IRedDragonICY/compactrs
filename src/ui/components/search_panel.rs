@@ -1,3 +1,4 @@
+/* --- src/ui/components/search_panel.rs --- */
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::types::*;
@@ -162,6 +163,7 @@ impl Component for SearchPanel {
         crate::ui::wrappers::ComboBox::new(self.hwnd_combo_algo).add_string("XPRESS8K");
         crate::ui::wrappers::ComboBox::new(self.hwnd_combo_algo).add_string("XPRESS16K");
         crate::ui::wrappers::ComboBox::new(self.hwnd_combo_algo).add_string("LZX");
+        crate::ui::wrappers::ComboBox::new(self.hwnd_combo_algo).add_string("LZNT1");
         crate::ui::wrappers::ComboBox::new(self.hwnd_combo_algo).set_selected_index(0);
 
         self.hwnd_combo_size = ControlBuilder::new(self.hwnd_panel, self.ids.combo_size)
@@ -252,6 +254,3 @@ impl SearchPanel {
             .apply_layout(RECT { left: 0, top: 35, right: w, bottom: 79 });
     }
 }
-
-// Window Procedure for SearchPanel
-

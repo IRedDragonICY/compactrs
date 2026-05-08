@@ -1,3 +1,4 @@
+/* --- src/ui/dialogs/watcher_add.rs --- */
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::ui::builder::ControlBuilder;
@@ -99,6 +100,7 @@ impl WindowHandler for WatcherAddState {
             cb.add_string("XPRESS 8K");
             cb.add_string("XPRESS 16K");
             cb.add_string("LZX");
+            cb.add_string("LZNT1");
             cb.set_selected_index(1);
             
             // 3. Time
@@ -169,6 +171,7 @@ impl WindowHandler for WatcherAddState {
                         WofAlgorithm::Xpress8K => 1,
                         WofAlgorithm::Xpress16K => 2,
                         WofAlgorithm::Lzx => 3,
+                        WofAlgorithm::Lznt1 => 4,
                     };
                     cb.set_selected_index(algo_idx);
                     
@@ -290,6 +293,7 @@ impl WatcherAddState {
              1 => WofAlgorithm::Xpress8K,
              2 => WofAlgorithm::Xpress16K,
              3 => WofAlgorithm::Lzx,
+             4 => WofAlgorithm::Lznt1,
              _ => WofAlgorithm::Xpress8K,
          };
          

@@ -1,3 +1,4 @@
+/* --- src/main.rs --- */
 #![windows_subsystem = "windows"]
 #![no_main]
 
@@ -62,6 +63,7 @@ fn parse_cli_args() -> Vec<StartupItem> {
                         "xpress8k" => WofAlgorithm::Xpress8K,
                         "xpress16k" => WofAlgorithm::Xpress16K,
                         "lzx" => WofAlgorithm::Lzx,
+                        "lznt1" => WofAlgorithm::Lznt1,
                         _ => WofAlgorithm::Xpress8K,
                     };
                     i += 2;
@@ -109,6 +111,7 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
                         WofAlgorithm::Xpress8K => "xpress8k",
                         WofAlgorithm::Xpress16K => "xpress16k",
                         WofAlgorithm::Lzx => "lzx",
+                        WofAlgorithm::Lznt1 => "lznt1",
                 };
                 let action_str = match item.action {
                     BatchAction::Compress => "compress",

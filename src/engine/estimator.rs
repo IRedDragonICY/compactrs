@@ -1,3 +1,4 @@
+/* --- src/engine/estimator.rs --- */
 //! EXPERT ESTIMATOR: Volumetric Weighting & Continuous Calibration
 //!
 //! # Mathematical Correction: Volumetric Sampling
@@ -165,6 +166,7 @@ fn apply_lzx_curve(sz: u64, ratio: f64, algo: WofAlgorithm) -> u64 {
         WofAlgorithm::Xpress4K => ratio,
         WofAlgorithm::Xpress8K => ratio * 0.99,
         WofAlgorithm::Xpress16K => ratio * 0.98,
+        WofAlgorithm::Lznt1 => ratio * 1.05, // LZNT1 generally ~5% larger than XPRESS4K
         WofAlgorithm::Lzx => {
             // ═══════════════════════════════════════════════════════════════
             // BASELINE LZX CURVE (Proven 92% Accuracy)
