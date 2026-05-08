@@ -5,6 +5,7 @@
 //! with `uxtheme.dll` for advanced styling.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use crate::types::*;
 use crate::utils::to_wstring;
 use crate::ui::state::AppTheme;
@@ -59,10 +60,16 @@ pub trait ThemeAware {
 // ============================================================================
 
 // Global Font Handle
-static APP_FONT_HANDLE: OnceLock<isize> = OnceLock::new();
+static APP_FONT_HANDLE: AtomicIsize = AtomicIsize::new(0);
 
 // Global Dark Background Brush
 static DARK_BRUSH_HANDLE: OnceLock<isize> = OnceLock::new();
+
+// Global Icon Font Handle (Segoe Fluent Icons)
+static ICON_FONT_HANDLE: AtomicIsize = AtomicIsize::new(0);
+
+// UI Scale Global
+static UI_SCALE: AtomicU32 = AtomicU32::new(100);
 
 /// Structure to hold resolved Uxtheme function pointers.
 struct UxthemeApi {
@@ -76,6 +83,20 @@ static UXTHEME_API: OnceLock<UxthemeApi> = OnceLock::new();
 // ============================================================================
 // Core Styling Functions
 // ============================================================================
+
+pub fn update_ui_scale(scale: f32) {
+    UI_SCALE.store((scale * 100.0) as u32, Ordering::Relaxed);
+    APP_FONT_HANDLE.store(0, Ordering::Relaxed);
+    ICON_FONT_HANDLE.store(0, Ordering::Relaxed);
+}
+
+pub fn ui_scale() -> f32 {
+    UI_SCALE.load(Ordering::Relaxed) as f32 / 100.0
+}
+
+pub fn scale(val: i32) -> i32 {
+    (val as f32 * ui_scale()).round() as i32
+}
 
 /// Applies the visual theme to a specific control or window.
 pub unsafe fn apply_theme(hwnd: HWND, control_type: ControlType, is_dark: bool) {
@@ -442,22 +463,30 @@ fn init_uxtheme() -> UxthemeApi {
 }
 
 pub fn get_app_font() -> HFONT {
-    let handle = *APP_FONT_HANDLE.get_or_init(|| unsafe {
-        let font_height = -12; // ~9pt
-        let font_name = to_wstring("Segoe UI Variable Display");
-        CreateFontW(
-            font_height,
-            0, 0, 0,
-            FW_NORMAL as i32,
-            0, 0, 0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            CLEARTYPE_QUALITY as u32,
-            (DEFAULT_PITCH | FF_DONTCARE) as u32,
-            font_name.as_ptr(),
-        ) as isize
-    });
+    let mut handle = APP_FONT_HANDLE.load(Ordering::Relaxed);
+    if handle == 0 {
+        let s = ui_scale();
+        handle = unsafe {
+            let font_height = (-12.0 * s).round() as i32; // ~9pt
+            let font_name = to_wstring("Segoe UI Variable Display");
+            CreateFontW(
+                font_height,
+                0, 0, 0,
+                FW_NORMAL as i32,
+                0, 0, 0,
+                DEFAULT_CHARSET as u32,
+                OUT_DEFAULT_PRECIS as u32,
+                CLIP_DEFAULT_PRECIS as u32,
+                CLEARTYPE_QUALITY as u32,
+                (DEFAULT_PITCH | FF_DONTCARE) as u32,
+                font_name.as_ptr(),
+            ) as isize
+        };
+        if let Err(actual) = APP_FONT_HANDLE.compare_exchange(0, handle, Ordering::Relaxed, Ordering::Relaxed) {
+            unsafe { DeleteObject(handle as HGDIOBJ); }
+            handle = actual;
+        }
+    }
     handle as HFONT
 }
 
@@ -468,26 +497,32 @@ pub fn get_dark_brush() -> HBRUSH {
     handle as HBRUSH
 }
 
-// Global Icon Font Handle (Segoe Fluent Icons)
-static ICON_FONT_HANDLE: OnceLock<isize> = OnceLock::new();
 
 pub fn get_icon_font() -> HFONT {
-    let handle = *ICON_FONT_HANDLE.get_or_init(|| unsafe {
-        let font_height = -16; // Slightly larger for icons
-        let font_name = to_wstring("Segoe Fluent Icons");
-        CreateFontW(
-            font_height,
-            0, 0, 0,
-            FW_NORMAL as i32,
-            0, 0, 0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            CLEARTYPE_QUALITY as u32,
-            (DEFAULT_PITCH | FF_DONTCARE) as u32,
-            font_name.as_ptr(),
-        ) as isize
-    });
+    let mut handle = ICON_FONT_HANDLE.load(Ordering::Relaxed);
+    if handle == 0 {
+        let s = ui_scale();
+        handle = unsafe {
+            let font_height = (-16.0 * s).round() as i32; // Slightly larger for icons
+            let font_name = to_wstring("Segoe Fluent Icons");
+            CreateFontW(
+                font_height,
+                0, 0, 0,
+                FW_NORMAL as i32,
+                0, 0, 0,
+                DEFAULT_CHARSET as u32,
+                OUT_DEFAULT_PRECIS as u32,
+                CLIP_DEFAULT_PRECIS as u32,
+                CLEARTYPE_QUALITY as u32,
+                (DEFAULT_PITCH | FF_DONTCARE) as u32,
+                font_name.as_ptr(),
+            ) as isize
+        };
+        if let Err(actual) = ICON_FONT_HANDLE.compare_exchange(0, handle, Ordering::Relaxed, Ordering::Relaxed) {
+            unsafe { DeleteObject(handle as HGDIOBJ); }
+            handle = actual;
+        }
+    }
     handle as HFONT
 }
 
@@ -607,4 +642,3 @@ pub fn resolve_mode(theme: AppTheme) -> bool {
         AppTheme::System => unsafe { is_system_dark_mode() },
     }
 }
-

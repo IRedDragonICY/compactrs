@@ -35,8 +35,8 @@ impl LayoutNode {
             policy: SizePolicy::Flex(1.0),
             children: Vec::new(),
             direction,
-            padding,
-            gap,
+            padding: crate::ui::theme::scale(padding),
+            gap: crate::ui::theme::scale(gap),
         }
     }
 
@@ -152,19 +152,10 @@ impl LayoutNode {
         // Pass 1: Measure
         for child in &self.children {
             match child.policy {
-                SizePolicy::Fixed(s) => total_fixed += s,
+                SizePolicy::Fixed(s) => total_fixed += crate::ui::theme::scale(s),
                 SizePolicy::Flex(w) => total_flex += w,
                 SizePolicy::Auto => {
-                    // Heuristic: If leaf, try to guess size? For now treat as Fixed(standard)
-                    // In a real engine we'd measure. Let's fallback to Fixed(100) or similar context-aware?
-                    // Or treat as Flex(0.0) -> minimal? 
-                    // Let's implement Auto as a "content-fit" if possible, else Fixed default.
-                    // For buttons: ~80-100. For labels: ~text len.
-                    // Simplification: Auto = Fixed(0) + Expand? No.
-                    // Let's map Auto to Fixed(Size) where Size is estimated.
-                    // For this refactor, we'll try to rely on Fixed/Flex mostly.
-                    // Fallback to 24px for height, 100px for width?
-                    if is_horizontal { total_fixed += 100; } else { total_fixed += 24; }
+                    if is_horizontal { total_fixed += crate::ui::theme::scale(100); } else { total_fixed += crate::ui::theme::scale(24); }
                 }
             }
         }
@@ -181,13 +172,11 @@ impl LayoutNode {
         // Pass 2: Position
         for child in &self.children {
             let item_major = match child.policy {
-                SizePolicy::Fixed(s) => s,
+                SizePolicy::Fixed(s) => crate::ui::theme::scale(s),
                 SizePolicy::Flex(w) => (w * flex_unit) as i32,
-                SizePolicy::Auto => if is_horizontal { 100 } else { 24 }, 
+                SizePolicy::Auto => if is_horizontal { crate::ui::theme::scale(100) } else { crate::ui::theme::scale(24) }, 
             };
             
-            // Minor axis: Stretch children to fill unless they have their own size policy?
-            // "StackPanel" usually stretches cross-axis.
             let item_minor = minor_size; 
 
             let child_rect = if is_horizontal {
@@ -229,9 +218,6 @@ impl LayoutNode {
             current_pos += item_major + self.gap;
         }
         
-        // Return used major size (current_pos - start)
         current_pos - if is_horizontal { rect.left } else { rect.top } - self.gap // subtract last gap
     }
 }
-
-

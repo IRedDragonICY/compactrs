@@ -1,4 +1,3 @@
-/* --- src/ui/builder.rs --- */
 use crate::types::*;
 use crate::utils::to_wstring;
 use crate::ui::theme::{self, ControlType};
@@ -127,9 +126,14 @@ impl<'a> ControlBuilder<'a> {
             let wants_visible = (self.style & WS_VISIBLE) != 0;
             let style_initial = self.style & !WS_VISIBLE;
 
+            let x = crate::ui::theme::scale(self.x);
+            let y = crate::ui::theme::scale(self.y);
+            let w = crate::ui::theme::scale(self.w);
+            let h = crate::ui::theme::scale(self.h);
+
             let hwnd = CreateWindowExW(
                 self.ex_style, class_ptr, text_ptr, style_initial,
-                self.x, self.y, self.w, self.h,
+                x, y, w, h,
                 self.parent, self.id as isize as HMENU, instance, std::ptr::null_mut(),
             );
 

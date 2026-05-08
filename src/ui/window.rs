@@ -1,4 +1,3 @@
-/* --- src/ui/window.rs --- */
 #![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use crate::types::*;
@@ -58,8 +57,8 @@ pub unsafe fn create_main_window(instance: HINSTANCE) -> Result<HWND, String> {
         } else {
             (config.window_x, config.window_y)
         };
-        let win_width = if config.window_width > 0 { config.window_width } else { 900 };
-        let win_height = if config.window_height > 0 { config.window_height } else { 600 };
+        let win_width = if config.window_width > 0 { config.window_width } else { crate::ui::theme::scale(900) };
+        let win_height = if config.window_height > 0 { config.window_height } else { crate::ui::theme::scale(600) };
         
         // Setup State
         let mut state = Box::new(AppState::new());

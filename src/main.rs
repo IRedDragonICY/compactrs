@@ -1,4 +1,3 @@
-/* --- src/main.rs --- */
 #![windows_subsystem = "windows"]
 #![no_main]
 
@@ -97,6 +96,9 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
     // Initialize Theme System early
     crate::ui::theme::init();
     crate::ui::theme::set_preferred_app_mode(true);
+
+    let config = crate::config::AppConfig::load();
+    crate::ui::theme::update_ui_scale(config.ui_scale_multiplier);
 
     // 0. Single Instance Check
     let class_name = w!("CompactRS_Class");

@@ -10,7 +10,7 @@ use crate::ui::state::AppTheme;
 #[derive(Clone, Copy, Debug)]
 pub struct AppConfig {
     pub magic: u32,   // 0x43505253 ("CPRS")
-    pub version: u32, // 8
+    pub version: u32, // 9
     pub theme: AppTheme,
     pub default_algo: WofAlgorithm,
     pub force_compress: bool,
@@ -34,8 +34,9 @@ pub struct AppConfig {
     // New in v8 (Persist precise UI Combobox states)
     pub combo_algo_index: u8,
     pub combo_action_index: u8,
+    // New in v9
+    pub ui_scale_multiplier: f32,
 }
-
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -52,7 +53,7 @@ impl Default for AppConfig {
 
         Self {
             magic: 0x43505253,
-            version: 8,
+            version: 9,
             theme: AppTheme::System,
             default_algo: WofAlgorithm::Xpress8K, // Default to XPRESS8K
             force_compress: false,
@@ -73,6 +74,7 @@ impl Default for AppConfig {
             set_compressed_attr: false,
             combo_algo_index: 0, // 0 = "As Listed"
             combo_action_index: 0, // 0 = "As Listed"
+            ui_scale_multiplier: 1.0,
         }
     }
 }
@@ -95,8 +97,8 @@ impl AppConfig {
                 if file.read_exact(&mut buffer).is_ok() {
                     unsafe {
                         let config = std::ptr::read_unaligned(buffer.as_ptr() as *const AppConfig);
-                        // Check for version 8
-                        if config.magic == 0x43505253 && config.version == 8 {
+                        // Check for version 9
+                        if config.magic == 0x43505253 && config.version == 9 {
                             return config;
                         }
                     }
