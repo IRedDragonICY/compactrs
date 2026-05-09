@@ -1,6 +1,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
 use crate::ui::framework::WindowHandler;
+use crate::ui::layout::{LayoutNode, SizePolicy, AlignItems, JustifyContent};
 
 use crate::types::*;
 
@@ -39,21 +40,17 @@ impl WindowHandler for ShortcutsState {
             let is_dark_mode = self.is_dark;
             crate::ui::theme::set_window_frame_theme(hwnd, is_dark_mode);
 
-            // Create fonts
             let h_default = GetStockObject(DEFAULT_GUI_FONT);
             let mut lf: LOGFONTW = std::mem::zeroed();
             GetObjectW(h_default, std::mem::size_of::<LOGFONTW>() as i32, &mut lf as *mut _ as *mut _);
             
-            // Bold font for keys
             lf.lfWeight = FW_BOLD as i32;
             lf.lfHeight = crate::ui::theme::scale(-14);
             self.h_font_bold = CreateFontIndirectW(&lf);
             
-            // Regular font for descriptions
             lf.lfWeight = FW_NORMAL as i32;
             self.h_font_regular = CreateFontIndirectW(&lf);
 
-            // Shortcuts: (key, description)
             let shortcuts = [
                 ("Ctrl + O", "Add Files"),
                 ("Ctrl + Shift + O", "Add Folder"),
@@ -66,39 +63,37 @@ impl WindowHandler for ShortcutsState {
                 ("Space", "Start Processing Selected"),
                 ("Ctrl + Space", "Pause/Resume Selected"),
             ];
-
-            let start_y = 20;
-            let row_h = 32;
-            let key_x = 30;
-            let key_w = 170;
-            let desc_x = key_x + key_w + 25;
             
             const SS_RIGHT: u32 = 0x2;
 
-            for (i, (key, desc)) in shortcuts.iter().enumerate() {
-                let y = start_y + (i as i32 * row_h);
+            let mut col_node = LayoutNode::col(20, 8).align_items(AlignItems::Stretch);
 
-                // Key Column (Right Aligned, Bold)
-                ControlBuilder::new(hwnd, 0)
+            for (key, desc) in shortcuts.iter() {
+                let h_key = ControlBuilder::new(hwnd, 0)
                     .label(false)
                     .text(key)
-                    .pos(key_x, y)
-                    .size(key_w, 24)
                     .font(self.h_font_bold)
                     .style(SS_RIGHT)
                     .dark_mode(is_dark_mode)
                     .build();
 
-                // Description Column (Left Aligned, Regular)
-                ControlBuilder::new(hwnd, 0)
+                let h_desc = ControlBuilder::new(hwnd, 0)
                     .label(false)
                     .text(desc)
-                    .pos(desc_x, y)
-                    .size(220, 24)
                     .font(self.h_font_regular)
                     .dark_mode(is_dark_mode)
                     .build();
+                    
+                col_node.add_child(LayoutNode::row(0, 15)
+                    .justify_content(JustifyContent::Center)
+                    .with(h_key, SizePolicy::Fixed(180))
+                    .with(h_desc, SizePolicy::Fixed(200))
+                    .with_policy(SizePolicy::Fixed(24))
+                );
             }
+
+            let client_rect = crate::utils::get_client_rect(hwnd);
+            col_node.apply_layout(client_rect);
 
             crate::ui::theme::apply_theme_recursive(hwnd, is_dark_mode);
         }

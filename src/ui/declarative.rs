@@ -1,10 +1,8 @@
 use crate::types::*;
-use crate::ui::layout::{LayoutNode, Direction, SizePolicy};
+use crate::ui::layout::{LayoutNode, Direction, SizePolicy, AlignItems, JustifyContent, FlexWrap, AlignContent};
 use crate::ui::builder::ControlBuilder;
 use crate::ui::subclass::apply_theme_to_control;
 
-
-// A simpler "Tree Builder" that doesn't hold large state
 pub struct DeclarativeContext {
     pub parent_hwnd: HWND,
     pub is_dark: bool,
@@ -48,6 +46,26 @@ impl<'a> ContainerBuilder<'a> {
     pub fn add_child(&mut self, child: LayoutNode) {
         self.node.add_child(child);
     }
+    
+    pub fn align_items(&mut self, align: AlignItems) {
+        self.node.align_items = align;
+    }
+
+    pub fn justify_content(&mut self, justify: JustifyContent) {
+        self.node.justify_content = justify;
+    }
+
+    pub fn flex_wrap(&mut self, wrap: FlexWrap) {
+        self.node.flex_wrap = wrap;
+    }
+
+    pub fn align_content(&mut self, align: AlignContent) {
+        self.node.align_content = align;
+    }
+
+    pub fn cross_policy(&mut self, policy: SizePolicy) {
+        self.node.cross_policy = Some(policy);
+    }
 
     // --- Helpers for Controls ---
 
@@ -60,10 +78,6 @@ impl<'a> ContainerBuilder<'a> {
                 .dark_mode(self.ctx.is_dark)
                 .build();
             apply_theme_to_control(h, self.ctx.is_dark);
-            
-            // Subclassing not strictly needed for statics usually, but consistent
-            // subclass_control(h); 
-            
             self.node.add_child(LayoutNode::new_leaf(h, policy));
             h
         }
@@ -92,7 +106,10 @@ impl<'a> ContainerBuilder<'a> {
                 .dark_mode(self.ctx.is_dark)
                 .build();
              apply_theme_to_control(h, self.ctx.is_dark);
-             self.node.add_child(LayoutNode::new_leaf(h, policy));
+             
+             let mut leaf = LayoutNode::new_leaf(h, policy);
+             leaf.cross_policy = Some(SizePolicy::Fixed(26)); // Normal button height
+             self.node.add_child(leaf);
              h
         }
     }
@@ -106,7 +123,10 @@ impl<'a> ContainerBuilder<'a> {
                 .dark_mode(self.ctx.is_dark)
                 .build();
              apply_theme_to_control(h, self.ctx.is_dark);
-             self.node.add_child(LayoutNode::new_leaf(h, policy));
+             
+             let mut leaf = LayoutNode::new_leaf(h, policy);
+             leaf.cross_policy = Some(SizePolicy::Fixed(26));
+             self.node.add_child(leaf);
              h
         }
     }
@@ -121,7 +141,10 @@ impl<'a> ContainerBuilder<'a> {
                .dark_mode(self.ctx.is_dark)
                .build();
             apply_theme_to_control(h, self.ctx.is_dark);
-            self.node.add_child(LayoutNode::new_leaf(h, policy));
+            
+            let mut leaf = LayoutNode::new_leaf(h, policy);
+            leaf.cross_policy = Some(SizePolicy::Fixed(20)); // Ensure checkboxes don't stretch vertically
+            self.node.add_child(leaf);
             h
         }
     }
@@ -136,7 +159,10 @@ impl<'a> ContainerBuilder<'a> {
                .dark_mode(self.ctx.is_dark)
                .build();
             apply_theme_to_control(h, self.ctx.is_dark);
-            self.node.add_child(LayoutNode::new_leaf(h, policy));
+            
+            let mut leaf = LayoutNode::new_leaf(h, policy);
+            leaf.cross_policy = Some(SizePolicy::Fixed(20));
+            self.node.add_child(leaf);
             h
         }
     }
@@ -153,10 +179,11 @@ impl<'a> ContainerBuilder<'a> {
              tb.set_range(min, max);
              tb.set_pos(pos);
              
-             // Trackbars are finicky with theming, strict subclass might be needed?
              apply_theme_to_control(h, self.ctx.is_dark);
              
-             self.node.add_child(LayoutNode::new_leaf(h, policy));
+             let mut leaf = LayoutNode::new_leaf(h, policy);
+             leaf.cross_policy = Some(SizePolicy::Fixed(30)); 
+             self.node.add_child(leaf);
              h
         }
     }
@@ -171,7 +198,10 @@ impl<'a> ContainerBuilder<'a> {
                 .dark_mode(self.ctx.is_dark)
                 .build();
              apply_theme_to_control(h, self.ctx.is_dark);
-             self.node.add_child(LayoutNode::new_leaf(h, policy));
+             
+             let mut leaf = LayoutNode::new_leaf(h, policy);
+             leaf.cross_policy = Some(SizePolicy::Fixed(24));
+             self.node.add_child(leaf);
              h
          }
     }
@@ -191,7 +221,10 @@ impl<'a> ContainerBuilder<'a> {
             cb.set_selected_index(selected_idx as i32);
             
             apply_theme_to_control(h, self.ctx.is_dark);
-            self.node.add_child(LayoutNode::new_leaf(h, policy));
+            
+            let mut leaf = LayoutNode::new_leaf(h, policy);
+            leaf.cross_policy = Some(SizePolicy::Fixed(24)); // Visual height in layout
+            self.node.add_child(leaf);
             h
         }
     }

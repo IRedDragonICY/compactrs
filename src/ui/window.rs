@@ -726,12 +726,14 @@ impl AppState {
             let mut client_rect: RECT = std::mem::zeroed();
             if GetClientRect(hwnd, &mut client_rect) != 0 {
                 if let Some(ctrls) = &mut self.controls {
-                     use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}};
+                     use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}, AlignItems, JustifyContent};
 
                      LayoutNode::col(0, 0)
                         .with_child(LayoutNode::row(10, 10)
+                            .justify_content(JustifyContent::SpaceBetween)
+                            .align_items(AlignItems::Center)
                             .with(ctrls.status_bar.label_hwnd(), Flex(1.0))
-                            .with(ctrls.header_panel.hwnd(), Fixed(220))
+                            .with(ctrls.header_panel.hwnd(), Fixed(170))
                             .with_policy(Fixed(50))
                         )
                         .with(ctrls.search_panel.panel_hwnd(), Fixed(85))
@@ -750,8 +752,6 @@ impl AppState {
                      ctrls.search_panel.refresh_layout();
                      ctrls.action_panel.refresh_layout();
                      
-                     let mut fl_rect: RECT = std::mem::zeroed();
-                     GetWindowRect(ctrls.file_list.hwnd(), &mut fl_rect);
                      ctrls.file_list.update_columns();
                 }
             }

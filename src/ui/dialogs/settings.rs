@@ -6,7 +6,7 @@ use crate::ui::framework::WindowHandler;
 use crate::types::*;
 use crate::ui::wrappers::{Button, Label, Trackbar, ComboBox};
 use crate::ui::declarative::{DeclarativeContext, ContainerBuilder};
-use crate::ui::layout::{LayoutNode, SizePolicy};
+use crate::ui::layout::{LayoutNode, SizePolicy, AlignItems, JustifyContent};
 
 #[link(name = "shell32")]
 unsafe extern "system" {
@@ -88,8 +88,6 @@ struct SettingsState {
     tab_panels: Vec<HWND>,
     tab_layouts: Vec<LayoutNode>,
     active_tab: usize,
-    sidebar_layout: Option<LayoutNode>,
-    top_layout: Option<LayoutNode>,
     
     // Highlight & Search
     highlighted_control_id: Option<u16>,
@@ -114,30 +112,24 @@ struct SearchTarget {
 
 fn get_search_targets() -> Vec<SearchTarget> {
     vec![
-        // Tab 0: General
         SearchTarget { tab_idx: 0, ctrl_id: IDC_CHK_FORCE_STOP, title: "Force Kill Processes", keywords: &["force", "kill", "process", "terminate", "lock", "automatically"] },
         SearchTarget { tab_idx: 0, ctrl_id: IDC_CHK_CONTEXT_MENU, title: "Explorer Context Menu", keywords: &["explorer", "context", "menu", "right", "click", "add"] },
         SearchTarget { tab_idx: 0, ctrl_id: IDC_CHK_SYSTEM_GUARD, title: "System Safety Guard", keywords: &["system", "guard", "safety", "critical", "prevent", "file"] },
         
-        // Tab 1: Interface
         SearchTarget { tab_idx: 1, ctrl_id: IDC_COMBO_THEME, title: "Application Theme", keywords: &["theme", "light", "dark", "appearance", "color", "system", "default"] },
         SearchTarget { tab_idx: 1, ctrl_id: IDC_COMBO_UI_SCALE, title: "UI Scaling", keywords: &["scale", "scaling", "size", "zoom", "interface", "ui", "adjust"] },
         SearchTarget { tab_idx: 1, ctrl_id: IDC_CHK_SET_ATTR, title: "Show Compressed Color", keywords: &["compress", "color", "blue", "attribute", "mark", "show"] },
         
-        // Tab 2: Performance
         SearchTarget { tab_idx: 2, ctrl_id: IDC_CHK_LOW_POWER, title: "Efficiency Mode", keywords: &["efficiency", "mode", "low", "power", "background", "resource", "reduce"] },
         SearchTarget { tab_idx: 2, ctrl_id: IDC_SLIDER_THREADS, title: "CPU Thread Limit", keywords: &["cpu", "thread", "limit", "worker", "core", "max", "maximum"] },
         SearchTarget { tab_idx: 2, ctrl_id: IDC_EDIT_CONCURRENT, title: "Concurrent File Queue", keywords: &["concurrent", "file", "queue", "simultaneous", "unlimited"] },
         
-        // Tab 3: File Handling
         SearchTarget { tab_idx: 3, ctrl_id: IDC_CHK_SKIP_EXT, title: "Smart Compression Skip", keywords: &["smart", "skip", "unlikely", "filter", "compress", "further"] },
         SearchTarget { tab_idx: 3, ctrl_id: IDC_EDIT_EXTENSIONS, title: "Excluded Extensions", keywords: &["exclude", "extension", "format", "zip", "rar", "default"] },
         
-        // Tab 4: Diagnostics
         SearchTarget { tab_idx: 4, ctrl_id: IDC_CHK_LOG_ENABLED, title: "Enable Diagnostic Logging", keywords: &["diagnostic", "log", "console", "real-time", "enable", "show"] },
         SearchTarget { tab_idx: 4, ctrl_id: IDC_CHK_LOG_ERRORS, title: "Log Levels (Errors, Warn, Info)", keywords: &["level", "error", "warning", "info", "trace", "log"] },
         
-        // Tab 5: Updates
         SearchTarget { tab_idx: 5, ctrl_id: IDC_BTN_CHECK_UPDATE, title: "Check for Updates", keywords: &["compactrs", "update", "version", "latest", "check"] },
         SearchTarget { tab_idx: 5, ctrl_id: IDC_BTN_RESTART_TI, title: "Advanced Startup (TI)", keywords: &["advanced", "startup", "trustedinstaller", "restart", "privilege", "ti"] },
         SearchTarget { tab_idx: 5, ctrl_id: IDC_BTN_RESET_ALL, title: "Reset Application Defaults", keywords: &["reset", "default", "application"] },
@@ -192,8 +184,6 @@ pub unsafe fn show_settings_modal(
         tab_panels: Vec::new(),
         tab_layouts: Vec::new(),
         active_tab: 0,
-        sidebar_layout: None,
-        top_layout: None,
         highlighted_control_id: None,
         hwnd_search_list: std::ptr::null_mut(),
         search_results: Vec::new(),
@@ -238,7 +228,6 @@ struct FontMap {
     old_global_app: HFONT,
 }
 
-// Subclass untuk Highlight Control (Menggambar Highlight secara Overlap agar tidak tertutup Label)
 unsafe extern "system" fn highlight_subclass_proc(
     hwnd: HWND, umsg: u32, wparam: WPARAM, lparam: LPARAM,
     _uidsubclass: usize, _dwrefdata: usize
@@ -349,9 +338,11 @@ impl SettingsState {
         if index >= self.tab_panels.len() { return; }
         self.active_tab = index;
         
-        for (i, &p) in self.tab_panels.iter().enumerate() {
-            ShowWindow(p, if i == index { SW_SHOW } else { SW_HIDE });
-        }
+        let parent_hwnd = GetParent(self.tab_panels[0]);
+        let mut rect: RECT = std::mem::zeroed();
+        GetClientRect(parent_hwnd, &mut rect);
+        let lparam = ((rect.bottom & 0xFFFF) << 16) | (rect.right & 0xFFFF);
+        SendMessageW(parent_hwnd, WM_SIZE, 0, lparam as isize);
         
         for (i, &b) in self.tab_buttons.iter().enumerate() {
             let checked = if i == index { 1 } else { 0 };
@@ -479,9 +470,6 @@ impl WindowHandler for SettingsState {
             for (i, c) in mdl2_name.encode_utf16().enumerate() { if i < 32 { lf_icon.lfFaceName[i] = c; } }
             self.h_font_icon = CreateFontIndirectW(&lf_icon);
 
-            let ctx_main = DeclarativeContext::new(hwnd, self.is_dark, crate::ui::theme::get_app_font());
-
-            // --- 1. Top Bar ---
             let h_search = ControlBuilder::new(hwnd, IDC_SEARCH_SETTINGS)
                 .edit()
                 .dark_mode(self.is_dark)
@@ -492,13 +480,6 @@ impl WindowHandler for SettingsState {
             
             SetWindowSubclass(h_search, Some(search_edit_subclass_proc), 8888, 0);
 
-            let top_layout = ctx_main.horizontal(10, 5, |r| {
-                r.add_child(LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                r.add_child(LayoutNode::new_leaf(h_search, SizePolicy::Fixed(250)));
-            });
-            self.top_layout = Some(top_layout);
-
-            // --- 2. Sidebar Buttons ---
             let tabs = [
                 "General", 
                 "Interface", 
@@ -508,27 +489,18 @@ impl WindowHandler for SettingsState {
                 "Updates"
             ];
             
-            let mut btn_nodes = Vec::new();
             for (i, name) in tabs.iter().enumerate() {
                 let id = IDC_TAB_START + i as u16;
                 let h = ControlBuilder::new(hwnd, id)
                     .radio()
-                    .style(0x1000) // BS_PUSHLIKE
+                    .style(0x1000) 
                     .text(*name)
                     .dark_mode(self.is_dark)
                     .font(crate::ui::theme::get_app_font())
                     .build();
                 self.tab_buttons.push(h);
-                btn_nodes.push(LayoutNode::new_leaf(h, SizePolicy::Fixed(32))); 
             }
 
-            let mut sidebar_layout = LayoutNode::col(5, 2);
-            for node in btn_nodes {
-                sidebar_layout.add_child(node);
-            }
-            self.sidebar_layout = Some(sidebar_layout);
-
-            // --- 3. Macro Helpers ---
             let section_header = |b: &mut ContainerBuilder, text: &str| {
                 b.row_with_policy(10, SizePolicy::Fixed(35), |r: &mut ContainerBuilder| {
                     r.label(text, SizePolicy::Flex(1.0));
@@ -536,29 +508,36 @@ impl WindowHandler for SettingsState {
             };
 
             let icon_row = |b: &mut ContainerBuilder, panel: HWND, icon: &str, title: &[u16], sub: &[u16], control_fn: &dyn Fn(&mut ContainerBuilder)| {
-                b.row_with_policy(15, SizePolicy::Fixed(42), |r: &mut ContainerBuilder| {
-                     r.col_with_policy(0, SizePolicy::Fixed(30), |c: &mut ContainerBuilder| {
-                             let h = ControlBuilder::new(panel, 0).label(false).text(icon).font(self.h_font_icon).dark_mode(self.is_dark).build();
-                             crate::ui::subclass::apply_theme_to_control(h, self.is_dark);
-                             c.add_child(crate::ui::layout::LayoutNode::new_leaf(h, SizePolicy::Fixed(24)));
+                // Diubah menjadi Fixed(50) untuk memberi napas jika isi kontrol berukuran besar
+                b.row_with_policy(15, SizePolicy::Fixed(50), |r: &mut ContainerBuilder| {
+                     r.align_items(AlignItems::Center);
+                     r.justify_content(JustifyContent::SpaceBetween);
+                     
+                     r.row_with_policy(10, SizePolicy::Flex(1.0), |lr| {
+                         lr.align_items(AlignItems::Center);
+                         
+                         let h_icon = ControlBuilder::new(panel, 0).label(false).text(icon).font(self.h_font_icon).dark_mode(self.is_dark).build();
+                         crate::ui::subclass::apply_theme_to_control(h_icon, self.is_dark);
+                         lr.add_child(LayoutNode::new_leaf(h_icon, SizePolicy::Fixed(24)));
+                         
+                         lr.col_with_policy(2, SizePolicy::Flex(1.0), |c| {
+                             c.justify_content(JustifyContent::Center);
+                             c.label_w(title, SizePolicy::Fixed(18)); 
+                             let h_sub = ControlBuilder::new(panel, 0).label(false).text_w(sub).dark_mode(self.is_dark).build();
+                             crate::ui::subclass::apply_theme_to_control(h_sub, self.is_dark);
+                             c.add_child(LayoutNode::new_leaf(h_sub, SizePolicy::Fixed(16)));
+                         });
                      });
                      
-                     r.col_with_policy(2, SizePolicy::Flex(1.0), |c: &mut ContainerBuilder| {
-                         c.label_w(title, SizePolicy::Fixed(18)); 
-                         let h = ControlBuilder::new(panel, 0).label(false).text_w(sub).dark_mode(self.is_dark).build();
-                         crate::ui::subclass::apply_theme_to_control(h, self.is_dark);
-                         c.add_child(crate::ui::layout::LayoutNode::new_leaf(h, SizePolicy::Fixed(16)));
-                     });
-                     
-                     r.col_with_policy(0, SizePolicy::Fixed(190), |c: &mut ContainerBuilder| {
-                         control_fn(c);
+                     // Memastikan ruang di sebelah kanan benar-benar paten 280px dan rata kanan
+                     r.row_with_policy(5, SizePolicy::Fixed(280), |rr| {
+                         rr.align_items(AlignItems::Center);
+                         rr.justify_content(JustifyContent::FlexEnd);
+                         control_fn(rr);
                      });
                 });
             };
 
-            // --- 4. Build Panels ---
-            
-            // Tab 0: General
             let p0 = crate::ui::components::panel::Panel::create(hwnd, "Tab0", 0, 0, 100, 100).unwrap();
             crate::ui::components::panel::Panel::update_theme(p0, self.is_dark);
             let l0 = {
@@ -566,30 +545,20 @@ impl WindowHandler for SettingsState {
                 ctx.vertical(15, 6, |v| {
                     section_header(v, "General Behavior");
                     icon_row(v, p0, "\u{E74D}", crate::w!("Force Kill Processes"), crate::w!("Automatically terminate locking processes"), &|c| {
-                         c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
-                             r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_FORCE_STOP, "", self.enable_force_stop, SizePolicy::Fixed(20));
-                         });
+                         c.checkbox(IDC_CHK_FORCE_STOP, "", self.enable_force_stop, SizePolicy::Fixed(20));
                     });
                     icon_row(v, p0, "\u{E8DE}", crate::w!("Explorer Context Menu"), crate::w!("Add 'CompactRS' to right-click menu"), &|c| {
-                         c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
-                             r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_CONTEXT_MENU, "Enable", self.enable_context_menu, SizePolicy::Fixed(70));
-                             r.checkbox(IDC_CHK_CTX_DIALOG, "Dialog Only", self.context_menu_dialog_only, SizePolicy::Fixed(110));
-                         });
+                         c.checkbox(IDC_CHK_CONTEXT_MENU, "Enable", self.enable_context_menu, SizePolicy::Fixed(70));
+                         c.checkbox(IDC_CHK_CTX_DIALOG, "Dialog Only", self.context_menu_dialog_only, SizePolicy::Fixed(110));
                     });
                     icon_row(v, p0, "\u{EA18}", crate::w!("System Safety Guard"), crate::w!("Prevent compression of critical system files"), &|c| {
-                         c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
-                             r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_SYSTEM_GUARD, "", self.enable_system_guard, SizePolicy::Fixed(20));
-                         });
+                         c.checkbox(IDC_CHK_SYSTEM_GUARD, "", self.enable_system_guard, SizePolicy::Fixed(20));
                     });
                 })
             };
             self.tab_panels.push(p0);
             self.tab_layouts.push(l0);
 
-            // Tab 1: Interface
             let p1 = crate::ui::components::panel::Panel::create(hwnd, "Tab1", 0, 0, 100, 100).unwrap();
             crate::ui::components::panel::Panel::update_theme(p1, self.is_dark);
             let l1 = {
@@ -599,7 +568,7 @@ impl WindowHandler for SettingsState {
                     icon_row(v, p1, "\u{E713}", crate::w!("Application Theme"), crate::w!("Choose between Light, Dark, or System Default"), &|c| {
                          c.combobox(IDC_COMBO_THEME, &["System Default", "Dark Mode", "Light Mode"], 
                              match self.theme { AppTheme::System => 0, AppTheme::Dark => 1, AppTheme::Light => 2 }, 
-                             SizePolicy::Fixed(24)); 
+                             SizePolicy::Fixed(160)); 
                     });
                     icon_row(v, p1, "\u{E8A3}", crate::w!("UI Scaling"), crate::w!("Adjust interface size (Applies instantly)"), &|c| {
                          c.combobox(IDC_COMBO_UI_SCALE, &["25%", "50%", "75%", "100%", "125%", "150%", "175%", "200%"], 
@@ -607,20 +576,16 @@ impl WindowHandler for SettingsState {
                                  x if x >= 2.0 => 7, x if x >= 1.75 => 6, x if x >= 1.5 => 5, x if x >= 1.25 => 4,
                                  x if x >= 1.0 => 3, x if x >= 0.75 => 2, x if x >= 0.50 => 1, _ => 0,
                              }, 
-                             SizePolicy::Fixed(24)); 
+                             SizePolicy::Fixed(90));
                     });
                     icon_row(v, p1, "\u{F012}", crate::w!("Show Compressed Color"), crate::w!("Mark compressed items with blue system attribute"), &|c| {
-                         c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
-                             r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_SET_ATTR, "", self.set_compressed_attr, SizePolicy::Fixed(20));
-                         });
+                         c.checkbox(IDC_CHK_SET_ATTR, "", self.set_compressed_attr, SizePolicy::Fixed(20));
                     });
                 })
             };
             self.tab_panels.push(p1);
             self.tab_layouts.push(l1);
 
-            // Tab 2: Performance
             let p2 = crate::ui::components::panel::Panel::create(hwnd, "Tab2", 0, 0, 100, 100).unwrap();
             crate::ui::components::panel::Panel::update_theme(p2, self.is_dark);
             let l2 = {
@@ -629,27 +594,23 @@ impl WindowHandler for SettingsState {
                     section_header(v, "Performance Optimization");
                     
                     icon_row(v, p2, "\u{EC48}", crate::w!("Efficiency Mode"), crate::w!("Reduce background resource usage (Low Power)"), &|c| {
-                         c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
-                             r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_LOW_POWER, "", self.low_power_mode, SizePolicy::Fixed(20));
-                         });
+                         c.checkbox(IDC_CHK_LOW_POWER, "", self.low_power_mode, SizePolicy::Fixed(20));
                     });
                     
                     let cpu_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as u32;
                     let current_threads = if self.max_threads == 0 { cpu_count } else { self.max_threads };
                     let thread_sub = crate::utils::concat_wstrings(&[crate::w!("Maximum worker threads (Current: "), &crate::utils::fmt_u32(current_threads), crate::w!(")")]);
                     icon_row(v, p2, "\u{E9D9}", crate::w!("CPU Thread Limit"), &thread_sub, &|c| {
-                         c.slider(IDC_SLIDER_THREADS, 1, cpu_count, current_threads, SizePolicy::Fixed(30));
+                         c.slider(IDC_SLIDER_THREADS, 1, cpu_count, current_threads, SizePolicy::Fixed(160)); 
                     });
                     icon_row(v, p2, "\u{E902}", crate::w!("Concurrent File Queue"), crate::w!("Files compressed simultaneously (0 = Unlimited)"), &|c| {
-                         c.input(IDC_EDIT_CONCURRENT, &self.max_concurrent_items.to_string(), ES_NUMBER | ES_CENTER, SizePolicy::Fixed(24));
+                         c.input(IDC_EDIT_CONCURRENT, &self.max_concurrent_items.to_string(), ES_NUMBER | ES_CENTER, SizePolicy::Fixed(60));
                     });
                 })
             };
             self.tab_panels.push(p2);
             self.tab_layouts.push(l2);
 
-            // Tab 3: File Handling
             let p3 = crate::ui::components::panel::Panel::create(hwnd, "Tab3", 0, 0, 100, 100).unwrap();
             crate::ui::components::panel::Panel::update_theme(p3, self.is_dark);
             let l3 = {
@@ -657,14 +618,11 @@ impl WindowHandler for SettingsState {
                 ctx.vertical(15, 6, |v| {
                     section_header(v, "File Filtering");
                     icon_row(v, p3, "\u{E71C}", crate::w!("Smart Compression Skip"), crate::w!("Skip files that are unlikely to compress further"), &|c| {
-                         c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
-                             r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_SKIP_EXT, "", self.enable_skip_heuristics, SizePolicy::Fixed(20));
-                         });
+                         c.checkbox(IDC_CHK_SKIP_EXT, "", self.enable_skip_heuristics, SizePolicy::Fixed(20));
                     });
                     v.row_with_policy(15, SizePolicy::Fixed(24), |r| {
                         r.label("Excluded Extensions:", SizePolicy::Flex(1.0));
-                        r.button_w(IDC_BTN_RESET_EXT, crate::w!("Reset Defaults"), SizePolicy::Fixed(100)); 
+                        r.button_w(IDC_BTN_RESET_EXT, crate::w!("Reset Defaults"), SizePolicy::Fixed(120)); 
                     });
                     
                     let mut ext_node = LayoutNode::row(15, 0);
@@ -677,7 +635,7 @@ impl WindowHandler for SettingsState {
                         .build();
                     crate::ui::subclass::apply_theme_to_control(h_edit_ext, self.is_dark);
                     ext_node.add_child(LayoutNode::new_leaf(h_edit_ext, SizePolicy::Flex(1.0)));
-                    v.add_child(ext_node.with_policy(SizePolicy::Fixed(80)));
+                    v.add_child(ext_node.with_policy(SizePolicy::Fixed(100))); // Diperluas ke 100px
                     
                     if !self.enable_skip_heuristics {
                          let btn = GetDlgItem(p3, IDC_BTN_RESET_EXT as i32);
@@ -689,7 +647,6 @@ impl WindowHandler for SettingsState {
             self.tab_panels.push(p3);
             self.tab_layouts.push(l3);
 
-            // Tab 4: Diagnostics
             let p4 = crate::ui::components::panel::Panel::create(hwnd, "Tab4", 0, 0, 100, 100).unwrap();
             crate::ui::components::panel::Panel::update_theme(p4, self.is_dark);
             let l4 = {
@@ -697,17 +654,15 @@ impl WindowHandler for SettingsState {
                 ctx.vertical(15, 6, |v| {
                     section_header(v, "Diagnostics");
                     icon_row(v, p4, "\u{EBE8}", crate::w!("Enable Diagnostic Logging"), crate::w!("Show real-time logs in a console window"), &|c| {
-                         c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
-                             r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_LOG_ENABLED, "", self.log_enabled, SizePolicy::Fixed(20));
-                         });
+                         c.checkbox(IDC_CHK_LOG_ENABLED, "", self.log_enabled, SizePolicy::Fixed(20));
                     });
                     v.row_with_policy(15, SizePolicy::Fixed(35), |r| {
+                         r.align_items(AlignItems::Center);
                          r.label("Levels:", SizePolicy::Fixed(50));
-                         r.checkbox(IDC_CHK_LOG_ERRORS, "Errors", self.log_level_mask & crate::logger::LOG_LEVEL_ERROR != 0, SizePolicy::Fixed(70));
+                         r.checkbox(IDC_CHK_LOG_ERRORS, "Errors", self.log_level_mask & crate::logger::LOG_LEVEL_ERROR != 0, SizePolicy::Fixed(60));
                          r.checkbox(IDC_CHK_LOG_WARNS, "Warnings", self.log_level_mask & crate::logger::LOG_LEVEL_WARN != 0, SizePolicy::Fixed(80));
-                         r.checkbox(IDC_CHK_LOG_INFO, "Info", self.log_level_mask & crate::logger::LOG_LEVEL_INFO != 0, SizePolicy::Fixed(60));
-                         r.checkbox(IDC_CHK_LOG_TRACE, "Trace", self.log_level_mask & crate::logger::LOG_LEVEL_TRACE != 0, SizePolicy::Fixed(70));
+                         r.checkbox(IDC_CHK_LOG_INFO, "Info", self.log_level_mask & crate::logger::LOG_LEVEL_INFO != 0, SizePolicy::Fixed(50));
+                         r.checkbox(IDC_CHK_LOG_TRACE, "Trace", self.log_level_mask & crate::logger::LOG_LEVEL_TRACE != 0, SizePolicy::Fixed(60));
                     });
                     if !self.log_enabled {
                         let ids = [IDC_CHK_LOG_ERRORS, IDC_CHK_LOG_WARNS, IDC_CHK_LOG_INFO, IDC_CHK_LOG_TRACE];
@@ -721,7 +676,6 @@ impl WindowHandler for SettingsState {
             self.tab_panels.push(p4);
             self.tab_layouts.push(l4);
 
-            // Tab 5: Updates
             let p5 = crate::ui::components::panel::Panel::create(hwnd, "Tab5", 0, 0, 100, 100).unwrap();
             crate::ui::components::panel::Panel::update_theme(p5, self.is_dark);
             let l5 = {
@@ -730,22 +684,31 @@ impl WindowHandler for SettingsState {
                     section_header(v, "About & Updates");
                     let version_str = crate::utils::to_wstring(env!("APP_VERSION"));
                     icon_row(v, p5, "\u{E946}", crate::w!("CompactRS"), &version_str, &|c| {
-                         c.button_w(IDC_BTN_CHECK_UPDATE, crate::w!("Check for Updates"), SizePolicy::Fixed(24));
-                         c.add_child(crate::ui::layout::LayoutNode::new_leaf(
-                             ControlBuilder::new(p5, IDC_LBL_UPDATE_STATUS).label(true).text("").dark_mode(self.is_dark).build(),
-                             SizePolicy::Fixed(16)
-                         ));
+                         // Menggunakan kolom dengan ukuran mutlak 160px yang diratakan ke kanan via kontrol kontainernya
+                         c.col_with_policy(2, SizePolicy::Fixed(160), |cc| {
+                              cc.align_items(AlignItems::Stretch);
+                              cc.justify_content(JustifyContent::Center);
+                              
+                              cc.button_w(IDC_BTN_CHECK_UPDATE, crate::w!("Check for Updates"), SizePolicy::Fixed(26));
+                              
+                              let h_lbl = ControlBuilder::new(p5, IDC_LBL_UPDATE_STATUS).label(true).text("").dark_mode(self.is_dark).build();
+                              crate::ui::subclass::apply_theme_to_control(h_lbl, self.is_dark);
+                              
+                              // Height 16px dipasangkan via Fixed(16)
+                              cc.add_child(LayoutNode::new_leaf(h_lbl, SizePolicy::Fixed(16)));
+                         });
                     });
                     icon_row(v, p5, "\u{E7EF}", crate::w!("Advanced Startup"), crate::w!("Restart with TrustedInstaller privileges"), &|c| {
                          if crate::engine::elevation::is_system_or_ti() {
-                             c.label_w(crate::w!("Running as TI"), SizePolicy::Fixed(24));
+                             c.label_w(crate::w!("Running as TI"), SizePolicy::Fixed(150));
                          } else {
-                             c.button_w(IDC_BTN_RESTART_TI, crate::w!("Restart as TI"), SizePolicy::Fixed(24));
+                             c.button_w(IDC_BTN_RESTART_TI, crate::w!("Restart as TI"), SizePolicy::Fixed(150));
                          }
                     });
                     v.row_with_policy(15, SizePolicy::Fixed(30), |r| {
-                         r.label("", SizePolicy::Flex(1.0));
-                         r.button_w(IDC_BTN_RESET_ALL, crate::w!("Reset Application Defaults"), SizePolicy::Fixed(180));
+                         // Menyudutkan tombol ke kanan dengan properti FlexEnd
+                         r.justify_content(JustifyContent::FlexEnd);
+                         r.button_w(IDC_BTN_RESET_ALL, crate::w!("Reset Application Defaults"), SizePolicy::Fixed(200));
                     });
                 })
             };
@@ -756,7 +719,6 @@ impl WindowHandler for SettingsState {
                 SetWindowSubclass(p, Some(highlight_subclass_proc), 9999, hwnd as usize);
             }
 
-            // --- 5. Create the Floating Search ListBox (Owner Drawn) ---
             let listbox_class = crate::w!("LISTBOX");
             let h_list = CreateWindowExW(
                 0, 
@@ -771,7 +733,7 @@ impl WindowHandler for SettingsState {
             );
             self.hwnd_search_list = h_list;
             
-            SendMessageW(h_list, 0x01A0, 0, crate::ui::theme::scale(28) as isize); // LB_SETITEMHEIGHT
+            SendMessageW(h_list, 0x01A0, 0, crate::ui::theme::scale(28) as isize);
             SendMessageW(h_list, WM_SETFONT, crate::ui::theme::get_app_font() as usize, 1);
 
             crate::ui::theme::apply_theme_recursive(hwnd, self.is_dark);
@@ -792,7 +754,6 @@ impl WindowHandler for SettingsState {
                     if self.h_font_icon != std::ptr::null_mut() { DeleteObject(self.h_font_icon); }
                     None
                 },
-                // Handle owner draw for search listbox
                 WM_DRAWITEM => {
                     let dis = &*(lparam as *const DRAWITEMSTRUCT);
                     if dis.CtlID == IDC_LIST_SEARCH_RESULTS as u32 {
@@ -801,7 +762,6 @@ impl WindowHandler for SettingsState {
                             let rc = dis.rcItem;
                             let is_selected = (dis.itemState & ODS_SELECTED) != 0;
                             
-                            // Accent Blue for selected item
                             let bg_color = if is_selected { 0x00D47800 } 
                                            else if self.is_dark { crate::ui::theme::COLOR_LIST_BG_DARK } 
                                            else { crate::ui::theme::COLOR_LIST_BG_LIGHT };
@@ -814,16 +774,16 @@ impl WindowHandler for SettingsState {
                             FillRect(hdc, &rc, brush);
                             DeleteObject(brush as HGDIOBJ);
                             
-                            let len = SendMessageW(dis.hwndItem, 0x018A, dis.itemID as usize, 0); // LB_GETTEXTLEN
+                            let len = SendMessageW(dis.hwndItem, 0x018A, dis.itemID as usize, 0);
                             if len > 0 {
                                 let mut buf = vec![0u16; (len + 1) as usize];
-                                SendMessageW(dis.hwndItem, 0x0189, dis.itemID as usize, buf.as_mut_ptr() as isize); // LB_GETTEXT
+                                SendMessageW(dis.hwndItem, 0x0189, dis.itemID as usize, buf.as_mut_ptr() as isize);
                                 
                                 SetBkMode(hdc, TRANSPARENT as i32);
                                 SetTextColor(hdc, text_color);
                                 
                                 let mut text_rc = rc;
-                                text_rc.left += crate::ui::theme::scale(12); // Indent padding
+                                text_rc.left += crate::ui::theme::scale(12);
                                 DrawTextW(hdc, buf.as_ptr(), len as i32, &mut text_rc, DT_SINGLELINE | DT_VCENTER);
                             }
                         }
@@ -834,31 +794,46 @@ impl WindowHandler for SettingsState {
                 WM_SIZE => {
                     let w = (lparam & 0xFFFF) as i32;
                     let h = ((lparam >> 16) & 0xFFFF) as i32;
+                    let rc = RECT { left: 0, top: 0, right: w, bottom: h };
                     
-                    let top_bar_h = crate::ui::theme::scale(40);
-                    let sidebar_w = crate::ui::theme::scale(180);
+                    let active_panel = self.tab_panels[self.active_tab];
                     
-                    if let Some(top) = &self.top_layout {
-                        top.calculate_layout(RECT { left: 0, top: 0, right: w, bottom: top_bar_h });
+                    let mut sidebar_col = LayoutNode::col(5, 2).with_policy(SizePolicy::Fixed(180));
+                    for &btn in &self.tab_buttons {
+                        sidebar_col.add_child(LayoutNode::new_leaf(btn, SizePolicy::Fixed(32)));
                     }
                     
-                    if let Some(sb) = &self.sidebar_layout {
-                        sb.calculate_layout(RECT { left: 0, top: top_bar_h, right: sidebar_w, bottom: h });
-                    }
-                    
-                    let content_rc = RECT { left: sidebar_w, top: top_bar_h, right: w, bottom: h };
-                    let panel_w = content_rc.right - content_rc.left;
-                    let panel_h = content_rc.bottom - content_rc.top;
-                    
+                    let h_search = GetDlgItem(hwnd, IDC_SEARCH_SETTINGS as i32);
+
+                    LayoutNode::col(0, 0)
+                        .with_child(LayoutNode::row(10, 5)
+                            .justify_content(JustifyContent::SpaceBetween)
+                            .align_items(AlignItems::Center)
+                            .with_policy(SizePolicy::Fixed(40))
+                            .flex_spacer()
+                            .with(h_search, SizePolicy::Fixed(250))
+                        )
+                        .with_child(LayoutNode::row(0, 0)
+                            .with_policy(SizePolicy::Flex(1.0))
+                            .with_child(sidebar_col)
+                            .with(active_panel, SizePolicy::Flex(1.0)) 
+                        )
+                        .apply_layout(rc);
+                        
                     for (i, &p) in self.tab_panels.iter().enumerate() {
-                        SetWindowPos(p, std::ptr::null_mut(), content_rc.left, content_rc.top, panel_w, panel_h, SWP_NOZORDER);
-                        self.tab_layouts[i].calculate_layout(RECT { left: 0, top: 0, right: panel_w, bottom: panel_h });
+                        if i != self.active_tab {
+                            ShowWindow(p, SW_HIDE);
+                        } else {
+                            ShowWindow(p, SW_SHOW);
+                            let mut panel_rc: RECT = std::mem::zeroed();
+                            GetClientRect(p, &mut panel_rc);
+                            self.tab_layouts[i].apply_layout(panel_rc);
+                        }
                     }
                     
                     if self.hwnd_search_list != std::ptr::null_mut() {
                         let is_visible = (GetWindowLongW(self.hwnd_search_list, GWL_STYLE) & WS_VISIBLE as i32) != 0;
                         if is_visible {
-                            let h_search = GetDlgItem(hwnd, IDC_SEARCH_SETTINGS as i32);
                             let mut rc: RECT = std::mem::zeroed();
                             GetWindowRect(h_search, &mut rc);
                             let mut pt = POINT { x: rc.left, y: rc.bottom };
@@ -915,21 +890,18 @@ impl WindowHandler for SettingsState {
                      let code = ((wparam >> 16) & 0xFFFF) as u16;
                      
                      if id == IDC_LIST_SEARCH_RESULTS {
-                         if code == 1 { // LBN_SELCHANGE
-                             let idx = SendMessageW(self.hwnd_search_list, 0x0188, 0, 0) as usize; // LB_GETCURSEL
+                         if code == 1 { 
+                             let idx = SendMessageW(self.hwnd_search_list, 0x0188, 0, 0) as usize; 
                              if idx < self.search_results.len() {
                                  let target = self.search_results[idx].clone();
                                  
-                                 // Bersihkan teks (akan trigger EN_CHANGE untuk menyembunyikan listbox)
                                  let h_search = GetDlgItem(hwnd, IDC_SEARCH_SETTINGS as i32);
                                  SetWindowTextW(h_search, crate::w!("").as_ptr());
                                  
-                                 // Pindah tab
                                  if self.active_tab != target.tab_idx {
                                      self.switch_tab(target.tab_idx);
                                  }
                                  
-                                 // Trigger highlight
                                  self.highlighted_control_id = Some(target.ctrl_id);
                                  InvalidateRect(self.tab_panels[target.tab_idx], std::ptr::null(), 1);
                              }
@@ -942,7 +914,6 @@ impl WindowHandler for SettingsState {
                              let h_search = GetDlgItem(hwnd, IDC_SEARCH_SETTINGS as i32);
                              let len = GetWindowTextLengthW(h_search);
                              
-                             // Selalu hapus highlight setiap user mengetik
                              self.highlighted_control_id = None;
                              InvalidateRect(self.tab_panels[self.active_tab], std::ptr::null(), 1);
                              
@@ -959,7 +930,7 @@ impl WindowHandler for SettingsState {
                                  } else {
                                      let targets = get_search_targets();
                                      self.search_results.clear();
-                                     SendMessageW(self.hwnd_search_list, 0x0184, 0, 0); // LB_RESETCONTENT
+                                     SendMessageW(self.hwnd_search_list, 0x0184, 0, 0);
                                      
                                      for t in targets {
                                          let mut is_match = false;
@@ -977,7 +948,7 @@ impl WindowHandler for SettingsState {
                                          if is_match {
                                              self.search_results.push(t.clone());
                                              let title_w = crate::utils::to_wstring(t.title);
-                                             SendMessageW(self.hwnd_search_list, 0x0180, 0, title_w.as_ptr() as isize); // LB_ADDSTRING
+                                             SendMessageW(self.hwnd_search_list, 0x0180, 0, title_w.as_ptr() as isize);
                                          }
                                      }
                                      
@@ -987,15 +958,14 @@ impl WindowHandler for SettingsState {
                                          let mut pt = POINT { x: rc.left, y: rc.bottom };
                                          ScreenToClient(hwnd, &mut pt);
                                          
-                                         let item_height = SendMessageW(self.hwnd_search_list, 0x01A1, 0, 0) as i32; // LB_GETITEMHEIGHT
+                                         let item_height = SendMessageW(self.hwnd_search_list, 0x01A1, 0, 0) as i32;
                                          let mut h_list = item_height * self.search_results.len() as i32 + 4;
                                          if h_list > 200 { h_list = 200; }
                                          
                                          SetWindowPos(self.hwnd_search_list, 0 as HWND, pt.x, pt.y, rc.right - rc.left, h_list, SWP_SHOWWINDOW);
                                          BringWindowToTop(self.hwnd_search_list);
                                          
-                                         // Otomatis menyeleksi item pertama
-                                         SendMessageW(self.hwnd_search_list, 0x0186, 0, 0); // LB_SETCURSEL ke index 0
+                                         SendMessageW(self.hwnd_search_list, 0x0186, 0, 0);
                                      } else {
                                          ShowWindow(self.hwnd_search_list, SW_HIDE);
                                      }

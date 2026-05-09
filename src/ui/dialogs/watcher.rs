@@ -96,7 +96,6 @@ impl WindowHandler for WatcherState {
 
     fn on_create(&mut self, hwnd: HWND) -> LRESULT {
         unsafe {
-
             crate::ui::theme::set_window_frame_theme(hwnd, self.is_dark);
             
             // Helper
@@ -140,9 +139,8 @@ impl WindowHandler for WatcherState {
         unsafe {
             match msg {
                 WM_NOTIFY => {
-                    // Prevent resizing using shared logic
                     if crate::ui::handlers::should_block_header_resize(lparam) {
-                         return Some(1); // TRUE prevents tracking/action
+                         return Some(1);
                     }
                     
                     let nmhdr = lparam as *const NMHDR;
@@ -156,13 +154,11 @@ impl WindowHandler for WatcherState {
                     } else if (*nmhdr).code == NM_CLICK {
                         let nmitem = lparam as *const NMITEMACTIVATE;
                         if (*nmitem).iItem >= 0 && (*nmitem).iSubItem == 6 {
-                             // Run Button Clicked
                              let task_opt = {
                                  let tasks = self.tasks.lock().unwrap();
                                  tasks.get((*nmitem).iItem as usize).cloned()
                              };
                              if let Some(task) = task_opt {
-                                 // Trigger Run
                                  let _ = self.tx.send(UiMessage::WatcherTrigger(task.get_path(), task.algorithm));
                                  MessageBoxW(hwnd, w!("Triggered manual run.").as_ptr(), w!("CompactRS").as_ptr(), MB_OK);
                              }
@@ -246,16 +242,19 @@ impl WindowHandler for WatcherState {
 
 impl WatcherState {
     unsafe fn do_layout(&mut self, _hwnd: HWND, rect: RECT, h_list: HWND, h_add: HWND, h_rem: HWND, h_ref: HWND, h_close: HWND) {
-         use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}};
+         use crate::ui::layout::{LayoutNode, SizePolicy::{Fixed, Flex}, AlignItems, JustifyContent};
          
          LayoutNode::col(10, 10)
              .with(h_list, Flex(1.0))
              .with_child(LayoutNode::row(0, 5)
-                 .with_policy(Fixed(28)) // Fix row height to 28px
-                 .with(h_add, Fixed(80))
-                 .with(h_rem, Fixed(80))
-                 .with(h_ref, Fixed(80))
-                 .flex_spacer()
+                 .align_items(AlignItems::Center)
+                 .justify_content(JustifyContent::SpaceBetween)
+                 .with_policy(Fixed(28)) 
+                 .with_child(LayoutNode::row(0, 5)
+                     .with(h_add, Fixed(80))
+                     .with(h_rem, Fixed(80))
+                     .with(h_ref, Fixed(80))
+                 )
                  .with(h_close, Fixed(100))
              )
              .apply_layout(rect);
@@ -297,7 +296,6 @@ impl WatcherState {
             lv.set_item_text(i as i32, 1, size_str);
             lv.set_item_text(i as i32, 2, disk_str);
             
-            // Schedule String
             let schedule = if (task.days_mask & 0x80) != 0 {
                 crate::utils::concat_wstrings(&[
                      crate::w!("Every Day at "),
@@ -325,7 +323,6 @@ impl WatcherState {
             };
             lv.set_item_text_w(i as i32, 3, &schedule);
             
-            // Algo
             let algo = match task.algorithm {
                 WofAlgorithm::Xpress4K => "XPRESS4K",
                 WofAlgorithm::Xpress8K => "XPRESS8K",
@@ -335,7 +332,6 @@ impl WatcherState {
             };
             lv.set_item_text(i as i32, 4, algo);
 
-            // Last Run
             let last_run = if task.last_run_timestamp == 0 {
                 crate::utils::to_wstring("Never")
             } else {
@@ -366,7 +362,6 @@ impl WatcherState {
             };
             lv.set_item_text_w(i as i32, 5, &last_run);
             
-            // Action
             lv.set_item_text(i as i32, 6, "▶ Run");
         }
     }
