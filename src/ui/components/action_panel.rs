@@ -262,22 +262,23 @@ impl ActionPanel {
         GetClientRect(self.hwnd_panel, &mut rect);
         let w = rect.right - rect.left;
         
+        let top_btn = crate::ui::theme::scale(22); // Push buttons down to give labels space
+        
         let lbl_rect = RECT {
             left: 0,
-            top: 4,
+            top: 0,
             right: w,
-            bottom: 20,
+            bottom: top_btn,
         };
         
         let btn_rect = RECT {
             left: 0,
-            top: 14,
+            top: top_btn,
             right: w,
-            bottom: 64,
+            bottom: rect.bottom, // Will be scale(60) usually
         };
 
-        // Labels Row
-        // Height 16px. Padding must be 0 or small.
+        // Labels Row (height = 22, no padding)
         LayoutNode::row(0, 5)
             .with(self.hwnd_lbl_input, Fixed(143))
             .spacer(20)
@@ -285,9 +286,8 @@ impl ActionPanel {
             .with(self.hwnd_lbl_algo, Fixed(100))
             .apply_layout(lbl_rect);
 
-        // Buttons Row
-        // Rect height 50. Padding 9 gives 32px inner height.
-        LayoutNode::row(9, 5)
+        // Buttons Row (height = 60 - 22 = 38. Padding 3 gives 32px height)
+        LayoutNode::row(3, 5)
             .with(self.hwnd_files, Fixed(32))
             .with(self.hwnd_folder, Fixed(32))
             .with(self.hwnd_remove, Fixed(32))

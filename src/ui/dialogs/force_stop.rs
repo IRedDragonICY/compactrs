@@ -5,7 +5,6 @@ use crate::utils::to_wstring;
 use crate::w;
 use crate::types::*;
 
-
 const TIMER_ID: usize = 1;
 const IDC_BTN_YES: u16 = 3001;
 const IDC_BTN_NO: u16 = 3002;
@@ -42,9 +41,8 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
     let p_width = rect.right - rect.left;
     let p_height = rect.bottom - rect.top;
     
-    // Increased width to 380 to fit text comfortably
-    let width = 380; 
-    let height = 180;
+    let width = crate::ui::theme::scale(380); 
+    let height = crate::ui::theme::scale(180);
     let x = rect.left + (p_width - width) / 2;
     let y = rect.top + (p_height - height) / 2;
 
@@ -112,7 +110,7 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                     static_cls.as_ptr(),
                     msg_wide.as_ptr(),
                     WS_VISIBLE | WS_CHILD,
-                    20, 20, 340, 60, // Widened label
+                    crate::ui::theme::scale(20), crate::ui::theme::scale(20), crate::ui::theme::scale(340), crate::ui::theme::scale(60), // Widened label
                     hwnd,
                     IDC_LBL_MSG as isize as HMENU,
                     instance,

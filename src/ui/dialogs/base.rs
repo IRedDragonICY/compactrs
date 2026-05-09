@@ -26,7 +26,7 @@ pub unsafe fn show_modal_singleton<T: WindowHandler>(
     show_modal(
         WindowBuilder::new(state, class_name, title)
             .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
-            .size(width, height)
+            .size(crate::ui::theme::scale(width), crate::ui::theme::scale(height))
             .align(WindowAlignment::CenterOnParent)
             .background(bg_brush),
         parent

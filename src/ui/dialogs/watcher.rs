@@ -1,4 +1,3 @@
-/* --- src/ui/dialogs/watcher.rs --- */
 #![allow(unsafe_op_in_unsafe_fn, non_snake_case)]
 
 use crate::ui::builder::ControlBuilder;
@@ -83,7 +82,7 @@ pub unsafe fn show_watcher_modal(
     show_modal(
         WindowBuilder::new(&mut state, class_name, WATCHER_TITLE)
             .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_THICKFRAME | WS_MAXIMIZEBOX)
-            .size(700, 400)
+            .size(crate::ui::theme::scale(700), crate::ui::theme::scale(400))
             .align(WindowAlignment::CenterOnParent)
             .background(bg_brush),
         parent

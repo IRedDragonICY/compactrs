@@ -65,7 +65,7 @@ pub unsafe fn show_console_window(app_state: &mut AppState, parent: HWND, is_dar
 
     let hwnd_res = WindowBuilder::new(state_ref, "CompactRS_Console", CONSOLE_TITLE)
         .style(WS_OVERLAPPEDWINDOW | WS_VISIBLE)
-        .size(600, 400)
+        .size(crate::ui::theme::scale(600), crate::ui::theme::scale(400))
         .align(WindowAlignment::Manual(CW_USEDEFAULT, CW_USEDEFAULT))
         .background(bg_brush)
         .build(parent);

@@ -199,8 +199,8 @@ pub unsafe fn show_settings_modal(
         search_results: Vec::new(),
     };
     
-    let initial_width = crate::ui::theme::scale(850);
-    let initial_height = crate::ui::theme::scale(550);
+    let initial_width = 850;
+    let initial_height = 550;
 
     let ran_modal = crate::ui::dialogs::base::show_modal_singleton(
         parent, 
@@ -233,6 +233,9 @@ struct FontMap {
     new_bold: HFONT,
     new_icon: HFONT,
     new_app: HFONT,
+    old_global_icon: HFONT,
+    new_global_icon: HFONT,
+    old_global_app: HFONT,
 }
 
 // Subclass untuk Highlight Control (Menggambar Highlight secara Overlap agar tidak tertutup Label)
@@ -357,10 +360,15 @@ impl SettingsState {
     }
 
     unsafe fn apply_dynamic_scale(&mut self, hwnd: HWND) {
-        crate::ui::theme::update_ui_scale(self.ui_scale_multiplier);
-
+        let old_global_app = crate::ui::theme::get_app_font();
+        let old_global_icon = crate::ui::theme::get_icon_font();
         let old_font_bold = self.h_font_bold;
         let old_font_icon = self.h_font_icon;
+
+        crate::ui::theme::update_ui_scale(self.ui_scale_multiplier);
+
+        let new_global_app = crate::ui::theme::get_app_font();
+        let new_global_icon = crate::ui::theme::get_icon_font();
 
         let h_default = GetStockObject(DEFAULT_GUI_FONT);
         let mut lf: LOGFONTW = std::mem::zeroed();
@@ -382,7 +390,10 @@ impl SettingsState {
             old_icon: old_font_icon,
             new_bold: self.h_font_bold,
             new_icon: self.h_font_icon,
-            new_app: crate::ui::theme::get_app_font(),
+            new_app: new_global_app,
+            old_global_icon,
+            new_global_icon,
+            old_global_app,
         };
 
         let thread_id = GetCurrentThreadId();
@@ -399,9 +410,11 @@ impl SettingsState {
             
             if h_font == map.old_icon {
                 SendMessageW(child, WM_SETFONT, map.new_icon as usize, 1);
+            } else if h_font == map.old_global_icon {
+                SendMessageW(child, WM_SETFONT, map.new_global_icon as usize, 1);
             } else if h_font == map.old_bold {
                 SendMessageW(child, WM_SETFONT, map.new_bold as usize, 1);
-            } else {
+            } else if h_font == map.old_global_app || h_font == std::ptr::null_mut() {
                 SendMessageW(child, WM_SETFONT, map.new_app as usize, 1);
             }
             1
@@ -749,7 +762,6 @@ impl WindowHandler for SettingsState {
                 0, 
                 listbox_class.as_ptr(),
                 std::ptr::null(),
-                // LBS_NOTIFY | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED
                 WS_CHILD | WS_BORDER | WS_VSCROLL | 0x0001 | 0x0040 | 0x0010, 
                 0, 0, 250, 150,
                 hwnd,
@@ -759,7 +771,6 @@ impl WindowHandler for SettingsState {
             );
             self.hwnd_search_list = h_list;
             
-            // Set item height
             SendMessageW(h_list, 0x01A0, 0, crate::ui::theme::scale(28) as isize); // LB_SETITEMHEIGHT
             SendMessageW(h_list, WM_SETFONT, crate::ui::theme::get_app_font() as usize, 1);
 

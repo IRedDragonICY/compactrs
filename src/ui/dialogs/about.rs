@@ -45,7 +45,7 @@ impl WindowHandler for AboutState {
             let segoe_ui = w!("Segoe UI");
             
             let make_font = |h: i32, w: i32, i: u32, face: *const u16| CreateFontW(
-                -h, 0, 0, 0, w, i, 0, 0, DEFAULT_CHARSET as u32,
+                -crate::ui::theme::scale(h), 0, 0, 0, w, i, 0, 0, DEFAULT_CHARSET as u32,
                 OUT_DEFAULT_PRECIS as u32, CLIP_DEFAULT_PRECIS as u32, CLEARTYPE_QUALITY as u32,
                 (DEFAULT_PITCH | FF_DONTCARE) as u32, face);
 

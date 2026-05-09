@@ -71,7 +71,7 @@ pub unsafe fn show(items: Vec<StartupItem>, config: AppConfig) {
     
     let hwnd_res = WindowBuilder::new(&mut state, "CompactRS_CtxDialog", "CompactRS - Processing")
         .style(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE)
-        .size(500, 180)
+        .size(crate::ui::theme::scale(500), crate::ui::theme::scale(180))
         .align(WindowAlignment::CenterOnScreen)
         .icon(icon)
         .background(bg_brush)

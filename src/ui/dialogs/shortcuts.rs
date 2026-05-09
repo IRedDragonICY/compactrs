@@ -46,7 +46,7 @@ impl WindowHandler for ShortcutsState {
             
             // Bold font for keys
             lf.lfWeight = FW_BOLD as i32;
-            lf.lfHeight = -14;
+            lf.lfHeight = crate::ui::theme::scale(-14);
             self.h_font_bold = CreateFontIndirectW(&lf);
             
             // Regular font for descriptions

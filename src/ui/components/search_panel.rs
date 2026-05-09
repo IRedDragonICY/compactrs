@@ -1,4 +1,3 @@
-/* --- src/ui/components/search_panel.rs --- */
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::types::*;
@@ -236,13 +235,16 @@ impl SearchPanel {
         
         use SizePolicy::{Fixed, Flex};
         
+        let row1_bottom = crate::ui::theme::scale(40);
+        let row2_bottom = rect.bottom; // Matches window.rs Fixed(85) => scale(85)
+        
         // Row 1: Search Bar + Results Label
-        LayoutNode::row(10, 0)
+        LayoutNode::row(6, 0)
             .with(self.hwnd_search, Flex(1.0)).spacer(10).with(self.hwnd_lbl_results, Fixed(200))
-            .apply_layout(RECT { left: 0, top: 0, right: w, bottom: 48 });
+            .apply_layout(RECT { left: 0, top: 0, right: w, bottom: row1_bottom });
 
         // Row 2: Filter Controls
-        LayoutNode::row(10, 10)
+        LayoutNode::row(8, 10)
             .with(self.hwnd_lbl_filter_by, Fixed(60))
             .with(self.hwnd_combo_filter_col, Fixed(100))
             .with(self.hwnd_lbl_algo, Fixed(65))
@@ -251,6 +253,6 @@ impl SearchPanel {
             .with(self.hwnd_combo_size, Fixed(90))
             .with(self.hwnd_chk_case, Fixed(110))
             .with(self.hwnd_chk_regex, Fixed(70))
-            .apply_layout(RECT { left: 0, top: 35, right: w, bottom: 79 });
+            .apply_layout(RECT { left: 0, top: row1_bottom, right: w, bottom: row2_bottom });
     }
 }
