@@ -31,6 +31,7 @@ const IDC_CHK_CONTEXT_MENU: u16 = 2008;
 const IDC_CHK_SYSTEM_GUARD: u16 = 2009;
 const IDC_CHK_LOW_POWER: u16 = 2013;
 const IDC_SLIDER_THREADS: u16 = 2014;
+const IDC_CHK_CTX_DIALOG: u16 = 2017;
 
 const IDC_CHK_LOG_ENABLED: u16 = 2021;
 const IDC_CHK_LOG_ERRORS: u16 = 2022;
@@ -75,6 +76,7 @@ struct SettingsState {
     skip_extensions: String,
     set_compressed_attr: bool,
     ui_scale_multiplier: f32,
+    context_menu_dialog_only: bool,
 
     update_status: UpdateStatus,
     pending_update: Option<crate::updater::UpdateInfo>,
@@ -157,8 +159,9 @@ pub unsafe fn show_settings_modal(
     enable_skip_heuristics: bool,
     skip_extensions_buf: [u16; 512],
     set_compressed_attr: bool,
-    ui_scale_multiplier: f32
-) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512], bool, f32) {
+    ui_scale_multiplier: f32,
+    context_menu_dialog_only: bool
+) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512], bool, f32, bool) {
 
     let skip_string = String::from_utf16_lossy(&skip_extensions_buf)
         .trim_matches(char::from(0))
@@ -180,6 +183,7 @@ pub unsafe fn show_settings_modal(
         skip_extensions: skip_string,
         set_compressed_attr,
         ui_scale_multiplier,
+        context_menu_dialog_only,
         update_status: UpdateStatus::Idle,
         pending_update: None,
         h_font_bold: std::ptr::null_mut(),
@@ -217,9 +221,9 @@ pub unsafe fn show_settings_modal(
                 i += 1;
             }
         }
-        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf, state.set_compressed_attr, state.ui_scale_multiplier)
+        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf, state.set_compressed_attr, state.ui_scale_multiplier, state.context_menu_dialog_only)
     } else {
-         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf, set_compressed_attr, ui_scale_multiplier)
+         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf, set_compressed_attr, ui_scale_multiplier, context_menu_dialog_only)
     }
 }
 
@@ -237,9 +241,7 @@ unsafe extern "system" fn highlight_subclass_proc(
     _uidsubclass: usize, _dwrefdata: usize
 ) -> LRESULT {
     if umsg == WM_PAINT {
-        // Biarkan panel menggambar backgroundnya secara utuh terlebih dahulu
         let res = DefSubclassProc(hwnd, umsg, wparam, lparam);
-        
         let main_hwnd = GetParent(hwnd);
         let state_ptr = GetWindowLongPtrW(main_hwnd, GWLP_USERDATA) as *mut SettingsState;
         
@@ -249,7 +251,6 @@ unsafe extern "system" fn highlight_subclass_proc(
                 let h_ctrl = GetDlgItem(hwnd, hl_id as i32);
                 if h_ctrl != std::ptr::null_mut() && GetParent(h_ctrl) == hwnd {
                     let hdc = GetDC(hwnd);
-                    
                     let mut rc: RECT = std::mem::zeroed();
                     GetWindowRect(h_ctrl, &mut rc);
                     let mut pt1 = POINT { x: rc.left, y: rc.top };
@@ -260,10 +261,7 @@ unsafe extern "system" fn highlight_subclass_proc(
                     let mut panel_rc: RECT = std::mem::zeroed();
                     GetClientRect(hwnd, &mut panel_rc);
                     
-                    // Kalkulasi batas luar (Bouding Box) agar border biru 
-                    // tidak memotong atau dihapus oleh background label/teks
                     let is_large_control = hl_id == IDC_EDIT_EXTENSIONS;
-                    
                     let row_top = if is_large_control { pt1.y - crate::ui::theme::scale(28) } else { pt1.y };
                     let row_bottom = if is_large_control { pt2.y + crate::ui::theme::scale(4) } else { pt1.y + crate::ui::theme::scale(42) };
                     
@@ -275,14 +273,11 @@ unsafe extern "system" fn highlight_subclass_proc(
                     };
                     
                     let ctrl_center_y = row_top + (row_bottom - row_top) / 2;
-                    
-                    // 1. Gambar Bounding Box (Aksen Biru/Highlight)
-                    let pen = CreatePen(PS_SOLID as i32, crate::ui::theme::scale(2), 0x00D47800); // Blue Accent BGR
+                    let pen = CreatePen(PS_SOLID as i32, crate::ui::theme::scale(2), 0x00D47800); 
                     let old_pen = SelectObject(hdc, pen as HGDIOBJ);
-                    let old_brush = SelectObject(hdc, GetStockObject(5)); // NULL_BRUSH (Hollow)
+                    let old_brush = SelectObject(hdc, GetStockObject(5)); 
                     RoundRect(hdc, draw_rc.left, draw_rc.top, draw_rc.right, draw_rc.bottom, crate::ui::theme::scale(8), crate::ui::theme::scale(8));
                     
-                    // 2. Gambar Modern Pill/Bar di kiri (Khas Windows 11)
                     let pill_rc = RECT {
                         left: draw_rc.left,
                         top: ctrl_center_y - crate::ui::theme::scale(10),
@@ -293,7 +288,6 @@ unsafe extern "system" fn highlight_subclass_proc(
                     FillRect(hdc, &pill_rc, pill_brush);
                     DeleteObject(pill_brush as HGDIOBJ);
                     
-                    // Bersihkan memori GDI
                     SelectObject(hdc, old_brush);
                     SelectObject(hdc, old_pen);
                     DeleteObject(pen as HGDIOBJ);
@@ -306,14 +300,13 @@ unsafe extern "system" fn highlight_subclass_proc(
     DefSubclassProc(hwnd, umsg, wparam, lparam)
 }
 
-// Subclass Edit Control Pencarian agar bisa navigasi ListBox pakai Arrow Down/Up
 unsafe extern "system" fn search_edit_subclass_proc(
     hwnd: HWND, umsg: u32, wparam: WPARAM, lparam: LPARAM,
     _uidsubclass: usize, _dwrefdata: usize
 ) -> LRESULT {
     if umsg == WM_KEYDOWN {
         let vk = wparam as i32;
-        if vk == 0x28 || vk == 0x26 || vk == 0x0D { // Down, Up, Enter
+        if vk == 0x28 || vk == 0x26 || vk == 0x0D { 
             let main_hwnd = GetParent(hwnd);
             let state_ptr = GetWindowLongPtrW(main_hwnd, GWLP_USERDATA) as *mut SettingsState;
             if !state_ptr.is_null() {
@@ -321,16 +314,14 @@ unsafe extern "system" fn search_edit_subclass_proc(
                 if state.hwnd_search_list != std::ptr::null_mut() {
                     let is_visible = (GetWindowLongW(state.hwnd_search_list, GWL_STYLE) & WS_VISIBLE as i32) != 0;
                     if is_visible {
-                        if vk == 0x0D { // Enter
-                            let idx = SendMessageW(state.hwnd_search_list, 0x0188, 0, 0); // LB_GETCURSEL
+                        if vk == 0x0D { 
+                            let idx = SendMessageW(state.hwnd_search_list, 0x0188, 0, 0); 
                             if idx >= 0 {
-                                // Eksekusi click
                                 let wparam_cmd = ((1 << 16) | IDC_LIST_SEARCH_RESULTS as u32) as usize;
                                 SendMessageW(main_hwnd, WM_COMMAND, wparam_cmd, state.hwnd_search_list as isize);
                             }
                             return 0;
                         } else {
-                            // Lempar Arrow ke Listbox
                             SendMessageW(state.hwnd_search_list, umsg, wparam, lparam);
                             return 0;
                         }
@@ -546,7 +537,7 @@ impl WindowHandler for SettingsState {
                          c.add_child(crate::ui::layout::LayoutNode::new_leaf(h, SizePolicy::Fixed(16)));
                      });
                      
-                     r.col_with_policy(0, SizePolicy::Fixed(140), |c: &mut ContainerBuilder| {
+                     r.col_with_policy(0, SizePolicy::Fixed(190), |c: &mut ContainerBuilder| {
                          control_fn(c);
                      });
                 });
@@ -570,7 +561,8 @@ impl WindowHandler for SettingsState {
                     icon_row(v, p0, "\u{E8DE}", crate::w!("Explorer Context Menu"), crate::w!("Add 'CompactRS' to right-click menu"), &|c| {
                          c.row_with_policy(0, SizePolicy::Fixed(20), |r| {
                              r.add_child(crate::ui::layout::LayoutNode::new_leaf(std::ptr::null_mut(), SizePolicy::Flex(1.0)));
-                             r.checkbox(IDC_CHK_CONTEXT_MENU, "", self.enable_context_menu, SizePolicy::Fixed(20));
+                             r.checkbox(IDC_CHK_CONTEXT_MENU, "Enable", self.enable_context_menu, SizePolicy::Fixed(70));
+                             r.checkbox(IDC_CHK_CTX_DIALOG, "Dialog Only", self.context_menu_dialog_only, SizePolicy::Fixed(110));
                          });
                     });
                     icon_row(v, p0, "\u{EA18}", crate::w!("System Safety Guard"), crate::w!("Prevent compression of critical system files"), &|c| {
@@ -1089,6 +1081,7 @@ impl WindowHandler for SettingsState {
                               }
                          },
                          IDC_CHK_CONTEXT_MENU => { if (code as u32) == BN_CLICKED { self.enable_context_menu = Button::new(self.get_control(id as i32)).is_checked(); } },
+                         IDC_CHK_CTX_DIALOG => { if (code as u32) == BN_CLICKED { self.context_menu_dialog_only = Button::new(self.get_control(id as i32)).is_checked(); } },
                          IDC_CHK_SYSTEM_GUARD => { if (code as u32) == BN_CLICKED { self.enable_system_guard = Button::new(self.get_control(id as i32)).is_checked(); } },
                          IDC_CHK_LOW_POWER => { if (code as u32) == BN_CLICKED { self.low_power_mode = Button::new(self.get_control(id as i32)).is_checked(); } },
                          IDC_CHK_SET_ATTR => { if (code as u32) == BN_CLICKED { self.set_compressed_attr = Button::new(self.get_control(id as i32)).is_checked(); } },

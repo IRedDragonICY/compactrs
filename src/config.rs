@@ -10,7 +10,7 @@ use crate::ui::state::AppTheme;
 #[derive(Clone, Copy, Debug)]
 pub struct AppConfig {
     pub magic: u32,   // 0x43505253 ("CPRS")
-    pub version: u32, // 9
+    pub version: u32, // 10
     pub theme: AppTheme,
     pub default_algo: WofAlgorithm,
     pub force_compress: bool,
@@ -23,19 +23,17 @@ pub struct AppConfig {
     pub enable_system_guard: bool,
     pub low_power_mode: bool,
     pub max_threads: u32,
-    pub max_concurrent_items: u32, // New in v5
+    pub max_concurrent_items: u32,
     pub log_enabled: bool,
     pub log_level_mask: u8,
-    // New in v6
     pub enable_skip_heuristics: bool,
-    pub skip_extensions_buf: [u16; 512], // Comma separated list
-    pub set_compressed_attr: bool, // New in v7
-    
-    // New in v8 (Persist precise UI Combobox states)
+    pub skip_extensions_buf: [u16; 512],
+    pub set_compressed_attr: bool, 
     pub combo_algo_index: u8,
     pub combo_action_index: u8,
-    // New in v9
     pub ui_scale_multiplier: f32,
+    // New in v10
+    pub context_menu_dialog_only: bool,
 }
 
 impl Default for AppConfig {
@@ -53,9 +51,9 @@ impl Default for AppConfig {
 
         Self {
             magic: 0x43505253,
-            version: 9,
+            version: 10,
             theme: AppTheme::System,
-            default_algo: WofAlgorithm::Xpress8K, // Default to XPRESS8K
+            default_algo: WofAlgorithm::Xpress8K,
             force_compress: false,
             enable_force_stop: false,
             window_width: 900,
@@ -72,9 +70,10 @@ impl Default for AppConfig {
             enable_skip_heuristics: true,
             skip_extensions_buf: buf,
             set_compressed_attr: false,
-            combo_algo_index: 0, // 0 = "As Listed"
-            combo_action_index: 0, // 0 = "As Listed"
+            combo_algo_index: 0,
+            combo_action_index: 0,
             ui_scale_multiplier: 1.0,
+            context_menu_dialog_only: true,
         }
     }
 }
@@ -97,8 +96,8 @@ impl AppConfig {
                 if file.read_exact(&mut buffer).is_ok() {
                     unsafe {
                         let config = std::ptr::read_unaligned(buffer.as_ptr() as *const AppConfig);
-                        // Check for version 9
-                        if config.magic == 0x43505253 && config.version == 9 {
+                        // Check for version 10
+                        if config.magic == 0x43505253 && config.version == 10 {
                             return config;
                         }
                     }

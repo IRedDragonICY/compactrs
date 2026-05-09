@@ -321,11 +321,11 @@ pub unsafe fn update_process_button_state(st: &AppState) {
 pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     let current_theme = st.theme;
     let is_dark = theme::resolve_mode(st.theme);
-    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads, new_concurrent, new_log_enabled, new_log_mask, new_skip, new_skip_buf, new_set_attr, new_scale) = crate::ui::dialogs::show_settings_modal(
+    let (new_theme, new_force, new_ctx, new_guard, new_low_power, new_threads, new_concurrent, new_log_enabled, new_log_mask, new_skip, new_skip_buf, new_set_attr, new_scale, new_ctx_dialog) = crate::ui::dialogs::show_settings_modal(
         hwnd, current_theme, is_dark, st.enable_force_stop, st.config.enable_context_menu, st.config.enable_system_guard, st.low_power_mode, st.config.max_threads,
         st.config.max_concurrent_items, st.config.log_enabled, st.config.log_level_mask,
         st.config.enable_skip_heuristics, st.config.skip_extensions_buf, st.config.set_compressed_attr,
-        st.config.ui_scale_multiplier
+        st.config.ui_scale_multiplier, st.config.context_menu_dialog_only
     );
     
     if let Some(t) = new_theme {
@@ -369,6 +369,8 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     
     st.config.ui_scale_multiplier = new_scale;
     crate::ui::theme::update_ui_scale(new_scale);
+    
+    st.config.context_menu_dialog_only = new_ctx_dialog;
     
     if st.config.log_enabled {
         crate::logger::set_log_level(st.config.log_level_mask);

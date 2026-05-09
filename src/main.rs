@@ -100,14 +100,25 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
     let config = crate::config::AppConfig::load();
     crate::ui::theme::update_ui_scale(config.ui_scale_multiplier);
 
+    // Parse CLI arguments
+    let startup_items = parse_cli_args();
+    let _ = STARTUP_ITEMS.set(startup_items.clone());
+
+    // If context menu dialog is enabled and we have args, bypass single instance and show dialog directly
+    if !startup_items.is_empty() && config.context_menu_dialog_only {
+        let _ = CoInitializeEx(ptr::null_mut(), COINIT_APARTMENTTHREADED);
+        crate::ui::dialogs::context_dialog::show(startup_items.clone(), config);
+        CoUninitialize();
+        ExitProcess(0);
+    }
+
     // 0. Single Instance Check
     let class_name = w!("CompactRS_Class");
     let hwnd_existing = FindWindowW(class_name.as_ptr(), std::ptr::null());
     
     if hwnd_existing != std::ptr::null_mut() {
-        let items = parse_cli_args();
-        if !items.is_empty() {
-            for item in items {
+        if !startup_items.is_empty() {
+            for item in startup_items {
                 let algo_str = match item.algorithm {
                         WofAlgorithm::Xpress4K => "xpress4k",
                         WofAlgorithm::Xpress8K => "xpress8k",
@@ -178,10 +189,6 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
         );
         ExitProcess(1);
     }
-
-    // Parse CLI arguments
-    let startup_items = parse_cli_args();
-    let _ = STARTUP_ITEMS.set(startup_items);
 
     if config.enable_context_menu {
         let _ = crate::registry::register_context_menu();

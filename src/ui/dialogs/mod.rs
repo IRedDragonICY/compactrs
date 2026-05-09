@@ -10,6 +10,7 @@ pub mod force_stop;
 pub mod watcher;
 pub mod base;
 pub mod watcher_add;
+pub mod context_dialog;
 
 // Flatten the API for consumers
 pub use settings::show_settings_modal;
