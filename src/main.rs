@@ -183,6 +183,10 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
     let startup_items = parse_cli_args();
     let _ = STARTUP_ITEMS.set(startup_items);
 
+    if config.enable_context_menu {
+        let _ = crate::registry::register_context_menu();
+    }
+
     // Cleanup old executable
     if let Ok(exe) = std::env::current_exe() {
         let old_exe = exe.with_extension("old");

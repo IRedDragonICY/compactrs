@@ -336,6 +336,24 @@ pub unsafe fn on_open_settings(st: &mut AppState, hwnd: HWND) {
     st.enable_force_stop = new_force;
     st.config.enable_force_stop = new_force; 
 
+    if new_ctx != st.config.enable_context_menu {
+        if new_ctx {
+            if let Err(e) = crate::registry::register_context_menu() {
+                crate::log_error!(&["Failed to register context menu: ", &e].concat());
+                let title = crate::w!("Error");
+                let msg = crate::utils::to_wstring(&format!("Failed to register context menu: {}", e));
+                crate::types::MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), crate::types::MB_OK | crate::types::MB_ICONERROR);
+            }
+        } else {
+            if let Err(e) = crate::registry::unregister_context_menu() {
+                crate::log_error!(&["Failed to unregister context menu: ", &e].concat());
+                let title = crate::w!("Error");
+                let msg = crate::utils::to_wstring(&format!("Failed to unregister context menu: {}", e));
+                crate::types::MessageBoxW(hwnd, msg.as_ptr(), title.as_ptr(), crate::types::MB_OK | crate::types::MB_ICONERROR);
+            }
+        }
+    }
+
     st.config.enable_context_menu = new_ctx;
     st.config.enable_system_guard = new_guard;
     st.low_power_mode = new_low_power;
