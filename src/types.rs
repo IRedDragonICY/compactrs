@@ -1085,6 +1085,11 @@ unsafe extern "system" {
     pub fn DeleteFileW(lpFileName: LPCWSTR) -> BOOL;
     pub fn MoveFileExW(lpExistingFileName: LPCWSTR, lpNewFileName: LPCWSTR, dwFlags: u32) -> BOOL;
     pub fn GetFileInformationByHandle(hFile: HANDLE, lpFileInformation: *mut BY_HANDLE_FILE_INFORMATION) -> BOOL;
+    
+    pub fn GetProcessHeap() -> HANDLE;
+    pub fn HeapAlloc(hHeap: HANDLE, dwFlags: u32, dwBytes: usize) -> LPVOID;
+    pub fn HeapFree(hHeap: HANDLE, dwFlags: u32, lpMem: LPVOID) -> BOOL;
+    pub fn HeapReAlloc(hHeap: HANDLE, dwFlags: u32, lpMem: LPVOID, dwBytes: usize) -> LPVOID;
 }
 
 #[link(name = "user32")]
@@ -1134,6 +1139,7 @@ unsafe extern "system" {
     pub fn UpdateWindow(hWnd: HWND) -> BOOL;
     pub fn PeekMessageW(lpMsg: *mut MSG, hWnd: HWND, wMsgFilterMin: u32, wMsgFilterMax: u32, wRemoveMsg: u32) -> BOOL;
     pub fn wsprintfW(output: LPWSTR, format: LPCWSTR, ...) -> i32;
+    pub fn PostMessageW(hWnd: HWND, Msg: u32, wParam: WPARAM, lParam: LPARAM) -> BOOL;
     
     pub fn SetWindowLongPtrW(hWnd: HWND, nIndex: i32, dwNewLong: isize) -> isize;
     pub fn GetWindowLongPtrW(hWnd: HWND, nIndex: i32) -> isize;

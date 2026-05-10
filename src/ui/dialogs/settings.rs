@@ -53,6 +53,7 @@ const IDC_LBL_UPDATE_STATUS: u16 = 2011;
 const IDC_BTN_RESTART_TI: u16 = 2012;
 const IDC_BTN_RESET_ALL: u16 = 2016;
 const WM_APP_UPDATE_CHECK_RESULT: u32 = 0x8000 + 10;
+const WM_APP_UPDATE_DOWNLOAD_RESULT: u32 = 0x8000 + 11;
 const WM_GETFONT: u32 = 0x0031;
 
 // Tab System IDs
@@ -599,12 +600,17 @@ impl WindowHandler for SettingsState {
                     
                     let cpu_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) as u32;
                     let current_threads = if self.max_threads == 0 { cpu_count } else { self.max_threads };
-                    let thread_sub = crate::utils::concat_wstrings(&[crate::w!("Maximum worker threads (Current: "), &crate::utils::fmt_u32(current_threads), crate::w!(")")]);
-                    icon_row(v, p2, "\u{E9D9}", crate::w!("CPU Thread Limit"), &thread_sub, &|c| {
+                    let nt_w = crate::utils::u64_to_wstring(current_threads as u64);
+                    let nt_s = String::from_utf16_lossy(&nt_w);
+                    let thread_sub = ["Maximum worker threads (Current: ", nt_s.trim_end_matches('\0'), ")"].concat();
+                    let thread_sub_w = crate::utils::to_wstring(&thread_sub);
+                    icon_row(v, p2, "\u{E9D9}", crate::w!("CPU Thread Limit"), &thread_sub_w, &|c| {
                          c.slider(IDC_SLIDER_THREADS, 1, cpu_count, current_threads, SizePolicy::Fixed(160)); 
                     });
                     icon_row(v, p2, "\u{E902}", crate::w!("Concurrent File Queue"), crate::w!("Files compressed simultaneously (0 = Unlimited)"), &|c| {
-                         c.input(IDC_EDIT_CONCURRENT, &self.max_concurrent_items.to_string(), ES_NUMBER | ES_CENTER, SizePolicy::Fixed(60));
+                         let val_w = crate::utils::u64_to_wstring(self.max_concurrent_items as u64);
+                         let val_s = String::from_utf16_lossy(&val_w);
+                         c.input(IDC_EDIT_CONCURRENT, val_s.trim_end_matches('\0'), ES_NUMBER | ES_CENTER, SizePolicy::Fixed(60));
                     });
                 })
             };
@@ -856,8 +862,42 @@ impl WindowHandler for SettingsState {
                      }
                      Some(0)
                 },
+                WM_APP_UPDATE_DOWNLOAD_RESULT => {
+                    let res_ptr = lparam as *mut Result<(), &'static str>;
+                    let res = Box::from_raw(res_ptr);
+                    
+                    self.update_status = UpdateStatus::Idle;
+                    let h_btn = self.get_control(IDC_BTN_CHECK_UPDATE as i32);
+                    let h_lbl = self.get_control(IDC_LBL_UPDATE_STATUS as i32);
+                    
+                    match *res {
+                        Ok(_) => {
+                            Label::new(h_lbl).set_text("Update ready! Restarting...");
+                            if let Ok(exe) = std::env::current_exe() {
+                                let op = crate::utils::to_wstring("open"); 
+                                let path = crate::utils::to_wstring(exe.to_str().unwrap());
+                                ShellExecuteW(
+                                    std::ptr::null_mut(),
+                                    op.as_ptr(),
+                                    path.as_ptr(),
+                                    std::ptr::null(),
+                                    std::ptr::null(),
+                                    SW_SHOWNORMAL
+                                );
+                                std::process::exit(0);
+                            }
+                        },
+                        Err(e) => {
+                            Button::new(h_btn).set_enabled(true);
+                            Button::new(h_btn).set_text("Retry Update");
+                            let msg = ["Update Failed: ", e].concat();
+                            Label::new(h_lbl).set_text(&msg);
+                        }
+                    }
+                    Some(0)
+                },
                 WM_APP_UPDATE_CHECK_RESULT => {
-                    let res_ptr = lparam as *mut Result<Option<crate::updater::UpdateInfo>, String>;
+                    let res_ptr = lparam as *mut Result<Option<crate::updater::UpdateInfo>, &'static str>;
                     let res = Box::from_raw(res_ptr);
                     
                     self.update_status = UpdateStatus::Idle;
@@ -869,7 +909,8 @@ impl WindowHandler for SettingsState {
                     match *res {
                         Ok(Some(info)) => {
                             self.pending_update = Some(info.clone());
-                            Label::new(h_lbl).set_text(&format!("Latest: {}", info.version));
+                            let msg = ["Latest: ", &info.version].concat();
+                            Label::new(h_lbl).set_text(&msg);
                             Button::new(h_btn).set_text("Update Now");
                         },
                         Ok(None) => {
@@ -879,7 +920,8 @@ impl WindowHandler for SettingsState {
                         },
                         Err(e) => {
                             self.pending_update = None;
-                            Label::new(h_lbl).set_text(&format!("Error: {}", e)); 
+                            let msg = ["Error: ", e].concat();
+                            Label::new(h_lbl).set_text(&msg); 
                             Button::new(h_btn).set_text("Retry Check");
                         }
                     }
@@ -1098,26 +1140,11 @@ impl WindowHandler for SettingsState {
                                          Label::new(self.get_control(IDC_LBL_UPDATE_STATUS as i32)).set_text("Downloading...");
                                          
                                          let url = info.download_url.clone();
+                                         let hwnd_target = hwnd as usize; 
                                          std::thread::spawn(move || {
-                                             match crate::updater::download_and_start_update(&url) {
-                                                Ok(_) => {
-                                                     if let Ok(exe) = std::env::current_exe() {
-                                                         let op = crate::utils::to_wstring("open"); 
-                                                         let path = crate::utils::to_wstring(exe.to_str().unwrap());
-                                                         ShellExecuteW(
-                                                             std::ptr::null_mut(),
-                                                             op.as_ptr(),
-                                                             path.as_ptr(),
-                                                             std::ptr::null(),
-                                                             std::ptr::null(),
-                                                             SW_SHOWNORMAL
-                                                         );
-                                                         std::process::exit(0);
-                                                     }
-                                                },
-                                                Err(_) => {
-                                                }
-                                             }
+                                             let res = crate::updater::download_and_start_update(&url);
+                                             let ptr = Box::into_raw(Box::new(res));
+                                             crate::types::PostMessageW(hwnd_target as HWND, WM_APP_UPDATE_DOWNLOAD_RESULT, 0, ptr as LPARAM);
                                          });
                                      },
                                      None => {
@@ -1129,7 +1156,7 @@ impl WindowHandler for SettingsState {
                                          std::thread::spawn(move || {
                                              let res = crate::updater::check_for_updates();
                                              let ptr = Box::into_raw(Box::new(res));
-                                             SendMessageW(hwnd_target as HWND, WM_APP_UPDATE_CHECK_RESULT, 0, ptr as LPARAM);
+                                             crate::types::PostMessageW(hwnd_target as HWND, WM_APP_UPDATE_CHECK_RESULT, 0, ptr as LPARAM);
                                          });
                                      }
                                  }

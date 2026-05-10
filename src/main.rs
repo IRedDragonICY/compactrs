@@ -1,11 +1,80 @@
 #![windows_subsystem = "windows"]
 #![no_main]
+#![allow(unsafe_op_in_unsafe_fn)]
 
-// Entry point refactoring complete
-
+use std::alloc::{GlobalAlloc, Layout};
 use crate::types::*;
 use std::ptr;
 use std::sync::OnceLock;
+
+struct Win32Allocator;
+
+unsafe impl GlobalAlloc for Win32Allocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let size = layout.size();
+        let align = layout.align();
+        
+        if align <= 16 {
+            unsafe { crate::types::HeapAlloc(crate::types::GetProcessHeap(), 0, size) as *mut u8 }
+        } else {
+            // Over-allocate to ensure alignment and room to store the original pointer
+            let offset = align - 1 + std::mem::size_of::<*mut u8>();
+            let ptr = unsafe { crate::types::HeapAlloc(crate::types::GetProcessHeap(), 0, size + offset) as *mut u8 };
+            if ptr.is_null() { return std::ptr::null_mut(); }
+            
+            let aligned = ((ptr as usize + offset) & !(align - 1)) as *mut u8;
+            // Store the original pointer right before the aligned pointer
+            unsafe { *(aligned.sub(std::mem::size_of::<*mut u8>()) as *mut *mut u8) = ptr };
+            aligned
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        if ptr.is_null() { return; }
+        let align = layout.align();
+        let orig_ptr = if align <= 16 {
+            ptr
+        } else {
+            unsafe { *(ptr.sub(std::mem::size_of::<*mut u8>()) as *mut *mut u8) }
+        };
+        unsafe { crate::types::HeapFree(crate::types::GetProcessHeap(), 0, orig_ptr as *mut _); }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        let size = layout.size();
+        let align = layout.align();
+        
+        if align <= 16 {
+            // HEAP_ZERO_MEMORY = 0x00000008
+            unsafe { crate::types::HeapAlloc(crate::types::GetProcessHeap(), 0x00000008, size) as *mut u8 }
+        } else {
+            let ptr = unsafe { self.alloc(layout) };
+            if !ptr.is_null() {
+                unsafe { std::ptr::write_bytes(ptr, 0, size) };
+            }
+            ptr
+        }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let align = layout.align();
+        
+        if align <= 16 {
+            unsafe { crate::types::HeapReAlloc(crate::types::GetProcessHeap(), 0, ptr as *mut _, new_size) as *mut u8 }
+        } else {
+            let new_ptr = unsafe { self.alloc(Layout::from_size_align_unchecked(new_size, align)) };
+            if !new_ptr.is_null() {
+                let copy_size = std::cmp::min(layout.size(), new_size);
+                unsafe { std::ptr::copy_nonoverlapping(ptr, new_ptr, copy_size) };
+                unsafe { self.dealloc(ptr, layout) };
+            }
+            new_ptr
+        }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: Win32Allocator = Win32Allocator;
 
 pub mod ui;
 pub mod engine;
@@ -90,7 +159,6 @@ fn is_admin() -> bool {
     unsafe { IsUserAnAdmin() != 0 }
 }
 
-#[allow(unsafe_op_in_unsafe_fn)]
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn WinMainCRTStartup() {
     // Initialize Theme System early
@@ -211,7 +279,8 @@ pub unsafe extern "system" fn WinMainCRTStartup() {
     let hwnd_main = match ui::window::create_main_window(instance) {
         Ok(h) => h,
         Err(e) => {
-            let msg = to_wstring(&("Failed to create main window: ".to_string() + &e.to_string()));
+            let msg_text = ["Failed to create main window: ", &e].concat();
+            let msg = to_wstring(&msg_text);
             MessageBoxW(std::ptr::null_mut(), msg.as_ptr(), w!("Error").as_ptr(), MB_ICONERROR | MB_OK);
             ExitProcess(1);
             std::ptr::null_mut()

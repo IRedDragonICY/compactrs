@@ -1,3 +1,4 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 use crate::ui::builder::ControlBuilder;
 use crate::ui::theme;
 use crate::ui::framework::get_window_state;
@@ -49,7 +50,7 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
     let mut state = DialogState {
         process_name: process_name.to_string(),
         seconds_left: 5,
-        result: false, // Default cancel
+        result: false, 
         is_dark,
     };
 
@@ -67,7 +68,6 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
 
     EnableWindow(parent, 0);
     
-    // Message Loop
     crate::ui::framework::run_message_loop(_hwnd);
     
     EnableWindow(parent, 1);
@@ -76,10 +76,8 @@ pub unsafe fn show_force_stop_dialog(parent: HWND, process_name: &str, is_dark: 
 }}
 
 unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT { unsafe {
-    // Use centralized helper for state access
     let get_state = || get_window_state::<DialogState>(hwnd);
 
-    // Centralized handler for theme-related messages
     if let Some(st) = get_state() {
         if let Some(result) = theme::handle_standard_colors(hwnd, msg, wparam, st.is_dark) {
             return result;
@@ -97,12 +95,15 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
             if let Some(st) = state_ptr.as_ref() {
                 let is_dark = st.is_dark;
                 
-                // Apply Dark Mode to Title Bar using centralized helper
                 crate::ui::theme::set_window_frame_theme(hwnd, is_dark);
             
-                // Message Label
-                let msg_text = "Process '".to_string() + &st.process_name + "' is locking this file.\nForce Stop and try again?";
-                let msg_wide = to_wstring(&msg_text);
+                let proc_w = to_wstring(&st.process_name);
+                let msg_wide = crate::utils::concat_wstrings(&[
+                    w!("Process '"),
+                    &proc_w,
+                    w!("' is locking this file.\nForce Stop and try again?")
+                ]);
+
                 let static_cls = w!("STATIC");
                 
                 let _h_msg = CreateWindowExW(
@@ -110,23 +111,22 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                     static_cls.as_ptr(),
                     msg_wide.as_ptr(),
                     WS_VISIBLE | WS_CHILD,
-                    crate::ui::theme::scale(20), crate::ui::theme::scale(20), crate::ui::theme::scale(340), crate::ui::theme::scale(60), // Widened label
+                    crate::ui::theme::scale(20), crate::ui::theme::scale(20), crate::ui::theme::scale(340), crate::ui::theme::scale(60),
                     hwnd,
                     IDC_LBL_MSG as isize as HMENU,
                     instance,
                     std::ptr::null_mut()
                 );
                 
-                // Yes Button
                 ControlBuilder::new(hwnd, IDC_BTN_YES)
                     .text_w(w!("Force Stop (Yes)")).pos(40, 90).size(130, 32).dark_mode(is_dark).build();
                 
-                // No Button with Timer
-                let no_text = "Cancel (".to_string() + &st.seconds_left.to_string() + ")";
-                ControlBuilder::new(hwnd, IDC_BTN_NO)
-                    .text(&no_text).pos(190, 90).size(130, 32).dark_mode(is_dark).build();
+                let sec_w = crate::utils::u64_to_wstring(st.seconds_left as u64);
+                let no_wide = crate::utils::concat_wstrings(&[w!("Cancel ("), &sec_w, w!(")")]);
                 
-                // Start Timer
+                ControlBuilder::new(hwnd, IDC_BTN_NO)
+                    .text_w(&no_wide).pos(190, 90).size(130, 32).dark_mode(is_dark).build();
+                
                 SetTimer(hwnd, TIMER_ID, 1000, None);
             }
             0
@@ -138,16 +138,16 @@ unsafe extern "system" fn dialog_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, 
                     if st.seconds_left > 0 {
                         st.seconds_left -= 1;
                         
-                        // Update No button text
-                        let no_text = "Cancel (".to_string() + &st.seconds_left.to_string() + ")";
-                        let no_wide = to_wstring(&no_text);
+                        let sec_w = crate::utils::u64_to_wstring(st.seconds_left as u64);
+                        let no_wide = crate::utils::concat_wstrings(&[w!("Cancel ("), &sec_w, w!(")")]);
+                        
                         let h_btn = GetDlgItem(hwnd, IDC_BTN_NO as i32);
                         if h_btn != std::ptr::null_mut() {
                              SetWindowTextW(h_btn, no_wide.as_ptr());
                         }
 
                         if st.seconds_left == 0 {
-                            st.result = false; // Auto-cancel
+                            st.result = false;
                             DestroyWindow(hwnd);
                         }
                     }

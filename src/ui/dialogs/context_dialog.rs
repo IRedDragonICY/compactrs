@@ -31,7 +31,7 @@ pub struct ContextDialogState {
     pub is_dark: bool,
     pub taskbar: Option<TaskbarProgress>,
     
-    pub start_time: Instant, // Menyimpan waktu mulai proses
+    pub start_time: Instant, 
     
     pub hwnd_path: HWND,
     pub hwnd_status: HWND,
@@ -97,32 +97,33 @@ impl ContextDialogState {
             total_disk += *disk;
         }
         
-        let logical_str = String::from_utf16_lossy(&crate::utils::format_size(total_logical));
-        let disk_str = String::from_utf16_lossy(&crate::utils::format_size(total_disk));
-        let ratio_str = String::from_utf16_lossy(&crate::utils::calculate_ratio_string(total_logical, total_disk));
+        let logical_str = crate::utils::format_size(total_logical);
+        let disk_str = crate::utils::format_size(total_disk);
+        let ratio_str = crate::utils::calculate_ratio_string(total_logical, total_disk);
         
-        // Menentukan tag Algoritma / Aksi dari item pertama
         let first_algo = self.items.first().map(|i| i.algorithm).unwrap_or(WofAlgorithm::Xpress8K);
         let first_action = self.items.first().map(|i| i.action).unwrap_or(BatchAction::Compress);
         let action_tag = match first_action {
-            BatchAction::Decompress => "Decompress",
+            BatchAction::Decompress => crate::w!("[Decompress]  Logical: "),
             BatchAction::Compress => match first_algo {
-                WofAlgorithm::Xpress4K => "XPRESS4K",
-                WofAlgorithm::Xpress8K => "XPRESS8K",
-                WofAlgorithm::Xpress16K => "XPRESS16K",
-                WofAlgorithm::Lzx => "LZX",
-                WofAlgorithm::Lznt1 => "LZNT1",
+                WofAlgorithm::Xpress4K => crate::w!("[XPRESS4K]  Logical: "),
+                WofAlgorithm::Xpress8K => crate::w!("[XPRESS8K]  Logical: "),
+                WofAlgorithm::Xpress16K => crate::w!("[XPRESS16K]  Logical: "),
+                WofAlgorithm::Lzx => crate::w!("[LZX]  Logical: "),
+                WofAlgorithm::Lznt1 => crate::w!("[LZNT1]  Logical: "),
             }
         };
 
-        let text = format!("[{}]  Logical: {}  |  On Disk: {}  |  Saved: {}", 
+        let msg_w = crate::utils::concat_wstrings(&[
             action_tag,
-            logical_str.trim_matches('\0'), 
-            disk_str.trim_matches('\0'), 
-            ratio_str.trim_matches('\0')
-        );
+            &logical_str,
+            crate::w!("  |  On Disk: "),
+            &disk_str,
+            crate::w!("  |  Saved: "),
+            &ratio_str
+        ]);
         
-        crate::ui::wrappers::Label::new(self.hwnd_stats).set_text(&text);
+        crate::ui::wrappers::Label::new(self.hwnd_stats).set_text_w(&msg_w);
     }
     
     unsafe fn do_layout(&mut self, hwnd: HWND) {
@@ -158,7 +159,6 @@ impl WindowHandler for ContextDialogState {
             
             let builder = |id| ControlBuilder::new(hwnd, id).dark_mode(self.is_dark).font(font);
             
-            // Tambahkan SS_PATHELLIPSIS (0x00004000) agar path panjang otomatis menjadi C:\...\Folder
             self.hwnd_path = builder(IDC_LBL_PATH).label(false).style(0x00004000).text("Initializing...").build();
             self.hwnd_status = builder(IDC_LBL_STATUS).label(false).text("Preparing to scan...").build();
             
@@ -177,19 +177,19 @@ impl WindowHandler for ContextDialogState {
             
             self.do_layout(hwnd);
             
-            // Set Path Label to first item or multiple
             if self.items.len() == 1 {
-                crate::ui::wrappers::Label::new(self.hwnd_path).set_text(&self.items[0].path);
+                let path_w = crate::utils::to_wstring(&self.items[0].path);
+                crate::ui::wrappers::Label::new(self.hwnd_path).set_text_w(&path_w);
             } else {
-                crate::ui::wrappers::Label::new(self.hwnd_path).set_text(&format!("Processing {} items...", self.items.len()));
+                let len_w = crate::utils::u64_to_wstring(self.items.len() as u64);
+                let msg_w = crate::utils::concat_wstrings(&[crate::w!("Processing "), &len_w, crate::w!(" items...")]);
+                crate::ui::wrappers::Label::new(self.hwnd_path).set_text_w(&msg_w);
             }
             
-            // Set Timer to process Rx messages
             SetTimer(hwnd, TIMER_ID, 50, None);
             
-            self.start_time = Instant::now(); // Mulai timer
+            self.start_time = Instant::now();
             
-            // Spawn Worker Thread
             let tx = self.tx.clone();
             let state = self.global_state.clone();
             let items = self.items.clone();
@@ -209,10 +209,8 @@ impl WindowHandler for ContextDialogState {
             self.global_state.store(ProcessingState::Running as u8, Ordering::Relaxed);
             
             std::thread::spawn(move || {
-                // Phase 1: Stream Scanning
                 for (i, item) in items.iter().enumerate() {
                     let id = (i + 1) as u32;
-                    // Scanner sends ScanProgress directly
                     crate::engine::scanner::scan_path_streaming(id, &item.path, tx.clone(), Some(&state));
                 }
                 
@@ -220,7 +218,6 @@ impl WindowHandler for ContextDialogState {
                     return;
                 }
 
-                // Phase 2: Processing
                 let items_for_worker = items.iter().enumerate().map(|(i, item)| {
                     (item.path.clone(), item.action, (i + 1) as u32, item.algorithm)
                 }).collect();
@@ -244,16 +241,20 @@ impl WindowHandler for ContextDialogState {
                                 UiMessage::ScanProgress(id, logical, disk, count) => {
                                     self.item_metrics.insert(id, (logical, disk));
                                     self.update_stats_label();
-                                    let status = format!("Scanning... {} files", count);
-                                    crate::ui::wrappers::Label::new(self.hwnd_status).set_text(&status);
+                                    
+                                    let count_w = crate::utils::u64_to_wstring(count);
+                                    let status_w = crate::utils::concat_wstrings(&[crate::w!("Scanning... "), &count_w, crate::w!(" files")]);
+                                    crate::ui::wrappers::Label::new(self.hwnd_status).set_text_w(&status_w);
                                 },
                                 UiMessage::Progress(cur, tot) => {
                                     let pb = crate::ui::wrappers::ProgressBar::new(self.hwnd_progress);
                                     pb.set_range(0, tot as i32);
                                     pb.set_pos(cur as i32);
                                     
-                                    let status = format!("Processing {} / {} files", cur, tot);
-                                    crate::ui::wrappers::Label::new(self.hwnd_status).set_text(&status);
+                                    let progress_str = crate::utils::fmt_progress(cur, tot);
+                                    let status_w = crate::utils::concat_wstrings(&[crate::w!("Processing "), &progress_str, crate::w!(" files")]);
+                                    
+                                    crate::ui::wrappers::Label::new(self.hwnd_status).set_text_w(&status_w);
                                     if let Some(tb) = &self.taskbar {
                                         tb.set_value(cur, tot);
                                         tb.set_state(TaskbarState::Normal);
@@ -277,13 +278,16 @@ impl WindowHandler for ContextDialogState {
                                 UiMessage::Finished => {
                                     self.global_state.store(ProcessingState::Idle as u8, Ordering::Relaxed);
                                     
-                                    // Hitung waktu eksekusi
-                                    let elapsed = self.start_time.elapsed().as_secs_f32();
+                                    let elapsed_secs = self.start_time.elapsed().as_secs();
                                     let total_files = self.global_total.load(Ordering::Relaxed);
                                     
-                                    let final_msg = format!("Finished in {:.1}s ({} files)", elapsed, total_files);
-                                    crate::ui::wrappers::Label::new(self.hwnd_status).set_text(&final_msg);
+                                    let secs_w = crate::utils::u64_to_wstring(elapsed_secs);
+                                    let tot_w = crate::utils::u64_to_wstring(total_files);
+                                    let final_msg = crate::utils::concat_wstrings(&[
+                                        crate::w!("Finished in "), &secs_w, crate::w!("s ("), &tot_w, crate::w!(" files)")
+                                    ]);
                                     
+                                    crate::ui::wrappers::Label::new(self.hwnd_status).set_text_w(&final_msg);
                                     crate::ui::wrappers::Button::new(self.hwnd_cancel).set_text("Close");
                                     if let Some(tb) = &self.taskbar {
                                         tb.set_state(TaskbarState::NoProgress);
