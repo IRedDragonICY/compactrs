@@ -69,6 +69,7 @@ pub fn batch_process_worker(
     enable_skip: bool,
     skip_extensions: String,
     set_compressed_attr: bool,
+    process_hidden_files: bool,
 ) {
     let _sleep_guard = ExecutionStateGuard::new();
     let _ = tx.send(UiMessage::StatusText(to_wstring("Discovering files...")));
@@ -81,7 +82,7 @@ pub fn batch_process_worker(
         let count = if std::path::Path::new(path).is_file() {
             1
         } else {
-            crate::engine::scanner::scan_path_metrics(path).file_count
+            crate::engine::scanner::scan_directory_for_processing(path, Some(&state), process_hidden_files).file_count
         };
         
         item_totals.insert(*id, count);
@@ -144,7 +145,7 @@ pub fn batch_process_worker(
                     crate::engine::wof::set_compressed_attribute(&path, false);
                 }
 
-                crate::engine::scanner::walk_directory(&path, Some(&state_producer), &mut |full_path, is_dir, _| {
+                crate::engine::scanner::walk_directory(&path, Some(&state_producer), process_hidden_files, &mut |full_path, is_dir, _| {
                     if is_dir {
                         if enable_attr {
                             crate::engine::wof::set_compressed_attribute(full_path, true);

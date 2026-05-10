@@ -201,6 +201,7 @@ impl WindowHandler for ContextDialogState {
             let enable_skip = self.config.enable_skip_heuristics;
             let skip_ext = String::from_utf16_lossy(&self.config.skip_extensions_buf).trim_matches('\0').to_string();
             let set_attr = self.config.set_compressed_attr;
+            let process_hidden = self.config.process_hidden_files; // Extract process_hidden_files from config
             let global_current = self.global_current.clone();
             let global_total = self.global_total.clone();
             
@@ -211,7 +212,7 @@ impl WindowHandler for ContextDialogState {
             std::thread::spawn(move || {
                 for (i, item) in items.iter().enumerate() {
                     let id = (i + 1) as u32;
-                    crate::engine::scanner::scan_path_streaming(id, &item.path, tx.clone(), Some(&state));
+                    crate::engine::scanner::scan_path_streaming(id, &item.path, tx.clone(), Some(&state), process_hidden);
                 }
                 
                 if state.load(Ordering::Relaxed) == ProcessingState::Stopped as u8 {
@@ -224,7 +225,7 @@ impl WindowHandler for ContextDialogState {
                 
                 crate::engine::worker::batch_process_worker(
                     items_for_worker, tx, state, force, hwnd_usize, guard, low_power, max_threads,
-                    global_current, global_total, enable_skip, skip_ext, set_attr
+                    global_current, global_total, enable_skip, skip_ext, set_attr, process_hidden
                 );
             });
         }

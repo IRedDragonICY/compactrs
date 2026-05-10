@@ -62,18 +62,20 @@ pub fn should_skip_extension(path: &str, enabled: bool, custom_list: &str) -> bo
 pub fn walk_directory<F>(
     path: &str,
     state: Option<&Arc<AtomicU8>>,
+    process_hidden_files: bool,
     visitor: &mut F,
 )
 where
     F: FnMut(&str, bool, &WIN32_FIND_DATAW),
 {
     let mut buffer = PathBuffer::from(path);
-    walk_recursive(&mut buffer, state, visitor);
+    walk_recursive(&mut buffer, state, process_hidden_files, visitor);
 }
 
 fn walk_recursive<F>(
     buffer: &mut PathBuffer,
     state: Option<&Arc<AtomicU8>>,
+    process_hidden_files: bool,
     visitor: &mut F,
 )
 where
@@ -120,6 +122,14 @@ where
                  }
             }
 
+            let is_hidden_or_system = (find_data.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
+            if !process_hidden_files && is_hidden_or_system {
+                if FindNextFileW(handle, &mut find_data) == 0 {
+                    break;
+                }
+                continue;
+            }
+
             let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
             let is_dot = filename_len == 1 && find_data.cFileName[0] == 46;
             let is_dot_dot = filename_len == 2 && find_data.cFileName[0] == 46 && find_data.cFileName[1] == 46;
@@ -135,7 +145,7 @@ where
                 visitor(&full_path_str, is_dir, &find_data);
 
                 if is_dir && !is_reparse {
-                    walk_recursive(buffer, state, visitor);
+                    walk_recursive(buffer, state, process_hidden_files, visitor);
                 }
                 
                 buffer.truncate(len_before);
@@ -167,6 +177,7 @@ struct ScanContext {
     
     collect_paths: bool,
     collected_paths: Mutex<Vec<String>>,
+    process_hidden_files: bool,
 }
 
 impl ScanContext {
@@ -264,6 +275,14 @@ fn scan_worker_thread(ctx: Arc<ScanContext>) {
                     }
                 }
                 
+                let is_hidden_or_system = (find_data.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
+                if !ctx.process_hidden_files && is_hidden_or_system {
+                    if unsafe { FindNextFileW(handle, &mut find_data) } == 0 {
+                        break;
+                    }
+                    continue;
+                }
+
                 let filename_len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
                 let is_dot = filename_len == 1 && find_data.cFileName[0] == 46;
                 let is_dot_dot = filename_len == 2 && find_data.cFileName[0] == 46 && find_data.cFileName[1] == 46;
@@ -335,7 +354,8 @@ fn run_multi_threaded_scan(
     path: &str,
     state: Option<&Arc<AtomicU8>>,
     collect_paths: bool,
-    tx_info: Option<(u32, Sender<UiMessage>)>
+    tx_info: Option<(u32, Sender<UiMessage>)>,
+    process_hidden_files: bool,
 ) -> ScanContext {
     let ctx = Arc::new(ScanContext {
         queue: Mutex::new(vec![path.to_string()]),
@@ -349,6 +369,7 @@ fn run_multi_threaded_scan(
         app_state: state.cloned(),
         collect_paths,
         collected_paths: Mutex::new(Vec::new()),
+        process_hidden_files,
     });
     
     // Spawn workers saturating NVMe and CPU
@@ -400,6 +421,7 @@ fn run_multi_threaded_scan(
 // ===== PUBLIC API =====
 
 /// Get metrics for a path. Performs high-speed multi-threaded NVMe scan.
+/// Uses a default behavior for processing hidden files (true).
 pub fn scan_path_metrics(path: &str) -> PathMetrics {
     let p = std::path::Path::new(path);
     
@@ -410,7 +432,8 @@ pub fn scan_path_metrics(path: &str) -> PathMetrics {
         return PathMetrics { logical_size: logical, disk_size: disk, compression_state: state, file_count: 1 };
     }
     
-    let ctx = run_multi_threaded_scan(path, None, false, None);
+    // Fallback to true if used externally without specifying
+    let ctx = run_multi_threaded_scan(path, None, false, None, true);
     let algos = ctx.seen_algos.into_inner().unwrap();
     
     PathMetrics {
@@ -427,6 +450,7 @@ pub fn scan_path_streaming(
     path: &str,
     tx: Sender<UiMessage>,
     state: Option<&Arc<AtomicU8>>,
+    process_hidden_files: bool,
 ) -> PathMetrics {
     let p = std::path::Path::new(path);
 
@@ -436,7 +460,7 @@ pub fn scan_path_streaming(
         return m;
     }
 
-    let ctx = run_multi_threaded_scan(path, state, false, Some((id, tx.clone())));
+    let ctx = run_multi_threaded_scan(path, state, false, Some((id, tx.clone())), process_hidden_files);
     
     let files = ctx.total_files.into_inner();
     let logical = ctx.total_logical.into_inner();
@@ -458,8 +482,9 @@ pub fn scan_path_streaming(
 pub fn scan_directory_for_processing(
     path: &str,
     state: Option<&Arc<AtomicU8>>,
+    process_hidden_files: bool,
 ) -> ScanStats {
-    let ctx = run_multi_threaded_scan(path, state, true, None);
+    let ctx = run_multi_threaded_scan(path, state, true, None, process_hidden_files);
     
     ScanStats {
         file_count: ctx.total_files.into_inner(),
@@ -475,12 +500,12 @@ pub fn detect_path_algorithm(path: &str) -> CompressionState {
     scan_path_metrics(path).compression_state
 }
 
-pub fn calculate_path_disk_size(path: &str) -> u64 {
+pub fn calculate_path_disk_size(path: &str, process_hidden_files: bool) -> u64 {
     if std::path::Path::new(path).is_file() {
         get_real_file_size(path)
     } else {
         let mut sum = 0;
-        walk_directory(path, None, &mut |p, is_dir, _| {
+        walk_directory(path, None, process_hidden_files, &mut |p, is_dir, _| {
             if !is_dir { sum += get_real_file_size(p); }
         });
         sum

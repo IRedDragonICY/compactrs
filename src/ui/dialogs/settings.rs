@@ -49,6 +49,8 @@ const IDC_CHK_SET_ATTR: u16 = 2044;
 
 const IDC_COMBO_UI_SCALE: u16 = 2045;
 
+const IDC_CHK_PROCESS_HIDDEN: u16 = 2046;
+
 const IDC_COMBO_DEFAULT_ALGO: u16 = 2052;
 const IDC_COMBO_DEFAULT_ACTION: u16 = 2053;
 
@@ -84,6 +86,7 @@ struct SettingsState {
     context_menu_dialog_only: bool,
     default_algo: WofAlgorithm,
     default_action: BatchAction,
+    process_hidden_files: bool,
 
     update_status: UpdateStatus,
     pending_update: Option<crate::updater::UpdateInfo>,
@@ -133,6 +136,7 @@ fn get_search_targets() -> Vec<SearchTarget> {
         
         SearchTarget { tab_idx: 3, ctrl_id: IDC_COMBO_DEFAULT_ALGO, title: "Default Algorithm", keywords: &["default", "algorithm", "compress", "xpress", "lzx"] },
         SearchTarget { tab_idx: 3, ctrl_id: IDC_COMBO_DEFAULT_ACTION, title: "Default Action", keywords: &["default", "action", "compress", "decompress"] },
+        SearchTarget { tab_idx: 3, ctrl_id: IDC_CHK_PROCESS_HIDDEN, title: "Process Hidden & System Files", keywords: &["hidden", "system", "file", "folder", "process", "skip"] },
         SearchTarget { tab_idx: 3, ctrl_id: IDC_CHK_SKIP_EXT, title: "Smart Compression Skip", keywords: &["smart", "skip", "unlikely", "filter", "compress", "further"] },
         SearchTarget { tab_idx: 3, ctrl_id: IDC_EDIT_EXTENSIONS, title: "Excluded Extensions", keywords: &["exclude", "extension", "format", "zip", "rar", "default"] },
         
@@ -163,8 +167,9 @@ pub unsafe fn show_settings_modal(
     ui_scale_multiplier: f32,
     context_menu_dialog_only: bool,
     default_algo: WofAlgorithm,
-    default_action: BatchAction
-) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512], bool, f32, bool, WofAlgorithm, BatchAction) {
+    default_action: BatchAction,
+    process_hidden_files: bool
+) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512], bool, f32, bool, WofAlgorithm, BatchAction, bool) {
 
     let skip_string = String::from_utf16_lossy(&skip_extensions_buf)
         .trim_matches(char::from(0))
@@ -189,6 +194,7 @@ pub unsafe fn show_settings_modal(
         context_menu_dialog_only,
         default_algo,
         default_action,
+        process_hidden_files,
         update_status: UpdateStatus::Idle,
         pending_update: None,
         h_font_bold: std::ptr::null_mut(),
@@ -224,9 +230,9 @@ pub unsafe fn show_settings_modal(
                 i += 1;
             }
         }
-        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf, state.set_compressed_attr, state.ui_scale_multiplier, state.context_menu_dialog_only, state.default_algo, state.default_action)
+        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf, state.set_compressed_attr, state.ui_scale_multiplier, state.context_menu_dialog_only, state.default_algo, state.default_action, state.process_hidden_files)
     } else {
-         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf, set_compressed_attr, ui_scale_multiplier, context_menu_dialog_only, default_algo, default_action)
+         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf, set_compressed_attr, ui_scale_multiplier, context_menu_dialog_only, default_algo, default_action, process_hidden_files)
     }
 }
 
@@ -655,6 +661,9 @@ impl WindowHandler for SettingsState {
                     });
 
                     section_header(v, "File Filtering");
+                    icon_row(v, p3, "\u{E7B3}", crate::w!("Process Hidden & System Files"), crate::w!("Process files with hidden or system attributes"), &|c| {
+                         c.checkbox(IDC_CHK_PROCESS_HIDDEN, "", self.process_hidden_files, SizePolicy::Fixed(20));
+                    });
                     icon_row(v, p3, "\u{E71C}", crate::w!("Smart Compression Skip"), crate::w!("Skip files that are unlikely to compress further"), &|c| {
                          c.checkbox(IDC_CHK_SKIP_EXT, "", self.enable_skip_heuristics, SizePolicy::Fixed(20));
                     });
@@ -1123,6 +1132,11 @@ impl WindowHandler for SettingsState {
                                  } else { self.max_concurrent_items = 0; }
                              }
                              DestroyWindow(hwnd);
+                         },
+                         IDC_CHK_PROCESS_HIDDEN => {
+                             if (code as u32) == BN_CLICKED {
+                                 self.process_hidden_files = Button::new(self.get_control(id as i32)).is_checked();
+                             }
                          },
                          IDC_CHK_SKIP_EXT => {
                              if (code as u32) == BN_CLICKED {

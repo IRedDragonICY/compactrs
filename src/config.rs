@@ -10,7 +10,7 @@ use crate::ui::state::{AppTheme, BatchAction};
 #[derive(Clone, Copy, Debug)]
 pub struct AppConfig {
     pub magic: u32,   // 0x43505253 ("CPRS")
-    pub version: u32, // 11
+    pub version: u32, // 12
     pub theme: AppTheme,
     pub default_algo: WofAlgorithm,
     pub force_compress: bool,
@@ -33,8 +33,8 @@ pub struct AppConfig {
     pub combo_action_index: u8,
     pub ui_scale_multiplier: f32,
     pub context_menu_dialog_only: bool,
-    // New in v11
     pub default_action: BatchAction,
+    pub process_hidden_files: bool,
 }
 
 impl Default for AppConfig {
@@ -52,7 +52,7 @@ impl Default for AppConfig {
 
         Self {
             magic: 0x43505253,
-            version: 11,
+            version: 12,
             theme: AppTheme::System,
             default_algo: WofAlgorithm::Xpress8K,
             force_compress: false,
@@ -76,6 +76,7 @@ impl Default for AppConfig {
             ui_scale_multiplier: 1.0,
             context_menu_dialog_only: true,
             default_action: BatchAction::Compress,
+            process_hidden_files: true,
         }
     }
 }
@@ -98,8 +99,8 @@ impl AppConfig {
                 if file.read_exact(&mut buffer).is_ok() {
                     unsafe {
                         let config = std::ptr::read_unaligned(buffer.as_ptr() as *const AppConfig);
-                        // Check for version 11
-                        if config.magic == 0x43505253 && config.version == 11 {
+                        // Check for version 12
+                        if config.magic == 0x43505253 && config.version == 12 {
                             return config;
                         }
                     }

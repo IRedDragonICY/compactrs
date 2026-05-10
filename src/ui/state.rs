@@ -292,6 +292,7 @@ pub struct AppState {
     pub ignored_lock_processes: std::collections::HashSet<String>,
 
     pub watcher_tasks: Arc<Mutex<Vec<crate::watcher_config::WatcherTask>>>,
+    pub process_hidden_files: bool,
 }
 
 impl AppState {
@@ -314,6 +315,7 @@ impl AppState {
             tx,
             rx,
             global_state: Arc::new(AtomicU8::new(ProcessingState::Idle as u8)),
+            process_hidden_files: config.process_hidden_files,
             config,
             theme: config.theme,
             logs: std::collections::VecDeque::with_capacity(1000),
@@ -418,12 +420,13 @@ impl AppState {
         unsafe { self.refresh_file_list(); }
 
         let tx = self.tx.clone();
+        let process_hidden_files = self.process_hidden_files;
         
         // Spawn analysis thread
         thread::spawn(move || {
             for (id, path, algo) in items_to_analyze {
                  // Single-pass scan with streaming updates
-                 let metrics = scan_path_streaming(id, &path, tx.clone(), None);
+                 let metrics = scan_path_streaming(id, &path, tx.clone(), None, process_hidden_files);
                  let _ = tx.send(UiMessage::BatchItemAnalyzed(id, metrics.logical_size, metrics.disk_size, metrics.compression_state));
                  
                  // Estimate compressed size
