@@ -10,7 +10,7 @@ use crate::types::*;
 use super::base::Component;
 use crate::ui::builder::ControlBuilder;
 use crate::ui::controls::{apply_button_theme, apply_combobox_theme, apply_accent_button_theme};
-use crate::ui::layout::{LayoutNode, SizePolicy, AlignItems, JustifyContent};
+use crate::ui::layout::{LayoutNode, SizePolicy, AlignItems};
 
 const ICON_FILES: &[u16] = &[0xD83D, 0xDCC4, 0]; // 📄
 const ICON_FOLDER: &[u16] = &[0xD83D, 0xDCC1, 0]; // 📂
@@ -235,26 +235,30 @@ impl ActionPanel {
         let mut rect: RECT = std::mem::zeroed();
         GetClientRect(self.hwnd_panel, &mut rect);
         
+        // Use a flex spacer to correctly push right-side controls dynamically without overflowing
         let lbl_row = LayoutNode::row(0, 5)
-            .justify_content(JustifyContent::SpaceBetween)
             .align_items(AlignItems::Center)
             .with_child(LayoutNode::row(0, 5)
                 .with(self.hwnd_lbl_input, Fixed(143))
+                .with_policy(Fixed(143))
             )
+            .flex_spacer()
             .with_child(LayoutNode::row(0, 5)
                 .with(self.hwnd_lbl_action_mode, Fixed(100))
                 .with(self.hwnd_lbl_algo, Fixed(100))
+                .with_policy(Fixed(471)) // Aligns to combo boxes
             );
 
         let btn_row = LayoutNode::row(3, 5)
-            .justify_content(JustifyContent::SpaceBetween)
             .align_items(AlignItems::Center)
             .with_child(LayoutNode::row(0, 5)
                 .with(self.hwnd_files, Fixed(32))
                 .with(self.hwnd_folder, Fixed(32))
                 .with(self.hwnd_remove, Fixed(32))
                 .with(self.hwnd_clear, Fixed(32))
+                .with_policy(Fixed(143)) // 32*4 + 3*5 = 143
             )
+            .flex_spacer()
             .with_child(LayoutNode::row(0, 5)
                 .with(self.hwnd_action_mode, Fixed(100))
                 .with(self.hwnd_combo_algo, Fixed(100))
@@ -263,6 +267,7 @@ impl ActionPanel {
                 .with(self.hwnd_pause, Fixed(32))
                 .with(self.hwnd_process, Fixed(32))
                 .with(self.hwnd_cancel, Fixed(32))
+                .with_policy(Fixed(471)) // 100+100+65+80+32+32+32 + 6*5 = 471
             );
 
         LayoutNode::col(0, 0)
