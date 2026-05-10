@@ -147,6 +147,7 @@ impl Default for SearchState {
 pub struct BatchItem {
     pub id: u32,                    // Unique identifier
     pub path: String,               // Folder path
+    pub path_lower: String,         // Cached lowercased path for fast sorting/filtering
     pub algorithm: WofAlgorithm,    // Selected compression algorithm
     pub action: BatchAction,        // Compress or Decompress
     pub status: BatchStatus,        // Pending, Processing, Complete, Error
@@ -164,9 +165,11 @@ pub struct BatchItem {
 
 impl BatchItem {
     pub fn new(id: u32, path: String) -> Self {
+        let path_lower = path.to_lowercase();
         Self {
             id,
             path,
+            path_lower,
             algorithm: WofAlgorithm::Xpress8K, // Default
             action: BatchAction::Compress,
             status: BatchStatus::Pending,
@@ -434,7 +437,7 @@ impl AppState {
             let i1 = &items[a];
             let i2 = &items[b];
             let ord = match sort_col {
-                0 => i1.path.to_lowercase().cmp(&i2.path.to_lowercase()), 
+                0 => i1.path_lower.cmp(&i2.path_lower), 
                 1 => {
                     let s1 = i1.final_state.unwrap_or(CompressionState::None);
                     let s2 = i2.final_state.unwrap_or(CompressionState::None);
@@ -481,46 +484,52 @@ impl AppState {
             let text_match = if raw_text.is_empty() {
                 true
             } else {
-                let haystack = match filter_column {
-                    FilterColumn::Path => item.path.to_lowercase(),
+                let status_str;
+                let haystack: &str = match filter_column {
+                    FilterColumn::Path => item.path_lower.as_str(),
                     FilterColumn::Status => {
-                        match item.status {
-                            BatchStatus::Pending => "pending".to_string(),
-                            BatchStatus::Processing => "processing".to_string(),
-                            BatchStatus::Complete => "complete".to_string(),
-                            BatchStatus::Error(_) => "error".to_string(),
-                        }
+                        status_str = match item.status {
+                            BatchStatus::Pending => "pending",
+                            BatchStatus::Processing => "processing",
+                            BatchStatus::Complete => "complete",
+                            BatchStatus::Error(_) => "error",
+                        };
+                        status_str
                     },
                 };
                 
                 if use_custom_match {
                     let pattern = &raw_text;
                     if case_sensitive {
-                        let haystack_raw = match filter_column {
-                            FilterColumn::Path => item.path.clone(),
+                        let status_str_raw;
+                        let haystack_raw: &str = match filter_column {
+                            FilterColumn::Path => item.path.as_str(),
                             FilterColumn::Status => {
-                                match &item.status {
+                                status_str_raw = match &item.status {
                                     BatchStatus::Pending => "Pending".to_string(),
                                     BatchStatus::Processing => "Processing".to_string(),
                                     BatchStatus::Complete => "Complete".to_string(),
-                                    BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
-                                }
+                                    BatchStatus::Error(e) => format!("Error({})", e),
+                                };
+                                &status_str_raw
                             },
                         };
-                        crate::utils::matcher::is_match(pattern, &haystack_raw)
+                        crate::utils::matcher::is_match(pattern, haystack_raw)
                     } else {
-                       crate::utils::matcher::is_match(&filter_text, &haystack)
+                       crate::utils::matcher::is_match(&filter_text, haystack)
                     }
                 } else if case_sensitive {
-                     let haystack_raw = match filter_column {
-                        FilterColumn::Path => item.path.clone(),
+                    let status_str_raw;
+                    let haystack_raw: &str = match filter_column {
+                        FilterColumn::Path => item.path.as_str(),
                         FilterColumn::Status => {
-                                match &item.status {
-                                    BatchStatus::Pending => "Pending".to_string(),
-                                    BatchStatus::Processing => "Processing".to_string(),
-                                    BatchStatus::Complete => "Complete".to_string(),
-                                    BatchStatus::Error(e) => ["Error(", e, ")"].concat(),
-                                }
+                            status_str_raw = match &item.status {
+                                BatchStatus::Pending => "Pending".to_string(),
+                                BatchStatus::Processing => "Processing".to_string(),
+                                BatchStatus::Complete => "Complete".to_string(),
+                                BatchStatus::Error(e) => format!("Error({})", e),
+                            };
+                            &status_str_raw
                         },
                     };
                     haystack_raw.contains(&raw_text)

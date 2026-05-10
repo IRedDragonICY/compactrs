@@ -509,6 +509,7 @@ pub const LVS_REPORT: u32 = 0x0001;
 pub const LVS_SINGLESEL: u32 = 0x0004;
 pub const LVS_SHOWSELALWAYS: u32 = 0x0008;
 pub const LVS_OWNERDATA: u32 = 0x1000;
+pub const LVS_NOSORTHEADER: u32 = 0x8000;
 
 // ListView Extended Styles
 pub const LVS_EX_FULLROWSELECT: u32 = 0x00000020;
@@ -566,6 +567,7 @@ pub const LVM_SETCOLUMNWIDTH: u32 = 0x101E;
 pub const LVM_SORTITEMS: u32 = LVM_FIRST + 48;
 pub const LVM_GETITEMTEXTW: u32 = LVM_FIRST + 115;
 pub const LVM_FINDITEMW: u32 = LVM_FIRST + 83;
+pub const LVM_ENSUREVISIBLE: u32 = LVM_FIRST + 19;
 pub const LVM_GETSUBITEMRECT: u32 = LVM_FIRST + 56;
 pub const LVM_SETITEMCOUNT: u32 = LVM_FIRST + 47;
 pub const LVM_REDRAWITEMS: u32 = LVM_FIRST + 21;
@@ -616,12 +618,12 @@ pub const WM_CONTEXTMENU: u32 = 0x007B;
 pub const WM_TIMER: u32 = 0x0113;
 pub const WM_DRAWITEM: u32 = 0x002B;
 pub const WM_LBUTTONDBLCLK: u32 = 0x0203;
-pub const WM_HSCROLL: u32 = 0x0114;
 pub const WM_GETMINMAXINFO: u32 = 0x0024;
 pub const WM_INITDIALOG: u32 = 0x0110;
 pub const WM_APP_UPDATE_CHECK_RESULT: u32 = WM_USER + 1; // Assuming WM_USER is defined or I need to define it.
 pub const WM_APP_SHORTCUT: u32 = WM_USER + 900;
 pub const WM_USER: u32 = 0x0400;
+pub const WM_HSCROLL: u32 = 0x0114;
 
 // Button, ComboBox, Edit Notifications & Styles
 pub const BN_CLICKED: u32 = 0;
@@ -642,6 +644,7 @@ pub const STM_SETICON: u32 = 0x0170;
 // Window Styles & Commands
 pub const WS_POPUP: u32 = 0x80000000;
 pub const WS_VSCROLL: u32 = 0x00200000;
+pub const WS_HSCROLL: u32 = 0x00100000;
 pub const SW_RESTORE: i32 = 9;
 pub const IDYES: i32 = 6;
 pub const MSGFLT_ADD: u32 = 1;
