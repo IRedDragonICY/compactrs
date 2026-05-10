@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use crate::engine::wof::WofAlgorithm;
-use crate::ui::state::AppTheme;
+use crate::ui::state::{AppTheme, BatchAction};
 
 // NOTE: We use #[repr(C)] to ensure predictable memory layout for binary dumping.
 // WARNING: Changing fields later will invalidate existing config files.
@@ -10,7 +10,7 @@ use crate::ui::state::AppTheme;
 #[derive(Clone, Copy, Debug)]
 pub struct AppConfig {
     pub magic: u32,   // 0x43505253 ("CPRS")
-    pub version: u32, // 10
+    pub version: u32, // 11
     pub theme: AppTheme,
     pub default_algo: WofAlgorithm,
     pub force_compress: bool,
@@ -32,8 +32,9 @@ pub struct AppConfig {
     pub combo_algo_index: u8,
     pub combo_action_index: u8,
     pub ui_scale_multiplier: f32,
-    // New in v10
     pub context_menu_dialog_only: bool,
+    // New in v11
+    pub default_action: BatchAction,
 }
 
 impl Default for AppConfig {
@@ -51,7 +52,7 @@ impl Default for AppConfig {
 
         Self {
             magic: 0x43505253,
-            version: 10,
+            version: 11,
             theme: AppTheme::System,
             default_algo: WofAlgorithm::Xpress8K,
             force_compress: false,
@@ -74,6 +75,7 @@ impl Default for AppConfig {
             combo_action_index: 0,
             ui_scale_multiplier: 1.0,
             context_menu_dialog_only: true,
+            default_action: BatchAction::Compress,
         }
     }
 }
@@ -96,8 +98,8 @@ impl AppConfig {
                 if file.read_exact(&mut buffer).is_ok() {
                     unsafe {
                         let config = std::ptr::read_unaligned(buffer.as_ptr() as *const AppConfig);
-                        // Check for version 10
-                        if config.magic == 0x43505253 && config.version == 10 {
+                        // Check for version 11
+                        if config.magic == 0x43505253 && config.version == 11 {
                             return config;
                         }
                     }

@@ -1,5 +1,6 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use crate::ui::state::AppTheme;
+use crate::engine::wof::WofAlgorithm;
+use crate::ui::state::{AppTheme, BatchAction};
 use crate::ui::builder::ControlBuilder;
 use crate::utils::to_wstring;
 use crate::ui::framework::WindowHandler;
@@ -48,6 +49,9 @@ const IDC_CHK_SET_ATTR: u16 = 2044;
 
 const IDC_COMBO_UI_SCALE: u16 = 2045;
 
+const IDC_COMBO_DEFAULT_ALGO: u16 = 2052;
+const IDC_COMBO_DEFAULT_ACTION: u16 = 2053;
+
 const IDC_BTN_CHECK_UPDATE: u16 = 2010;
 const IDC_LBL_UPDATE_STATUS: u16 = 2011;
 const IDC_BTN_RESTART_TI: u16 = 2012;
@@ -78,6 +82,8 @@ struct SettingsState {
     set_compressed_attr: bool,
     ui_scale_multiplier: f32,
     context_menu_dialog_only: bool,
+    default_algo: WofAlgorithm,
+    default_action: BatchAction,
 
     update_status: UpdateStatus,
     pending_update: Option<crate::updater::UpdateInfo>,
@@ -125,6 +131,8 @@ fn get_search_targets() -> Vec<SearchTarget> {
         SearchTarget { tab_idx: 2, ctrl_id: IDC_SLIDER_THREADS, title: "CPU Thread Limit", keywords: &["cpu", "thread", "limit", "worker", "core", "max", "maximum"] },
         SearchTarget { tab_idx: 2, ctrl_id: IDC_EDIT_CONCURRENT, title: "Concurrent File Queue", keywords: &["concurrent", "file", "queue", "simultaneous", "unlimited"] },
         
+        SearchTarget { tab_idx: 3, ctrl_id: IDC_COMBO_DEFAULT_ALGO, title: "Default Algorithm", keywords: &["default", "algorithm", "compress", "xpress", "lzx"] },
+        SearchTarget { tab_idx: 3, ctrl_id: IDC_COMBO_DEFAULT_ACTION, title: "Default Action", keywords: &["default", "action", "compress", "decompress"] },
         SearchTarget { tab_idx: 3, ctrl_id: IDC_CHK_SKIP_EXT, title: "Smart Compression Skip", keywords: &["smart", "skip", "unlikely", "filter", "compress", "further"] },
         SearchTarget { tab_idx: 3, ctrl_id: IDC_EDIT_EXTENSIONS, title: "Excluded Extensions", keywords: &["exclude", "extension", "format", "zip", "rar", "default"] },
         
@@ -153,8 +161,10 @@ pub unsafe fn show_settings_modal(
     skip_extensions_buf: [u16; 512],
     set_compressed_attr: bool,
     ui_scale_multiplier: f32,
-    context_menu_dialog_only: bool
-) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512], bool, f32, bool) {
+    context_menu_dialog_only: bool,
+    default_algo: WofAlgorithm,
+    default_action: BatchAction
+) -> (Option<AppTheme>, bool, bool, bool, bool, u32, u32, bool, u8, bool, [u16; 512], bool, f32, bool, WofAlgorithm, BatchAction) {
 
     let skip_string = String::from_utf16_lossy(&skip_extensions_buf)
         .trim_matches(char::from(0))
@@ -177,6 +187,8 @@ pub unsafe fn show_settings_modal(
         set_compressed_attr,
         ui_scale_multiplier,
         context_menu_dialog_only,
+        default_algo,
+        default_action,
         update_status: UpdateStatus::Idle,
         pending_update: None,
         h_font_bold: std::ptr::null_mut(),
@@ -212,9 +224,9 @@ pub unsafe fn show_settings_modal(
                 i += 1;
             }
         }
-        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf, state.set_compressed_attr, state.ui_scale_multiplier, state.context_menu_dialog_only)
+        (state.result, state.enable_force_stop, state.enable_context_menu, state.enable_system_guard, state.low_power_mode, state.max_threads, state.max_concurrent_items, state.log_enabled, state.log_level_mask, state.enable_skip_heuristics, final_buf, state.set_compressed_attr, state.ui_scale_multiplier, state.context_menu_dialog_only, state.default_algo, state.default_action)
     } else {
-         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf, set_compressed_attr, ui_scale_multiplier, context_menu_dialog_only)
+         (None, enable_force_stop, enable_context_menu, enable_system_guard, low_power_mode, max_threads, max_concurrent_items, log_enabled, log_level_mask, enable_skip_heuristics, skip_extensions_buf, set_compressed_attr, ui_scale_multiplier, context_menu_dialog_only, default_algo, default_action)
     }
 }
 
@@ -503,34 +515,33 @@ impl WindowHandler for SettingsState {
             }
 
             let section_header = |b: &mut ContainerBuilder, text: &str| {
-                b.row_with_policy(10, SizePolicy::Fixed(35), |r: &mut ContainerBuilder| {
+                b.row_with_policy(10, SizePolicy::Fixed(25), |r: &mut ContainerBuilder| {
+                    r.align_items(AlignItems::FlexEnd);
                     r.label(text, SizePolicy::Flex(1.0));
                 });
             };
 
             let icon_row = |b: &mut ContainerBuilder, panel: HWND, icon: &str, title: &[u16], sub: &[u16], control_fn: &dyn Fn(&mut ContainerBuilder)| {
-                // Diubah menjadi Fixed(50) untuk memberi napas jika isi kontrol berukuran besar
-                b.row_with_policy(15, SizePolicy::Fixed(50), |r: &mut ContainerBuilder| {
+                b.row_with_policy(10, SizePolicy::Fixed(42), |r: &mut ContainerBuilder| {
                      r.align_items(AlignItems::Center);
                      r.justify_content(JustifyContent::SpaceBetween);
                      
-                     r.row_with_policy(10, SizePolicy::Flex(1.0), |lr| {
+                     r.row_with_policy(5, SizePolicy::Flex(1.0), |lr| {
                          lr.align_items(AlignItems::Center);
                          
                          let h_icon = ControlBuilder::new(panel, 0).label(false).text(icon).font(self.h_font_icon).dark_mode(self.is_dark).build();
                          crate::ui::subclass::apply_theme_to_control(h_icon, self.is_dark);
                          lr.add_child(LayoutNode::new_leaf(h_icon, SizePolicy::Fixed(24)));
                          
-                         lr.col_with_policy(2, SizePolicy::Flex(1.0), |c| {
+                         lr.col_with_policy(0, SizePolicy::Flex(1.0), |c| {
                              c.justify_content(JustifyContent::Center);
-                             c.label_w(title, SizePolicy::Fixed(18)); 
+                             c.label_w(title, SizePolicy::Fixed(16)); 
                              let h_sub = ControlBuilder::new(panel, 0).label(false).text_w(sub).dark_mode(self.is_dark).build();
                              crate::ui::subclass::apply_theme_to_control(h_sub, self.is_dark);
                              c.add_child(LayoutNode::new_leaf(h_sub, SizePolicy::Fixed(16)));
                          });
                      });
                      
-                     // Memastikan ruang di sebelah kanan benar-benar paten 280px dan rata kanan
                      r.row_with_policy(5, SizePolicy::Fixed(280), |rr| {
                          rr.align_items(AlignItems::Center);
                          rr.justify_content(JustifyContent::FlexEnd);
@@ -543,7 +554,7 @@ impl WindowHandler for SettingsState {
             crate::ui::components::panel::Panel::update_theme(p0, self.is_dark);
             let l0 = {
                 let ctx = DeclarativeContext::new(p0, self.is_dark, self.h_font_bold);
-                ctx.vertical(15, 6, |v| {
+                ctx.vertical(15, 2, |v| {
                     section_header(v, "General Behavior");
                     icon_row(v, p0, "\u{E74D}", crate::w!("Force Kill Processes"), crate::w!("Automatically terminate locking processes"), &|c| {
                          c.checkbox(IDC_CHK_FORCE_STOP, "", self.enable_force_stop, SizePolicy::Fixed(20));
@@ -564,7 +575,7 @@ impl WindowHandler for SettingsState {
             crate::ui::components::panel::Panel::update_theme(p1, self.is_dark);
             let l1 = {
                 let ctx = DeclarativeContext::new(p1, self.is_dark, self.h_font_bold);
-                ctx.vertical(15, 6, |v| {
+                ctx.vertical(15, 2, |v| {
                     section_header(v, "Appearance");
                     icon_row(v, p1, "\u{E713}", crate::w!("Application Theme"), crate::w!("Choose between Light, Dark, or System Default"), &|c| {
                          c.combobox(IDC_COMBO_THEME, &["System Default", "Dark Mode", "Light Mode"], 
@@ -591,7 +602,7 @@ impl WindowHandler for SettingsState {
             crate::ui::components::panel::Panel::update_theme(p2, self.is_dark);
             let l2 = {
                 let ctx = DeclarativeContext::new(p2, self.is_dark, self.h_font_bold);
-                ctx.vertical(15, 6, |v| {
+                ctx.vertical(15, 2, |v| {
                     section_header(v, "Performance Optimization");
                     
                     icon_row(v, p2, "\u{EC48}", crate::w!("Efficiency Mode"), crate::w!("Reduce background resource usage (Low Power)"), &|c| {
@@ -621,17 +632,39 @@ impl WindowHandler for SettingsState {
             crate::ui::components::panel::Panel::update_theme(p3, self.is_dark);
             let l3 = {
                 let ctx = DeclarativeContext::new(p3, self.is_dark, self.h_font_bold);
-                ctx.vertical(15, 6, |v| {
+                ctx.vertical(15, 2, |v| {
+                    section_header(v, "Default Operations");
+                    icon_row(v, p3, "\u{E8B5}", crate::w!("Default Algorithm"), crate::w!("Algorithm applied to newly added files"), &|c| {
+                         c.combobox(IDC_COMBO_DEFAULT_ALGO, &["XPRESS4K", "XPRESS8K", "XPRESS16K", "LZX", "LZNT1"], 
+                             match self.default_algo {
+                                 WofAlgorithm::Xpress4K => 0,
+                                 WofAlgorithm::Xpress8K => 1,
+                                 WofAlgorithm::Xpress16K => 2,
+                                 WofAlgorithm::Lzx => 3,
+                                 WofAlgorithm::Lznt1 => 4,
+                             }, 
+                             SizePolicy::Fixed(110)); 
+                    });
+                    icon_row(v, p3, "\u{E768}", crate::w!("Default Action"), crate::w!("Action applied to newly added files"), &|c| {
+                         c.combobox(IDC_COMBO_DEFAULT_ACTION, &["Compress", "Decompress"], 
+                             match self.default_action {
+                                 BatchAction::Compress => 0,
+                                 BatchAction::Decompress => 1,
+                             }, 
+                             SizePolicy::Fixed(110)); 
+                    });
+
                     section_header(v, "File Filtering");
                     icon_row(v, p3, "\u{E71C}", crate::w!("Smart Compression Skip"), crate::w!("Skip files that are unlikely to compress further"), &|c| {
                          c.checkbox(IDC_CHK_SKIP_EXT, "", self.enable_skip_heuristics, SizePolicy::Fixed(20));
                     });
-                    v.row_with_policy(15, SizePolicy::Fixed(24), |r| {
+                    v.row_with_policy(10, SizePolicy::Fixed(24), |r| {
+                        r.align_items(AlignItems::Center);
                         r.label("Excluded Extensions:", SizePolicy::Flex(1.0));
                         r.button_w(IDC_BTN_RESET_EXT, crate::w!("Reset Defaults"), SizePolicy::Fixed(120)); 
                     });
                     
-                    let mut ext_node = LayoutNode::row(15, 0);
+                    let mut ext_node = LayoutNode::row(10, 0);
                     let h_edit_ext = ControlBuilder::new(p3, IDC_EDIT_EXTENSIONS)
                         .edit()
                         .text(&self.skip_extensions)
@@ -641,7 +674,7 @@ impl WindowHandler for SettingsState {
                         .build();
                     crate::ui::subclass::apply_theme_to_control(h_edit_ext, self.is_dark);
                     ext_node.add_child(LayoutNode::new_leaf(h_edit_ext, SizePolicy::Flex(1.0)));
-                    v.add_child(ext_node.with_policy(SizePolicy::Fixed(100))); // Diperluas ke 100px
+                    v.add_child(ext_node.with_policy(SizePolicy::Fixed(80))); 
                     
                     if !self.enable_skip_heuristics {
                          let btn = GetDlgItem(p3, IDC_BTN_RESET_EXT as i32);
@@ -657,7 +690,7 @@ impl WindowHandler for SettingsState {
             crate::ui::components::panel::Panel::update_theme(p4, self.is_dark);
             let l4 = {
                 let ctx = DeclarativeContext::new(p4, self.is_dark, self.h_font_bold);
-                ctx.vertical(15, 6, |v| {
+                ctx.vertical(15, 2, |v| {
                     section_header(v, "Diagnostics");
                     icon_row(v, p4, "\u{EBE8}", crate::w!("Enable Diagnostic Logging"), crate::w!("Show real-time logs in a console window"), &|c| {
                          c.checkbox(IDC_CHK_LOG_ENABLED, "", self.log_enabled, SizePolicy::Fixed(20));
@@ -686,11 +719,10 @@ impl WindowHandler for SettingsState {
             crate::ui::components::panel::Panel::update_theme(p5, self.is_dark);
             let l5 = {
                 let ctx = DeclarativeContext::new(p5, self.is_dark, self.h_font_bold);
-                ctx.vertical(15, 6, |v| {
+                ctx.vertical(15, 2, |v| {
                     section_header(v, "About & Updates");
                     let version_str = crate::utils::to_wstring(env!("APP_VERSION"));
                     icon_row(v, p5, "\u{E946}", crate::w!("CompactRS"), &version_str, &|c| {
-                         // Menggunakan kolom dengan ukuran mutlak 160px yang diratakan ke kanan via kontrol kontainernya
                          c.col_with_policy(2, SizePolicy::Fixed(160), |cc| {
                               cc.align_items(AlignItems::Stretch);
                               cc.justify_content(JustifyContent::Center);
@@ -700,7 +732,6 @@ impl WindowHandler for SettingsState {
                               let h_lbl = ControlBuilder::new(p5, IDC_LBL_UPDATE_STATUS).label(true).text("").dark_mode(self.is_dark).build();
                               crate::ui::subclass::apply_theme_to_control(h_lbl, self.is_dark);
                               
-                              // Height 16px dipasangkan via Fixed(16)
                               cc.add_child(LayoutNode::new_leaf(h_lbl, SizePolicy::Fixed(16)));
                          });
                     });
@@ -712,7 +743,6 @@ impl WindowHandler for SettingsState {
                          }
                     });
                     v.row_with_policy(15, SizePolicy::Fixed(30), |r| {
-                         // Menyudutkan tombol ke kanan dengan properti FlexEnd
                          r.justify_content(JustifyContent::FlexEnd);
                          r.button_w(IDC_BTN_RESET_ALL, crate::w!("Reset Application Defaults"), SizePolicy::Fixed(200));
                     });
@@ -1054,6 +1084,31 @@ impl WindowHandler for SettingsState {
                                     SendMessageW(parent, 0x8000 + 1, theme_val as WPARAM, 0);
                                 }
                             }
+                         },
+                         IDC_COMBO_DEFAULT_ALGO => {
+                             if (code as u32) == CBN_SELCHANGE {
+                                 let h_combo = self.get_control(IDC_COMBO_DEFAULT_ALGO as i32);
+                                 let idx = ComboBox::new(h_combo).get_selected_index();
+                                 self.default_algo = match idx {
+                                     0 => WofAlgorithm::Xpress4K,
+                                     1 => WofAlgorithm::Xpress8K,
+                                     2 => WofAlgorithm::Xpress16K,
+                                     3 => WofAlgorithm::Lzx,
+                                     4 => WofAlgorithm::Lznt1,
+                                     _ => WofAlgorithm::Xpress8K,
+                                 };
+                             }
+                         },
+                         IDC_COMBO_DEFAULT_ACTION => {
+                             if (code as u32) == CBN_SELCHANGE {
+                                 let h_combo = self.get_control(IDC_COMBO_DEFAULT_ACTION as i32);
+                                 let idx = ComboBox::new(h_combo).get_selected_index();
+                                 self.default_action = match idx {
+                                     0 => BatchAction::Compress,
+                                     1 => BatchAction::Decompress,
+                                     _ => BatchAction::Compress,
+                                 };
+                             }
                          },
                          IDC_BTN_CANCEL => {
                              let h_edit = self.get_control(IDC_EDIT_CONCURRENT as i32);

@@ -85,10 +85,11 @@ pub enum UiMessage {
 }
 
 /// Action to perform on a batch item
+#[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BatchAction {
-    Compress,
-    Decompress,
+    Compress = 0,
+    Decompress = 1,
 }
 
 impl Default for BatchAction {
@@ -170,7 +171,7 @@ impl BatchItem {
             id,
             path,
             path_lower,
-            algorithm: WofAlgorithm::Xpress8K, // Default
+            algorithm: WofAlgorithm::Xpress8K, // Default fallback
             action: BatchAction::Compress,
             status: BatchStatus::Pending,
             status_override: None,
@@ -342,7 +343,13 @@ impl AppState {
     pub fn add_batch_item(&mut self, path: String) -> u32 {
         let id = self.next_item_id;
         self.next_item_id += 1;
-        self.batch_items.push(BatchItem::new(id, path));
+        let mut item = BatchItem::new(id, path);
+        
+        // Apply configured defaults
+        item.algorithm = self.config.default_algo;
+        item.action = self.config.default_action;
+        
+        self.batch_items.push(item);
         id
     }
     
@@ -396,7 +403,7 @@ impl AppState {
                 // Get the default algorithm for estimation
                 let algo = self.batch_items.iter().find(|i| i.id == id)
                     .map(|i| i.algorithm)
-                    .unwrap_or(WofAlgorithm::Xpress8K);
+                    .unwrap_or(self.config.default_algo);
                 
                 if let Some(item) = self.get_batch_item_mut(id) {
                      item.status_override = Some("Calculating...".to_string());
